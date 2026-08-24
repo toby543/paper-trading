@@ -29,7 +29,11 @@ def create_app(cfg: Config) -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template(
+            "index.html",
+            slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
+            flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
+        )
 
     @app.get("/api/summary")
     def api_summary():
