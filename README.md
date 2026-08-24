@@ -100,7 +100,15 @@ python main.py web --host 0.0.0.0 --port 8080
 
 A local, read-only dashboard (Flask) showing live-marked open positions,
 unrealized P&L, an equity curve, and recent trade history, self-refreshing
-every 10 seconds. It reads the same SQLite ledger the engine writes to —
+every 10 seconds, with a responsive layout that works on a phone.
+
+**To open it from your phone:** start it with `--host 0.0.0.0`, find the
+host machine's LAN IP (`ipconfig getifaddr en0` on Mac, `hostname -I` on
+Linux, `ipconfig` on Windows), then visit `http://<that-ip>:8000` from a
+phone on the **same Wi-Fi**. This is Flask's development server — fine
+for personal/LAN use, but don't expose it directly to the internet.
+
+It reads the same SQLite ledger the engine writes to —
 run it alongside `python main.py run` (or a cron-driven `once`) in a
 separate process/terminal; the dashboard never places trades itself.
 
