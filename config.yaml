@@ -1,0 +1,67 @@
+# Configuration for the autonomous NSE momentum paper-trading system.
+
+account:
+  starting_capital: 1000000.0   # ₹10,00,000 virtual capital
+  currency: INR
+  state_file: data/state.db     # SQLite file holding cash/positions/trades
+
+universe:
+  file: data/universe.csv       # NSE symbols to scan (no .NS suffix)
+
+strategy:
+  name: momentum_52w_high
+  # A stock qualifies as a BUY candidate when it is trading within this
+  # percentage of its 52-week high...
+  proximity_to_52w_high_pct: 5.0
+  # ...and has delivered at least this much return over the lookback window...
+  momentum_lookback_days: 90
+  min_momentum_return_pct: 15.0
+  # ...and is trading above both moving averages (trend confirmation).
+  fast_ma_days: 50
+  slow_ma_days: 200
+  # Minimum average daily traded value (₹) over the last 20 sessions,
+  # used as a liquidity filter so illiquid names are skipped.
+  min_avg_daily_turnover_inr: 50000000
+  # How many top-ranked new candidates to buy per scan.
+  max_new_positions_per_scan: 3
+
+risk:
+  max_open_positions: 10
+  # Fraction of total equity risked/allocated per new position.
+  position_size_pct_of_equity: 8.0
+  # Hard stop-loss from entry price.
+  stop_loss_pct: 7.0
+  # Trailing stop from the highest close recorded since entry.
+  trailing_stop_pct: 10.0
+  # Exit if price closes below the fast moving average (momentum breakdown).
+  exit_below_fast_ma: true
+  # Never let a single scan commit more than this fraction of free cash.
+  max_cash_deployed_per_scan_pct: 40.0
+
+execution:
+  # Simulated slippage applied to paper fills.
+  slippage_bps: 5
+  # Flat brokerage + STT/charges approximation per executed order (₹).
+  flat_charges_inr: 20.0
+
+engine:
+  timezone: Asia/Kolkata
+  market_open: "09:15"
+  market_close: "15:30"
+  scan_interval_minutes: 15
+  # Recheck exits (stop loss / trailing stop) more frequently than full
+  # universe scans for new entries.
+  exit_check_interval_minutes: 5
+  holidays_file: data/nse_holidays.csv
+
+data_source:
+  # "nse" tries the official NSE website API first and falls back to
+  # "yfinance" automatically if it is unreachable or blocked.
+  preferred: nse
+  fallback: yfinance
+  request_timeout_seconds: 10
+  max_retries: 3
+
+logging:
+  file: data/papertrader.log
+  level: INFO
