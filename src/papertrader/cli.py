@@ -66,6 +66,14 @@ def cmd_portfolio(args: argparse.Namespace) -> None:
     print(f"Total equity:      ₹{cash + total_mv:,.2f}")
 
 
+def cmd_web(args: argparse.Namespace) -> None:
+    cfg = Config.load(args.config)
+    _setup_logging(cfg)
+    from .web.app import run_dashboard
+
+    run_dashboard(cfg, host=args.host, port=args.port)
+
+
 def cmd_history(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     engine = TradingEngine(cfg)
@@ -82,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run", help="Run the autonomous trading loop (blocks until killed)").set_defaults(func=cmd_run)
     sub.add_parser("once", help="Run a single scan/trade cycle and exit").set_defaults(func=cmd_once)
     sub.add_parser("portfolio", help="Show current positions and P&L").set_defaults(func=cmd_portfolio)
+
+    web = sub.add_parser("web", help="Launch the local read-only web dashboard")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8000)
+    web.set_defaults(func=cmd_web)
 
     hist = sub.add_parser("history", help="Show trade history")
     hist.add_argument("--limit", type=int, default=50)

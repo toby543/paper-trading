@@ -91,6 +91,19 @@ View trade history:
 python main.py history --limit 100
 ```
 
+### Web dashboard
+
+```bash
+python main.py web                      # http://127.0.0.1:8000
+python main.py web --host 0.0.0.0 --port 8080
+```
+
+A local, read-only dashboard (Flask) showing live-marked open positions,
+unrealized P&L, an equity curve, and recent trade history, self-refreshing
+every 10 seconds. It reads the same SQLite ledger the engine writes to —
+run it alongside `python main.py run` (or a cron-driven `once`) in a
+separate process/terminal; the dashboard never places trades itself.
+
 ### Running continuously
 
 Two supported ways to keep it running unattended:

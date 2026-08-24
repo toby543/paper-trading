@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NSE Momentum Paper Trader</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-border: #202a37;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --green: #3fb950;
+    --red: #f85149;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.open { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.closed { background: rgba(139,148,165,0.15); color: var(--muted); }
+  main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .card .value { font-size: 20px; font-weight: 600; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  section h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  .side-buy { color: var(--green); font-weight: 600; }
+  .side-sell { color: var(--red); font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; padding: 20px; }
+  canvas { width: 100%; height: 180px; display: block; }
+  .table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>NSE Momentum Paper Trader</h1>
+    <div class="sub" id="asOf">loading…</div>
+  </div>
+  <span class="badge closed" id="marketBadge">MARKET —</span>
+</header>
+
+<main>
+  <div class="cards" id="cards"></div>
+
+  <section>
+    <h2>Equity Curve</h2>
+    <canvas id="equityChart" height="180"></canvas>
+  </section>
+
+  <section>
+    <h2>Open Positions</h2>
+    <div class="table-wrap">
+      <table id="positionsTable">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Qty</th><th>Avg Price</th><th>LTP</th>
+            <th>Mkt Value</th><th>P&amp;L</th><th>P&amp;L %</th><th>Entry Date</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Recent Trades</h2>
+    <div class="table-wrap">
+      <table id="tradesTable">
+        <thead>
+          <tr>
+            <th>Time</th><th>Side</th><th>Symbol</th><th>Qty</th>
+            <th>Price</th><th>Value</th><th>Reason</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const fmt = (n) => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("en-IN", {maximumFractionDigits: 2, minimumFractionDigits: 2});
+const pnlClass = (n) => n > 0 ? "pos" : (n < 0 ? "neg" : "");
+
+function renderCards(s) {
+  const cards = [
+    ["Total Equity", "₹" + fmt(s.total_equity), ""],
+    ["Cash", "₹" + fmt(s.cash), ""],
+    ["Positions Value", "₹" + fmt(s.positions_value), ""],
+    ["Total P&L", (s.total_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_pnl) + " (" + (s.total_pnl_pct >= 0 ? "+" : "") + s.total_pnl_pct + "%)", pnlClass(s.total_pnl)],
+    ["Open Positions", s.open_positions + " / " + s.max_positions, ""],
+    ["Universe Scanned", s.universe_size + " symbols", ""],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(([label, value, cls]) =>
+    `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`
+  ).join("");
+
+  document.getElementById("asOf").textContent = "Last updated " + new Date(s.as_of).toLocaleTimeString("en-IN");
+  const badge = document.getElementById("marketBadge");
+  badge.textContent = s.market_open ? "MARKET OPEN" : "MARKET CLOSED";
+  badge.className = "badge " + (s.market_open ? "open" : "closed");
+}
+
+function renderPositions(s) {
+  const tbody = document.querySelector("#positionsTable tbody");
+  if (!s.positions.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">No open positions</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = s.positions.map(p => `
+    <tr>
+      <td>${p.symbol}</td>
+      <td>${p.quantity}</td>
+      <td>${fmt(p.avg_price)}</td>
+      <td>${fmt(p.ltp)}</td>
+      <td>${fmt(p.market_value)}</td>
+      <td class="${pnlClass(p.unrealized_pnl)}">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)}</td>
+      <td class="${pnlClass(p.unrealized_pnl_pct)}">${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%</td>
+      <td>${p.entry_date}</td>
+    </tr>
+  `).join("");
+}
+
+function renderTrades(trades) {
+  const tbody = document.querySelector("#tradesTable tbody");
+  if (!trades.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">No trades yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = trades.map(t => `
+    <tr>
+      <td>${t.timestamp}</td>
+      <td class="side-${t.side.toLowerCase()}">${t.side}</td>
+      <td>${t.symbol}</td>
+      <td>${t.quantity}</td>
+      <td>${fmt(t.price)}</td>
+      <td>${fmt(t.value)}</td>
+      <td style="text-align:left; white-space:normal;">${t.reason}</td>
+    </tr>
+  `).join("");
+}
+
+function renderEquityChart(curve) {
+  const canvas = document.getElementById("equityChart");
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth;
+  const cssHeight = 180;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  if (curve.length < 2) {
+    ctx.fillStyle = "#8b98a5";
+    ctx.font = "13px sans-serif";
+    ctx.fillText("Not enough equity history yet", 8, cssHeight / 2);
+    return;
+  }
+
+  const values = curve.map(p => p.total_equity);
+  const min = Math.min(...values), max = Math.max(...values);
+  const pad = 10;
+  const range = (max - min) || 1;
+  const stepX = (cssWidth - pad * 2) / (values.length - 1);
+  const y = (v) => cssHeight - pad - ((v - min) / range) * (cssHeight - pad * 2);
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad + i * stepX;
+    if (i === 0) ctx.moveTo(x, y(v)); else ctx.lineTo(x, y(v));
+  });
+  ctx.strokeStyle = values[values.length - 1] >= values[0] ? "#3fb950" : "#f85149";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.lineTo(pad + (values.length - 1) * stepX, cssHeight - pad);
+  ctx.lineTo(pad, cssHeight - pad);
+  ctx.closePath();
+  ctx.fillStyle = values[values.length - 1] >= values[0] ? "rgba(63,185,80,0.08)" : "rgba(248,81,73,0.08)";
+  ctx.fill();
+}
+
+async function refresh() {
+  try {
+    const [summary, trades, curve] = await Promise.all([
+      fetch("/api/summary").then(r => r.json()),
+      fetch("/api/trades?limit=50").then(r => r.json()),
+      fetch("/api/equity_curve").then(r => r.json()),
+    ]);
+    renderCards(summary);
+    renderPositions(summary);
+    renderTrades(trades);
+    renderEquityChart(curve);
+  } catch (e) {
+    console.error("Dashboard refresh failed", e);
+  }
+}
+
+refresh();
+setInterval(refresh, 10000);
+window.addEventListener("resize", refresh);
+</script>
+</body>
+</html>
