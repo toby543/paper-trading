@@ -158,8 +158,45 @@
   }
   @media (max-width: 560px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(3) { border-right: 1px solid var(--border); }
+    .stat:nth-child(2n) { border-right: none; }
     .shell { padding: 0 14px 40px; }
-    .topbar { padding: 16px 14px; flex-wrap: wrap; }
+    .topbar { padding: 14px; flex-wrap: wrap; row-gap: 10px; }
+    .brand { flex-wrap: wrap; row-gap: 4px; }
+  }
+
+  /* ---------- positions table -> cards on narrow screens ---------- */
+  @media (max-width: 640px) {
+    #positionsTable thead { display: none; }
+    #positionsBody { display: block; }
+    #positionsBody tr {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    #positionsBody tr.empty-row { display: block; }
+    #positionsBody td {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      text-align: left;
+      padding: 0;
+      border-bottom: none;
+      white-space: normal;
+    }
+    #positionsBody td::before {
+      content: attr(data-label);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-faint);
+    }
+    #positionsBody td.sym { grid-column: 1 / -1; flex-direction: row; align-items: baseline; gap: 6px; }
+    #positionsBody td.sym::before { content: none; }
+    #positionsBody td.sym .exch { margin-left: 0; }
   }
 </style>
 </head>
@@ -200,7 +237,7 @@
           <span class="meta mono" id="positionsMeta">0 held</span>
         </div>
         <div class="table-scroll">
-          <table>
+          <table id="positionsTable">
             <thead>
               <tr>
                 <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>
@@ -283,13 +320,13 @@ function renderPositions(s) {
     return `
     <tr>
       <td class="sym">${p.symbol}<span class="exch">NSE</span></td>
-      <td class="mono">${fmtInt(p.quantity)}</td>
-      <td class="mono">${fmt(p.avg_price)}</td>
-      <td class="mono">${fmt(p.ltp)}</td>
-      <td class="mono">${fmt(p.market_value)}</td>
-      <td class="mono ${pnlClass(p.unrealized_pnl)}">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
-      <td><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
-      <td class="mono" style="color:var(--ink-dim);">${shortDate(p.entry_date)}</td>
+      <td class="mono" data-label="Qty">${fmtInt(p.quantity)}</td>
+      <td class="mono" data-label="Avg">${fmt(p.avg_price)}</td>
+      <td class="mono" data-label="LTP">${fmt(p.ltp)}</td>
+      <td class="mono" data-label="Mkt Value">${fmt(p.market_value)}</td>
+      <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
+      <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
+      <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
     </tr>`;
   }).join("");
 }
