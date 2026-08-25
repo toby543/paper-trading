@@ -22,6 +22,20 @@ strategy:
   # Minimum average daily traded value (₹) over the last 20 sessions,
   # used as a liquidity filter so illiquid names are skipped.
   min_avg_daily_turnover_inr: 50000000
+  # Relative strength: the stock's own return over momentum_lookback_days
+  # must beat the benchmark index's return over the same window by at
+  # least this many percentage points -- a stock merely drifting up with
+  # a rising market isn't the same signal as one genuinely leading it.
+  # Uses regime.index_symbol as the benchmark. Comment out to disable.
+  min_relative_strength_pct: 5.0
+  # Volume confirmation: require recent trading activity to be running
+  # hot relative to the stock's own baseline before treating a move near
+  # the 52-week high as a real breakout rather than a quiet drift.
+  volume_confirmation:
+    enabled: true
+    recent_days: 10
+    baseline_days: 50
+    min_volume_multiple: 1.2
   # How many top-ranked new candidates to buy per scan.
   max_new_positions_per_scan: 3
 
@@ -31,6 +45,8 @@ regime:
   # broader index itself is in an uptrend. Existing positions still
   # exit normally (stop-loss/trailing-stop/momentum-breakdown) regardless
   # of regime -- this only gates new buys, never risk management.
+  # index_symbol is also reused as the benchmark for
+  # strategy.min_relative_strength_pct, even if this filter is disabled.
   enabled: true
   index_symbol: "^NSEI"   # Nifty 50 index (Yahoo Finance ticker)
   ma_days: 200            # index must be trading above this many-day average

@@ -17,10 +17,21 @@ local SQLite database.
 A stock is bought when it is (1) trading within a configurable band of
 its 52-week high, (2) has strong trailing momentum (e.g. ≥15% return
 over the last ~90 days), (3) is trading above its 50-day and 200-day
-moving averages (trend confirmation, no death-cross), and (4) is liquid
-enough to trade (average daily turnover filter). Candidates are ranked
-by a momentum+proximity score and the top few are bought each scan,
-sized as a fixed percentage of total equity.
+moving averages (trend confirmation, no death-cross), (4) is liquid
+enough to trade (average daily turnover filter), (5) is **outperforming
+the Nifty 50 by a minimum margin over the same window** (relative
+strength — a stock merely drifting up with a rising market isn't the
+same signal as one genuinely leading it), and (6) shows **recent trading
+volume running hot relative to its own baseline** (volume confirmation —
+a move near the 52-week high on light volume is a weaker signal than
+one with real participation). Candidates are ranked by a
+momentum+proximity+relative-strength score and the top few are bought
+each scan, sized as a fixed percentage of total equity. Relative
+strength and volume confirmation are each independently toggleable in
+`config.yaml` (`strategy.min_relative_strength_pct`,
+`strategy.volume_confirmation.enabled`) and fail open (skip the check
+rather than blocking every trade) if the underlying index/volume data
+can't be fetched for a given scan.
 
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, or a **momentum breakdown**

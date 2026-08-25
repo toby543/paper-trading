@@ -103,6 +103,16 @@ class TradingEngine:
             )
             return
 
+        # Fetch the benchmark index once per scan (cached) so every
+        # candidate's relative strength is judged against the same frame,
+        # instead of a per-symbol network round trip.
+        index_history = None
+        if self.strategy_cfg.get("min_relative_strength_pct") is not None:
+            try:
+                index_history = self.data.get_index_history(self.regime_cfg.get("index_symbol", "^NSEI"))
+            except DataUnavailableError as exc:
+                log.warning("Could not fetch index history for relative-strength scoring (%s); skipping that filter this scan", exc)
+
         candidates = []
         for symbol in self.universe:
             if symbol in positions:
@@ -115,7 +125,7 @@ class TradingEngine:
                 log.debug("Skipping %s: %s", symbol, exc)
                 continue
 
-            cand = evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg)
+            cand = evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
             if cand:
                 candidates.append(cand)
 
@@ -142,15 +152,17 @@ class TradingEngine:
             if spent + cost_estimate > scan_budget:
                 log.info("Per-scan cash budget reached; deferring %s to next scan", cand.symbol)
                 continue
+            reason = (
+                f"momentum_52w_high score={cand.score:.1f} "
+                f"{cand.pct_from_52w_high:.1f}% off 52w-high, "
+                f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
+            )
+            if cand.relative_strength_pct is not None:
+                reason += f", RS {cand.relative_strength_pct:+.1f}pp vs index"
+            if cand.volume_multiple is not None:
+                reason += f", volume {cand.volume_multiple:.1f}x baseline"
             try:
-                self.broker.buy(
-                    cand.symbol, qty, cand.ltp,
-                    reason=(
-                        f"momentum_52w_high score={cand.score:.1f} "
-                        f"{cand.pct_from_52w_high:.1f}% off 52w-high, "
-                        f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
-                    ),
-                )
+                self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
                 spent += cost_estimate
             except InsufficientFundsError as exc:
                 log.warning("Insufficient funds for %s: %s", cand.symbol, exc)

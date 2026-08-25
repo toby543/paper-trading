@@ -139,3 +139,60 @@ def test_market_regime_fails_open_without_enough_history():
     idx = pd.date_range(end=pd.Timestamp.today(), periods=10, freq="B")
     df = pd.DataFrame({"Close": [20000.0] * 10}, index=idx)
     assert is_market_in_uptrend(df, ma_days=200) is True
+
+
+def test_relative_strength_passes_when_outperforming_index():
+    hist = _uptrend_history(drift=0.008)
+    index_hist = _uptrend_history(drift=0.002)
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_relative_strength_pct": 1.0}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg, index_history=index_hist)
+    assert cand is not None
+    assert cand.relative_strength_pct is not None and cand.relative_strength_pct > 1.0
+
+
+def test_relative_strength_rejects_when_bar_too_high():
+    hist = _uptrend_history(drift=0.008)
+    index_hist = _uptrend_history(drift=0.002)
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_relative_strength_pct": 500.0}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg, index_history=index_hist)
+    assert cand is None
+
+
+def test_volume_surge_passes_confirmation():
+    hist = _uptrend_history()
+    hist["Volume"] = [1_000_000] * (len(hist) - 10) + [2_500_000] * 10
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "volume_confirmation": {"enabled": True, "recent_days": 10, "baseline_days": 50, "min_volume_multiple": 1.2}}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is not None
+    assert cand.volume_multiple is not None and cand.volume_multiple > 1.2
+
+
+def test_flat_volume_rejected_by_confirmation():
+    hist = _uptrend_history()
+    hist["Volume"] = [1_000_000] * len(hist)
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "volume_confirmation": {"enabled": True, "recent_days": 10, "baseline_days": 50, "min_volume_multiple": 1.2}}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is None
+
+
+def test_new_filters_are_backward_compatible_when_absent():
+    hist = _uptrend_history()
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.01, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, STRATEGY_CFG)
+    assert cand is not None
+    assert cand.relative_strength_pct is None
+    assert cand.volume_multiple is None

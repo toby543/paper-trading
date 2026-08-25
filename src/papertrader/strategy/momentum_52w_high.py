@@ -10,6 +10,14 @@ making a new high"): a stock is a BUY candidate when
   3. It confirms trend: price is above both the fast and slow moving
      averages (fast above slow too, i.e. no death-cross).
   4. It is liquid enough to trade in size (average daily turnover filter).
+  5. (optional) It is outperforming the broader index over the same
+     lookback window by at least `min_relative_strength_pct` -- a stock
+     merely drifting up with a rising market isn't the same signal as
+     one genuinely leading it.
+  6. (optional) Its recent trading volume is running hot relative to its
+     own baseline (`volume_confirmation`) -- a breakout near a 52-week
+     high on light volume is a weaker signal than one with real
+     participation behind it.
 
 Exits (handled by `check_exit`) are a hard stop-loss from entry, a
 trailing stop from the highest close recorded since entry, or a momentum
@@ -34,6 +42,8 @@ class Candidate:
     momentum_return_pct: float
     avg_daily_turnover: float
     score: float
+    relative_strength_pct: float | None = None
+    volume_multiple: float | None = None
 
 
 def _moving_average(history: pd.DataFrame, window: int) -> float | None:
@@ -53,8 +63,46 @@ def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | N
     return (now - past) / past * 100.0
 
 
-def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, avg_daily_turnover: float, cfg: dict) -> Candidate | None:
-    """Return a Candidate if `symbol` currently qualifies as a BUY, else None."""
+def _relative_strength_pct(history: pd.DataFrame, index_history: pd.DataFrame, lookback_days: int) -> float | None:
+    """How much more (or less) the stock has returned than the index over
+    the same window, in percentage points. None if either return can't be
+    computed (not enough history yet)."""
+    stock_return = _momentum_return_pct(history, lookback_days)
+    index_return = _momentum_return_pct(index_history, lookback_days)
+    if stock_return is None or index_return is None:
+        return None
+    return stock_return - index_return
+
+
+def _volume_multiple(history: pd.DataFrame, recent_days: int, baseline_days: int) -> float | None:
+    """Recent average volume as a multiple of the longer-run baseline
+    average -- >1 means trading activity has picked up. None if volume
+    data isn't available or a baseline can't be computed."""
+    try:
+        baseline_avg = float(history["Volume"].tail(baseline_days).mean())
+        if not baseline_avg or baseline_avg <= 0:
+            return None
+        recent_avg = float(history["Volume"].tail(recent_days).mean())
+    except (KeyError, TypeError, ZeroDivisionError):
+        return None
+    return recent_avg / baseline_avg
+
+
+def evaluate_candidate(
+    symbol: str,
+    quote: Quote,
+    history: pd.DataFrame,
+    avg_daily_turnover: float,
+    cfg: dict,
+    index_history: pd.DataFrame | None = None,
+) -> Candidate | None:
+    """Return a Candidate if `symbol` currently qualifies as a BUY, else None.
+
+    `index_history` is optional: pass the broader index's daily bars to
+    enable the relative-strength filter/score component. Without it, that
+    check is simply skipped (fails open), same as any other filter whose
+    config key is absent.
+    """
     if quote.week52_high <= 0:
         return None
 
@@ -76,11 +124,33 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, avg_dai
     if avg_daily_turnover < cfg["min_avg_daily_turnover_inr"]:
         return None
 
-    # Higher momentum and closer proximity to the 52-week high both
-    # increase the score; proximity contributes as a bounded bonus so a
-    # single mega-momentum outlier can't dominate purely on that axis.
+    relative_strength = None
+    min_rs = cfg.get("min_relative_strength_pct")
+    if index_history is not None:
+        relative_strength = _relative_strength_pct(history, index_history, cfg["momentum_lookback_days"])
+        if min_rs is not None and relative_strength is not None and relative_strength < min_rs:
+            return None
+
+    volume_multiple = None
+    volume_cfg = cfg.get("volume_confirmation") or {}
+    if volume_cfg.get("enabled", False):
+        volume_multiple = _volume_multiple(
+            history,
+            recent_days=volume_cfg.get("recent_days", 10),
+            baseline_days=volume_cfg.get("baseline_days", 50),
+        )
+        min_multiple = volume_cfg.get("min_volume_multiple", 1.0)
+        if volume_multiple is not None and volume_multiple < min_multiple:
+            return None
+
+    # Higher momentum, closer proximity to the 52-week high, and stronger
+    # relative strength vs. the index all increase the score; proximity
+    # and relative strength contribute as bounded/secondary terms so raw
+    # momentum can't be swamped by either single axis.
     proximity_bonus = max(0.0, cfg["proximity_to_52w_high_pct"] - pct_from_high)
     score = momentum + proximity_bonus
+    if relative_strength is not None:
+        score += max(0.0, relative_strength) * 0.5
 
     return Candidate(
         symbol=symbol,
@@ -90,6 +160,8 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, avg_dai
         momentum_return_pct=momentum,
         avg_daily_turnover=avg_daily_turnover,
         score=score,
+        relative_strength_pct=relative_strength,
+        volume_multiple=volume_multiple,
     )
 
 
