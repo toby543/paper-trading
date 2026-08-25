@@ -71,8 +71,8 @@ class NSESession:
 
     @retry(
         reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=8),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, min=1, max=3),
         retry=retry_if_exception_type((requests.RequestException,)),
     )
     def get_json(self, url: str) -> dict:
@@ -95,14 +95,21 @@ class MarketDataClient:
         self.timeout = timeout
         self._nse = NSESession(timeout=timeout)
         self._history_cache: dict[str, pd.DataFrame] = {}
+        # Once NSE fails once, its anti-bot layer is almost always blocking
+        # this network for the rest of the run too. Retrying it per-symbol
+        # (with backoff) across a large universe is what makes scans take
+        # minutes, so trip a circuit breaker and go straight to the
+        # fallback for the remainder of this process's lifetime.
+        self._nse_broken = False
 
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:
-        if self.preferred == "nse":
+        if self.preferred == "nse" and not self._nse_broken:
             try:
                 return self._quote_from_nse(symbol)
             except Exception as exc:  # noqa: BLE001 - deliberately broad, we fall back
-                log.warning("NSE quote failed for %s (%s); falling back to yfinance", symbol, exc)
+                log.warning("NSE quote failed for %s (%s); falling back to yfinance for the rest of this run", symbol, exc)
+                self._nse_broken = True
         try:
             return self._quote_from_yfinance(symbol)
         except Exception as exc:  # noqa: BLE001
@@ -159,8 +166,12 @@ class MarketDataClient:
         self._history_cache[cache_key] = df
         return df
 
-    def get_avg_daily_turnover(self, symbol: str, days: int = 20) -> float:
-        df = self.get_history(symbol, period="3mo")
+    def get_avg_daily_turnover(self, symbol: str, days: int = 20, history: pd.DataFrame | None = None) -> float:
+        # Reuse an already-fetched history frame when the caller has one
+        # (the 1y frame pulled for moving averages/momentum easily covers
+        # the last 20 sessions) instead of making a second network round
+        # trip per symbol just for this filter.
+        df = history if history is not None else self.get_history(symbol, period="3mo")
         recent = df.tail(days)
         turnover = (recent["Close"] * recent["Volume"]).mean()
         return float(turnover) if not pd.isna(turnover) else 0.0

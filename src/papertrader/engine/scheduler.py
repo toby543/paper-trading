@@ -88,7 +88,7 @@ class TradingEngine:
             try:
                 quote = self.data.get_quote(symbol)
                 history = self.data.get_history(symbol, period="1y")
-                turnover = self.data.get_avg_daily_turnover(symbol)
+                turnover = self.data.get_avg_daily_turnover(symbol, history=history)
             except DataUnavailableError as exc:
                 log.debug("Skipping %s: %s", symbol, exc)
                 continue
