@@ -166,6 +166,23 @@ class MarketDataClient:
         self._history_cache[cache_key] = df
         return df
 
+    def get_index_history(self, index_symbol: str, period: str = "1y", ttl_seconds: int = 900) -> pd.DataFrame:
+        """Like get_history, but for a raw Yahoo Finance ticker (e.g. the
+        "^NSEI" Nifty 50 index) that must NOT get the ".NS" equity suffix."""
+        cache_key = f"index:{index_symbol}:{period}"
+        cached = self._history_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and (now - cached.attrs.get("_fetched_at", 0)) < ttl_seconds:
+            return cached
+        import yfinance as yf
+
+        df = yf.Ticker(index_symbol).history(period=period, interval="1d")
+        if df.empty:
+            raise DataUnavailableError(f"No history for index {index_symbol}")
+        df.attrs["_fetched_at"] = now
+        self._history_cache[cache_key] = df
+        return df
+
     def get_avg_daily_turnover(self, symbol: str, days: int = 20, history: pd.DataFrame | None = None) -> float:
         # Reuse an already-fetched history frame when the caller has one
         # (the 1y frame pulled for moving averages/momentum easily covers

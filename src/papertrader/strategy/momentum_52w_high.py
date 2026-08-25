@@ -97,6 +97,19 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
+def is_market_in_uptrend(index_history: pd.DataFrame, ma_days: int) -> bool:
+    """Market regime filter: true when the index's last close is above its
+    own `ma_days` moving average. Momentum-at-new-highs strategies tend to
+    whipsaw badly when the broader market is in a downtrend, so this gates
+    new entries (never exits -- risk management still applies regardless
+    of regime)."""
+    ma = _moving_average(index_history, ma_days)
+    if ma is None:
+        return True  # not enough index history yet; fail open rather than freezing entries
+    last_close = float(index_history["Close"].iloc[-1])
+    return last_close > ma
+
+
 def check_exit(position: Position, quote: Quote, history: pd.DataFrame, cfg: dict) -> tuple[bool, str]:
     """Return (should_exit, reason)."""
     stop_loss_price = position.avg_price * (1 - cfg["stop_loss_pct"] / 100.0)

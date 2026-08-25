@@ -6,7 +6,7 @@ import pytest
 
 from papertrader.data.nse_client import Quote
 from papertrader.portfolio.models import Position
-from papertrader.strategy.momentum_52w_high import evaluate_candidate, check_exit, rank_candidates
+from papertrader.strategy.momentum_52w_high import evaluate_candidate, check_exit, rank_candidates, is_market_in_uptrend
 
 STRATEGY_CFG = {
     "proximity_to_52w_high_pct": 5.0,
@@ -117,3 +117,25 @@ def test_rank_candidates_orders_by_score():
     assert c1 and c2
     ranked = rank_candidates([c2, c1])
     assert ranked[0].symbol == "A"  # closer to its 52w high -> higher proximity bonus
+
+
+def test_market_uptrend_detected():
+    hist = _uptrend_history()
+    assert is_market_in_uptrend(hist, ma_days=200) is True
+
+
+def test_market_downtrend_detected():
+    days = 260
+    idx = pd.date_range(end=pd.Timestamp.today(), periods=days, freq="B")
+    rng = np.random.default_rng(7)
+    closes = [20000.0]
+    for _ in range(days - 1):
+        closes.append(closes[-1] * (1 - 0.004 + rng.normal(0, 0.004)))
+    df = pd.DataFrame({"Close": closes}, index=idx)
+    assert is_market_in_uptrend(df, ma_days=200) is False
+
+
+def test_market_regime_fails_open_without_enough_history():
+    idx = pd.date_range(end=pd.Timestamp.today(), periods=10, freq="B")
+    df = pd.DataFrame({"Close": [20000.0] * 10}, index=idx)
+    assert is_market_in_uptrend(df, ma_days=200) is True

@@ -25,6 +25,16 @@ strategy:
   # How many top-ranked new candidates to buy per scan.
   max_new_positions_per_scan: 3
 
+regime:
+  # Market regime filter: momentum strategies get badly hurt trading
+  # through a falling market, so only take NEW positions while the
+  # broader index itself is in an uptrend. Existing positions still
+  # exit normally (stop-loss/trailing-stop/momentum-breakdown) regardless
+  # of regime -- this only gates new buys, never risk management.
+  enabled: true
+  index_symbol: "^NSEI"   # Nifty 50 index (Yahoo Finance ticker)
+  ma_days: 200            # index must be trading above this many-day average
+
 risk:
   max_open_positions: 10
   # Fraction of total equity risked/allocated per new position.

@@ -80,6 +80,10 @@
   .pill.open .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-wash); animation: pulse 2s ease-in-out infinite; }
   .pill.closed { background: var(--surface-2); color: var(--ink-faint); border-color: var(--border); }
   .pill.closed .dot { background: var(--ink-faint); }
+  .pill.up { background: var(--good-wash); color: var(--good); }
+  .pill.up .dot { background: var(--good); }
+  .pill.down { background: var(--bad-wash); color: var(--bad); }
+  .pill.down .dot { background: var(--bad); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) { .pill.open .dot { animation: none; } }
 
@@ -208,6 +212,7 @@
     <span class="tag">NSE Paper Book</span>
   </div>
   <div class="topbar-right">
+    <span class="pill" id="regimePill" style="display:none;"><span class="dot"></span><span id="regimePillText">—</span></span>
     <span class="pill closed" id="marketPill"><span class="dot"></span><span id="marketPillText">Market —</span></span>
     <span class="clock mono" id="clock">—</span>
   </div>
@@ -306,6 +311,17 @@ function renderStats(s) {
   const pill = document.getElementById("marketPill");
   pill.className = "pill " + (s.market_open ? "open" : "closed");
   document.getElementById("marketPillText").textContent = s.market_open ? "Market Open" : "Market Closed";
+
+  const regimePill = document.getElementById("regimePill");
+  const r = s.regime;
+  if (!r || !r.enabled || !r.status) {
+    regimePill.style.display = "none";
+  } else {
+    regimePill.style.display = "inline-flex";
+    regimePill.className = "pill " + (r.status === "up" ? "up" : "down");
+    document.getElementById("regimePillText").textContent =
+      (r.status === "up" ? "Uptrend" : "Downtrend") + " · " + r.index_symbol.replace("^", "");
+  }
 }
 
 function renderPositions(s) {

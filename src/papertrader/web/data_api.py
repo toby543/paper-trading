@@ -5,11 +5,28 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from ..strategy.momentum_52w_high import is_market_in_uptrend
+
+
 def _safe_ltp(engine, symbol: str, fallback: float) -> float:
     try:
         return engine.data.get_quote(symbol).ltp
     except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky quote
         return fallback
+
+
+def _market_regime(engine) -> dict:
+    regime_cfg = engine.cfg.get("regime", default={}) or {}
+    index_symbol = regime_cfg.get("index_symbol", "^NSEI")
+    ma_days = regime_cfg.get("ma_days", 200)
+    if not regime_cfg.get("enabled", False):
+        return {"enabled": False, "status": None, "index_symbol": index_symbol, "ma_days": ma_days}
+    try:
+        index_history = engine.data.get_index_history(index_symbol)
+        status = "up" if is_market_in_uptrend(index_history, ma_days) else "down"
+    except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky index fetch
+        status = None
+    return {"enabled": True, "status": status, "index_symbol": index_symbol, "ma_days": ma_days}
 
 
 def build_summary(engine) -> dict:
@@ -42,6 +59,7 @@ def build_summary(engine) -> dict:
     return {
         "as_of": datetime.now().isoformat(timespec="seconds"),
         "market_open": engine.calendar.is_market_open(),
+        "regime": _market_regime(engine),
         "cash": round(cash, 2),
         "positions_value": round(positions_value, 2),
         "total_equity": round(total_equity, 2),

@@ -25,6 +25,17 @@ sized as a fixed percentage of total equity.
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, or a **momentum breakdown**
 (close falls below the 50-day moving average) — whichever comes first.
+Exits always apply regardless of market regime (see below) — only new
+entries are gated.
+
+**Market regime filter:** momentum strategies get badly hurt trading
+through a falling market, so by default new entries only happen while
+the Nifty 50 index itself is trading above its own 200-day moving
+average (`regime` section in `config.yaml`). When the index is below
+that average, the engine keeps managing exits on existing positions as
+normal but stops opening new ones until the index recovers. Disable
+with `regime.enabled: false` if you'd rather trade through every
+regime.
 
 **Data:** real-time quotes and 52-week high/low come from the NSE
 website's own JSON API; historical daily bars used for moving averages

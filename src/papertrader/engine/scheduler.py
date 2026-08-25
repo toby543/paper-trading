@@ -20,7 +20,7 @@ from ..data.universe import load_universe
 from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
-from ..strategy.momentum_52w_high import evaluate_candidate, rank_candidates, check_exit
+from ..strategy.momentum_52w_high import evaluate_candidate, rank_candidates, check_exit, is_market_in_uptrend
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -54,8 +54,23 @@ class TradingEngine:
         self.universe = load_universe(cfg.universe_file)
         self.strategy_cfg = cfg.get("strategy", default={})
         self.risk_cfg = cfg.get("risk", default={})
+        self.regime_cfg = cfg.get("regime", default={})
 
     # ------------------------------------------------------------------
+    def market_regime_ok(self) -> bool:
+        """True if new entries are allowed under the market regime filter
+        (or the filter is disabled / its data is unavailable, in which
+        case we fail open rather than freezing the whole system)."""
+        if not self.regime_cfg.get("enabled", False):
+            return True
+        index_symbol = self.regime_cfg.get("index_symbol", "^NSEI")
+        try:
+            index_history = self.data.get_index_history(index_symbol)
+        except DataUnavailableError as exc:
+            log.warning("Could not evaluate market regime (%s); proceeding without the filter this scan", exc)
+            return True
+        return is_market_in_uptrend(index_history, self.regime_cfg.get("ma_days", 200))
+
     def check_exits(self) -> None:
         positions = self.broker.positions()
         for symbol, pos in positions.items():
@@ -79,6 +94,13 @@ class TradingEngine:
         room = self.risk.room_for_new_positions(len(positions))
         if room <= 0:
             log.info("Max open positions reached (%d); skipping entry scan", self.risk.max_open_positions)
+            return
+
+        if not self.market_regime_ok():
+            log.info(
+                "Market regime filter: %s below its %sd average; skipping new entries this scan",
+                self.regime_cfg.get("index_symbol", "^NSEI"), self.regime_cfg.get("ma_days", 200),
+            )
             return
 
         candidates = []
