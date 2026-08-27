@@ -238,3 +238,43 @@ def test_stop_loss_still_works_when_take_profit_enabled():
     should_exit, reason = check_exit(pos, quote, hist, cfg)
     assert should_exit
     assert "stop_loss" in reason
+
+
+def test_price_range_disabled_by_default():
+    hist = _uptrend_history()
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_ltp_inr": 0, "max_ltp_inr": 0}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is not None
+
+
+def test_min_ltp_rejects_below_floor():
+    hist = _uptrend_history()
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_ltp_inr": ltp + 50, "max_ltp_inr": 0}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is None
+
+
+def test_max_ltp_rejects_above_ceiling():
+    hist = _uptrend_history()
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_ltp_inr": 0, "max_ltp_inr": ltp - 50}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is None
+
+
+def test_price_within_range_qualifies():
+    hist = _uptrend_history()
+    ltp = float(hist["Close"].iloc[-1])
+    quote = Quote(symbol="TEST", ltp=ltp, prev_close=ltp * 0.99, week52_high=ltp * 1.005, week52_low=ltp * 0.5,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {**STRATEGY_CFG, "min_ltp_inr": ltp - 10, "max_ltp_inr": ltp + 10}
+    cand = evaluate_candidate("TEST", quote, hist, 100_000_000, cfg)
+    assert cand is not None

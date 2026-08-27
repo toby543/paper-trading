@@ -47,6 +47,12 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "max_new_positions_per_scan"), "type": "int", "min": 1, "max": 50,
      "group": "Strategy — Entry", "label": "New positions per scan", "unit": "",
      "desc": "Caps how many top-ranked candidates get bought in a single scan."},
+    {"path": ("strategy", "min_ltp_inr"), "type": "float", "min": 0,
+     "group": "Strategy — Entry", "label": "Min price", "unit": "₹ (0 = off)",
+     "desc": "Skip stocks trading below this price, e.g. to avoid penny stocks."},
+    {"path": ("strategy", "max_ltp_inr"), "type": "float", "min": 0,
+     "group": "Strategy — Entry", "label": "Max price", "unit": "₹ (0 = off)",
+     "desc": "Skip stocks trading above this price."},
 
     {"path": ("regime", "enabled"), "type": "bool",
      "group": "Market regime", "label": "Regime filter", "unit": "",

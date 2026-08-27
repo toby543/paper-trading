@@ -407,6 +407,19 @@
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
         <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+        {% set min_ltp = strategy.get('min_ltp_inr') %}
+        {% set max_ltp = strategy.get('max_ltp_inr') %}
+        {% if min_ltp or max_ltp %}
+        <div class="rule"><span>Price range</span><span class="mono">
+          {%- if min_ltp and max_ltp -%}
+            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+          {%- elif min_ltp -%}
+            &ge; ₹{{ min_ltp|inr }}
+          {%- else -%}
+            &le; ₹{{ max_ltp|inr }}
+          {%- endif -%}
+        </span></div>
+        {% endif %}
       </div>
       <div class="rules-col">
         <div class="rules-col-label">Exit — first to trigger wins</div>

@@ -38,6 +38,12 @@ strategy:
     min_volume_multiple: 1.2
   # How many top-ranked new candidates to buy per scan.
   max_new_positions_per_scan: 3
+  # Optional LTP (last traded price) range filter. 0 = no bound on that
+  # side. Useful for skipping penny stocks below a floor, or steering
+  # clear of very high-priced names that eat too much of a position's
+  # share count.
+  min_ltp_inr: 0
+  max_ltp_inr: 0
 
 regime:
   # Market regime filter: momentum strategies get badly hurt trading

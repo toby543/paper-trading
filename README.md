@@ -31,7 +31,9 @@ strength and volume confirmation are each independently toggleable in
 `config.yaml` (`strategy.min_relative_strength_pct`,
 `strategy.volume_confirmation.enabled`) and fail open (skip the check
 rather than blocking every trade) if the underlying index/volume data
-can't be fetched for a given scan.
+can't be fetched for a given scan. An optional price range
+(`strategy.min_ltp_inr`/`max_ltp_inr`, 0 = no bound) can also skip
+penny stocks or steer clear of very high-priced names.
 
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, a **momentum breakdown**

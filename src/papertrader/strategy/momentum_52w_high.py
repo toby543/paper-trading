@@ -18,6 +18,8 @@ making a new high"): a stock is a BUY candidate when
      own baseline (`volume_confirmation`) -- a breakout near a 52-week
      high on light volume is a weaker signal than one with real
      participation behind it.
+  7. (optional) Its price falls within `min_ltp_inr`/`max_ltp_inr`, to
+     e.g. skip penny stocks or keep clear of very high-priced names.
 
 Exits (handled by `check_exit`) are a hard stop-loss from entry, a
 trailing stop from the highest close recorded since entry, or a momentum
@@ -104,6 +106,16 @@ def evaluate_candidate(
     config key is absent.
     """
     if quote.week52_high <= 0:
+        return None
+
+    # Optional LTP range filter (0/absent = no bound), e.g. to skip penny
+    # stocks below a floor or steer clear of very high-priced names. Cheap
+    # check, so it runs before anything that needs historical bars.
+    min_ltp = cfg.get("min_ltp_inr")
+    if min_ltp and quote.ltp < min_ltp:
+        return None
+    max_ltp = cfg.get("max_ltp_inr")
+    if max_ltp and quote.ltp > max_ltp:
         return None
 
     pct_from_high = (quote.week52_high - quote.ltp) / quote.week52_high * 100.0
