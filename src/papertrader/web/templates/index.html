@@ -219,16 +219,16 @@
   .edit-banner { margin: 12px 18px 0; padding: 10px 14px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; }
   .edit-banner.success { background: var(--good-wash); color: var(--good); }
   .edit-banner.error { background: var(--bad-wash); color: var(--bad); }
-  .edit-panel-head { cursor: pointer; user-select: none; }
-  .edit-collapse-toggle { display: flex; align-items: center; gap: 10px; }
-  .edit-collapse-btn {
+  .collapsible-head { cursor: pointer; user-select: none; }
+  .collapse-toggle { display: flex; align-items: center; gap: 10px; }
+  .collapse-btn {
     background: none; border: none; color: var(--ink-faint); cursor: pointer;
     font-size: 11px; line-height: 1; padding: 4px; border-radius: 3px;
     transition: transform 0.15s ease;
   }
-  .edit-collapse-btn:hover { color: var(--ink); background: var(--surface-2); }
-  #editPanel.collapsed .edit-collapse-btn { transform: rotate(180deg); }
-  #editPanel.collapsed #editBody { display: none; }
+  .collapse-btn:hover { color: var(--ink); background: var(--surface-2); }
+  .panel.collapsed .collapse-btn { transform: rotate(180deg); }
+  .panel.collapsed .panel-body-collapsible { display: none; }
   @media (max-width: 640px) {
     .edit-groups { grid-template-columns: 1fr; }
     .edit-row { flex-wrap: wrap; }
@@ -345,10 +345,14 @@
   </div>
 
   <div class="panel" id="rulesPanel">
-    <div class="panel-head">
+    <div class="panel-head collapsible-head" id="rulesPanelHead">
       <h2>Strategy Rules</h2>
-      <span class="meta mono">from config.yaml</span>
+      <span class="collapse-toggle">
+        <span class="meta mono">from config.yaml</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="rulesBody" title="Collapse">&#9650;</button>
+      </span>
     </div>
+    <div id="rulesBody" class="panel-body-collapsible">
     <div class="rules-grid">
       <div class="rules-col">
         <div class="rules-col-label">Entry — all must pass</div>
@@ -380,13 +384,18 @@
         <div class="rule"><span>Max cash deployed / scan</span><span class="mono">{{ risk.get('max_cash_deployed_per_scan_pct', '—') }}% of free cash</span></div>
       </div>
     </div>
+    </div>
   </div>
 
   <div class="panel" id="settingsPanel">
-    <div class="panel-head">
+    <div class="panel-head collapsible-head" id="settingsPanelHead">
       <h2>All Settings</h2>
-      <span class="meta mono">from config.yaml</span>
+      <span class="collapse-toggle">
+        <span class="meta mono">from config.yaml</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="settingsBody" title="Collapse">&#9650;</button>
+      </span>
     </div>
+    <div id="settingsBody" class="panel-body-collapsible">
     <div class="settings-grid">
       <div>
         <div class="settings-col-label">Account</div>
@@ -451,17 +460,18 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   <div class="panel" id="editPanel">
-    <div class="panel-head edit-panel-head" id="editPanelHead">
+    <div class="panel-head collapsible-head" id="editPanelHead">
       <h2>Edit Settings</h2>
-      <span class="edit-collapse-toggle">
+      <span class="collapse-toggle">
         <span class="meta mono" id="editMeta">writes to config.yaml</span>
-        <button id="editCollapseBtn" class="edit-collapse-btn" aria-expanded="true" aria-controls="editBody" title="Collapse">&#9650;</button>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="editBody" title="Collapse">&#9650;</button>
       </span>
     </div>
-    <div id="editBody">
+    <div id="editBody" class="panel-body-collapsible">
       <div id="editBanner" class="edit-banner" style="display:none;"></div>
       <div id="editGroups" class="edit-groups"></div>
       <div class="edit-actions">
@@ -786,36 +796,37 @@ async function saveSettings() {
 document.getElementById("editSaveBtn").addEventListener("click", saveSettings);
 loadSettings();
 
-// ---- Collapse/expand the Edit Settings panel, remembered per-browser ----
-const EDIT_COLLAPSE_KEY = "papertrader.editSettingsCollapsed";
+// ---- Collapse/expand any settings panel, remembered per-browser --------
+function makeCollapsible(panelId, headId, storageKey) {
+  const panel = document.getElementById(panelId);
+  const head = document.getElementById(headId);
+  const btn = head.querySelector(".collapse-btn");
 
-function setEditCollapsed(collapsed) {
-  const panel = document.getElementById("editPanel");
-  const btn = document.getElementById("editCollapseBtn");
-  panel.classList.toggle("collapsed", collapsed);
-  btn.setAttribute("aria-expanded", String(!collapsed));
-  btn.title = collapsed ? "Expand" : "Collapse";
-  try {
-    localStorage.setItem(EDIT_COLLAPSE_KEY, collapsed ? "1" : "0");
-  } catch (e) {
-    // localStorage unavailable (private browsing, blocked site data, etc.) -- fine, just won't persist.
+  function setCollapsed(collapsed) {
+    panel.classList.toggle("collapsed", collapsed);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.title = collapsed ? "Expand" : "Collapse";
+    try {
+      localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    } catch (e) {
+      // localStorage unavailable (private browsing, blocked site data, etc.) -- fine, just won't persist.
+    }
   }
-}
 
-document.getElementById("editPanelHead").addEventListener("click", () => {
-  const panel = document.getElementById("editPanel");
-  setEditCollapsed(!panel.classList.contains("collapsed"));
-});
+  head.addEventListener("click", () => setCollapsed(!panel.classList.contains("collapsed")));
 
-(function restoreEditCollapsedState() {
   let saved = null;
   try {
-    saved = localStorage.getItem(EDIT_COLLAPSE_KEY);
+    saved = localStorage.getItem(storageKey);
   } catch (e) {
     // ignore -- default to expanded below
   }
-  if (saved === "1") setEditCollapsed(true);
-})();
+  if (saved === "1") setCollapsed(true);
+}
+
+makeCollapsible("rulesPanel", "rulesPanelHead", "papertrader.rulesPanelCollapsed");
+makeCollapsible("settingsPanel", "settingsPanelHead", "papertrader.settingsPanelCollapsed");
+makeCollapsible("editPanel", "editPanelHead", "papertrader.editSettingsCollapsed");
 
 async function refresh() {
   try {
