@@ -108,8 +108,17 @@ class Backtester:
         except OSError:
             pass
 
-    # ------------------------------------------------------------------
+    # Minimum spacing between consecutive Yahoo Finance requests. Firing
+    # requests for a 100-500 symbol universe back-to-back with no pacing
+    # is exactly the pattern that trips Yahoo's rate limiting/anti-abuse
+    # throttling, which then surfaces as a 404 -- indistinguishable from a
+    # genuinely delisted symbol unless several real, actively-traded
+    # stocks failing in the same run tips you off to suspect throttling.
+    _YFINANCE_MIN_INTERVAL_SECONDS = 0.2
+
     def _fetch(self) -> None:
+        import time as _time
+
         import yfinance as yf
 
         fetch_start = self.start - pd.Timedelta(days=self.lookback_buffer_days)
@@ -117,7 +126,12 @@ class Backtester:
         log.info("Fetching %d symbols from %s to %s (includes lookback buffer for MAs/momentum)...",
                   len(self.universe), fetch_start.date(), self.end.date())
 
-        for symbol in self.universe:
+        last_call = 0.0
+        for i, symbol in enumerate(self.universe):
+            elapsed = _time.time() - last_call
+            if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
+                _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
+            last_call = _time.time()
             try:
                 df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end)
                 if not df.empty:
@@ -125,6 +139,8 @@ class Backtester:
                     self._history[symbol] = df
             except Exception as exc:  # noqa: BLE001 - one bad symbol must not abort the whole backtest
                 log.debug("Skipping %s: %s", symbol, exc)
+            if (i + 1) % 50 == 0:
+                log.info("Fetch progress: %d/%d symbols (%d resolved so far)", i + 1, len(self.universe), len(self._history))
 
         index_symbol = self.regime_cfg.get("index_symbol", "^NSEI")
         try:

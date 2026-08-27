@@ -239,7 +239,13 @@ to a CSV for charting elsewhere.
   buffer itself is still warming up.
 - A larger universe (e.g. the Nifty 500 list) or longer date range means
   more symbols × more days to fetch and simulate — expect it to take a
-  while for anything beyond a small universe or a few months.
+  while for anything beyond a small universe or a few months. Fetches
+  are paced (~0.2s apart) to avoid tripping Yahoo Finance's rate
+  limiting, which otherwise surfaces as "possibly delisted" 404s on
+  perfectly real, actively-traded stocks and is easy to mistake for a
+  wrong ticker — if several genuinely-listed symbols fail together in
+  the same run (especially ones that resolved fine before), suspect
+  throttling before assuming the symbol is wrong.
 - Past performance in a backtest is not a promise of future results —
   it validates that the *logic* behaves as intended against history, not
   that the strategy will keep working going forward.

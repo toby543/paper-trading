@@ -89,18 +89,34 @@ class NSESession:
 class MarketDataClient:
     """Facade combining NSE (preferred) and Yahoo Finance (fallback)."""
 
+    # Minimum spacing between consecutive Yahoo Finance requests. With a
+    # 100-500 symbol universe, firing requests back-to-back with no pacing
+    # is exactly the pattern that trips Yahoo's rate limiting/anti-abuse
+    # throttling -- which then looks indistinguishable from real symbols
+    # being "delisted" (both surface as a 404) unless you know to suspect
+    # rate limiting first when several genuinely-listed, actively-traded
+    # stocks fail in the same run.
+    _YFINANCE_MIN_INTERVAL_SECONDS = 0.2
+
     def __init__(self, preferred: str = "nse", fallback: str = "yfinance", timeout: int = 10):
         self.preferred = preferred
         self.fallback = fallback
         self.timeout = timeout
         self._nse = NSESession(timeout=timeout)
         self._history_cache: dict[str, pd.DataFrame] = {}
+        self._last_yfinance_call = 0.0
         # Once NSE fails once, its anti-bot layer is almost always blocking
         # this network for the rest of the run too. Retrying it per-symbol
         # (with backoff) across a large universe is what makes scans take
         # minutes, so trip a circuit breaker and go straight to the
         # fallback for the remainder of this process's lifetime.
         self._nse_broken = False
+
+    def _throttle_yfinance(self) -> None:
+        elapsed = time.time() - self._last_yfinance_call
+        if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
+            time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
+        self._last_yfinance_call = time.time()
 
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:
@@ -133,6 +149,7 @@ class MarketDataClient:
     def _quote_from_yfinance(self, symbol: str) -> Quote:
         import yfinance as yf
 
+        self._throttle_yfinance()
         ticker = yf.Ticker(symbol + ".NS")
         hist = ticker.history(period="1y", interval="1d")
         if hist.empty:
@@ -159,6 +176,7 @@ class MarketDataClient:
             return cached
         import yfinance as yf
 
+        self._throttle_yfinance()
         df = yf.Ticker(symbol + ".NS").history(period=period, interval="1d")
         if df.empty:
             raise DataUnavailableError(f"No history for {symbol}")
@@ -176,6 +194,7 @@ class MarketDataClient:
             return cached
         import yfinance as yf
 
+        self._throttle_yfinance()
         df = yf.Ticker(index_symbol).history(period=period, interval="1d")
         if df.empty:
             raise DataUnavailableError(f"No history for index {index_symbol}")
