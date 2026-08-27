@@ -53,7 +53,27 @@ EDITABLE_SETTINGS: list[dict] = [
      "desc": "Block new entries while the benchmark index is below its own moving average."},
     {"path": ("regime", "index_symbol"), "type": "str", "max_len": 20,
      "group": "Market regime", "label": "Benchmark index", "unit": "",
-     "desc": "Yahoo Finance ticker, e.g. ^NSEI (Nifty 50). Also used for relative strength."},
+     "desc": "Yahoo Finance ticker for the regime filter and relative-strength "
+             "benchmark. Pick a suggestion or type any other ticker -- if it "
+             "can't be fetched, both checks fail open (skip themselves) rather "
+             "than blocking trading.",
+     "suggestions": [
+         ("^NSEI", "Nifty 50"),
+         ("^NSEBANK", "Nifty Bank"),
+         ("^CNXIT", "Nifty IT"),
+         ("^CNX100", "Nifty 100"),
+         ("^CNX200", "Nifty 200"),
+         ("^CRSLDX", "Nifty 500"),
+         ("^NSMIDCP", "Nifty Midcap 100"),
+         ("^CNXFMCG", "Nifty FMCG"),
+         ("^CNXPHARMA", "Nifty Pharma"),
+         ("^CNXAUTO", "Nifty Auto"),
+         ("^CNXMETAL", "Nifty Metal"),
+         ("^CNXREALTY", "Nifty Realty"),
+         ("^CNXENERGY", "Nifty Energy"),
+         ("^CNXPSE", "Nifty PSE"),
+         ("^CNXINFRA", "Nifty Infrastructure"),
+     ]},
     {"path": ("regime", "ma_days"), "type": "int", "min": 5, "max": 400,
      "group": "Market regime", "label": "Regime moving average", "unit": "days", "desc": ""},
 

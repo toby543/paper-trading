@@ -695,6 +695,12 @@ function inputHtmlFor(f) {
     const max = f.max !== undefined ? ` max="${f.max}"` : "";
     return `<input type="number" step="${step}"${min}${max} class="edit-input" id="edit-${key}" value="${f.value ?? ""}">`;
   }
+  if (f.type === "str" && f.suggestions && f.suggestions.length) {
+    const listId = `dl-${key}`;
+    const opts = f.suggestions.map(([ticker, label]) => `<option value="${ticker}">${label}</option>`).join("");
+    return `<input type="text" list="${listId}" class="edit-input wide" id="edit-${key}" value="${f.value ?? ""}" ${f.max_len ? `maxlength="${f.max_len}"` : ""}>
+            <datalist id="${listId}">${opts}</datalist>`;
+  }
   return `<input type="text" class="edit-input wide" id="edit-${key}" value="${f.value ?? ""}" ${f.max_len ? `maxlength="${f.max_len}"` : ""}>`;
 }
 

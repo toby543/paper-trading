@@ -50,7 +50,12 @@ average (`regime` section in `config.yaml`). When the index is below
 that average, the engine keeps managing exits on existing positions as
 normal but stops opening new ones until the index recovers. Disable
 with `regime.enabled: false` if you'd rather trade through every
-regime.
+regime. The benchmark index (`regime.index_symbol`, also used for
+relative strength) isn't limited to Nifty 50 — the dashboard's Edit
+Settings panel offers common alternatives (Nifty Bank, Nifty IT, Nifty
+500, several sector indexes, etc.) as autocomplete suggestions, or type
+any other Yahoo Finance ticker directly; an unreachable/invalid ticker
+just fails that check open rather than blocking trading.
 
 **Data:** real-time quotes and 52-week high/low come from the NSE
 website's own JSON API; historical daily bars used for moving averages
