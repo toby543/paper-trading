@@ -19,13 +19,14 @@ def _resolve(path: str) -> str:
 @dataclass
 class Config:
     raw: dict[str, Any] = field(repr=False)
+    path: str = field(default="")
 
     @classmethod
     def load(cls, path: str | None = None) -> "Config":
         path = path or os.path.join(REPO_ROOT, "config.yaml")
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
-        return cls(raw=raw)
+        return cls(raw=raw, path=path)
 
     def __getitem__(self, key: str) -> Any:
         return self.raw[key]

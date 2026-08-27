@@ -17,6 +17,7 @@
     --ink-dim: #5b6472;
     --ink-faint: #8891a0;
     --accent: #a06a1e;
+    --accent-ink: #ffffff;
     --accent-wash: rgba(160, 106, 30, 0.10);
     --good: #1f8f5f;
     --good-wash: rgba(31, 143, 95, 0.10);
@@ -29,7 +30,7 @@
     :root:not([data-theme="light"]) {
       --bg: #0a0e14; --surface: #10161f; --surface-2: #161d29; --border: #232c3a;
       --ink: #e8ecf2; --ink-dim: #8791a3; --ink-faint: #59626f;
-      --accent: #d4a244; --accent-wash: rgba(212, 162, 68, 0.10);
+      --accent: #d4a244; --accent-ink: #16110a; --accent-wash: rgba(212, 162, 68, 0.10);
       --good: #3ecf8e; --good-wash: rgba(62, 207, 142, 0.10);
       --bad: #ef5350; --bad-wash: rgba(239, 83, 80, 0.10);
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
@@ -38,7 +39,7 @@
   :root[data-theme="dark"] {
     --bg: #0a0e14; --surface: #10161f; --surface-2: #161d29; --border: #232c3a;
     --ink: #e8ecf2; --ink-dim: #8791a3; --ink-faint: #59626f;
-    --accent: #d4a244; --accent-wash: rgba(212, 162, 68, 0.10);
+    --accent: #d4a244; --accent-ink: #16110a; --accent-wash: rgba(212, 162, 68, 0.10);
     --good: #3ecf8e; --good-wash: rgba(62, 207, 142, 0.10);
     --bad: #ef5350; --bad-wash: rgba(239, 83, 80, 0.10);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
@@ -181,6 +182,46 @@
   .setting-desc { font-size: 11px; color: var(--ink-faint); margin-top: 2px; line-height: 1.4; max-width: 46ch; }
   @media (max-width: 640px) {
     .settings-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- edit settings ---------- */
+  #editPanel { margin-top: 20px; }
+  .edit-groups { padding: 6px 18px 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+  .edit-group-label { grid-column: 1 / -1; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; margin: 14px 0 6px; }
+  .edit-group-label:first-child { margin-top: 4px; }
+  .edit-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .edit-row:last-of-type { border-bottom: none; }
+  .edit-row-text { min-width: 0; }
+  .edit-row-label { font-size: 12.5px; display: block; }
+  .edit-row-desc { font-size: 11px; color: var(--ink-faint); margin-top: 1px; line-height: 1.35; }
+  .edit-input-wrap { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .edit-input {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); border-radius: 3px;
+    padding: 5px 8px; width: 92px; text-align: right;
+  }
+  .edit-input.wide { width: 130px; text-align: left; }
+  .edit-input:focus { outline: none; border-color: var(--accent); }
+  .edit-input.dirty { border-color: var(--accent); background: var(--accent-wash); }
+  .edit-unit { font-size: 11px; color: var(--ink-faint); white-space: nowrap; min-width: 60px; }
+  .edit-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .edit-actions {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 18px; border-top: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .edit-hint { font-size: 11.5px; color: var(--ink-faint); }
+  .edit-save-btn {
+    font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; font-weight: 600;
+    background: var(--accent); color: var(--accent-ink); border: none; border-radius: 4px;
+    padding: 8px 18px; cursor: pointer;
+  }
+  .edit-save-btn:disabled { background: var(--surface-2); color: var(--ink-faint); cursor: not-allowed; }
+  .edit-banner { margin: 12px 18px 0; padding: 10px 14px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; }
+  .edit-banner.success { background: var(--good-wash); color: var(--good); }
+  .edit-banner.error { background: var(--bad-wash); color: var(--bad); }
+  @media (max-width: 640px) {
+    .edit-groups { grid-template-columns: 1fr; }
+    .edit-row { flex-wrap: wrap; }
   }
 
   @media (max-width: 900px) {
@@ -402,6 +443,19 @@
     </div>
   </div>
 
+  <div class="panel" id="editPanel">
+    <div class="panel-head">
+      <h2>Edit Settings</h2>
+      <span class="meta mono" id="editMeta">writes to config.yaml</span>
+    </div>
+    <div id="editBanner" class="edit-banner" style="display:none;"></div>
+    <div id="editGroups" class="edit-groups"></div>
+    <div class="edit-actions">
+      <span id="editHint" class="edit-hint">Changes are saved to config.yaml but only take effect after you restart the engine/dashboard.</span>
+      <button id="editSaveBtn" class="edit-save-btn" disabled>Save Changes</button>
+    </div>
+  </div>
+
   <div class="footer-note">
     <span>Simulated fills · slippage {{ slippage_bps }}bps · ₹{{ flat_charges_inr|inr }} flat charge</span>
     <span class="sep"></span>
@@ -588,6 +642,134 @@ function renderEquityChart(curve) {
   ctx.fillText("₹" + Math.round(max).toLocaleString("en-IN"), cssW - 4, padT + 9);
   ctx.textAlign = "left";
 }
+
+// ---- Edit Settings panel ------------------------------------------------
+let editFields = [];       // last-loaded schema+values from the server
+const editOriginal = {};   // path.join(".") -> last-saved value, for dirty tracking
+
+function pathKey(path) { return path.join("."); }
+
+function inputHtmlFor(f) {
+  const key = pathKey(f.path);
+  if (f.type === "bool") {
+    return `<input type="checkbox" class="edit-checkbox" id="edit-${key}" ${f.value ? "checked" : ""}>`;
+  }
+  if (f.type === "choice") {
+    const opts = f.choices.map(c => `<option value="${c}" ${c === f.value ? "selected" : ""}>${c}</option>`).join("");
+    return `<select class="edit-input wide" id="edit-${key}">${opts}</select>`;
+  }
+  if (f.type === "time") {
+    return `<input type="time" class="edit-input" id="edit-${key}" value="${f.value ?? ""}">`;
+  }
+  if (f.type === "int" || f.type === "float") {
+    const step = f.type === "int" ? "1" : "any";
+    const min = f.min !== undefined ? ` min="${f.min}"` : "";
+    const max = f.max !== undefined ? ` max="${f.max}"` : "";
+    return `<input type="number" step="${step}"${min}${max} class="edit-input" id="edit-${key}" value="${f.value ?? ""}">`;
+  }
+  return `<input type="text" class="edit-input wide" id="edit-${key}" value="${f.value ?? ""}" ${f.max_len ? `maxlength="${f.max_len}"` : ""}>`;
+}
+
+function readInputValue(f) {
+  const el = document.getElementById(`edit-${pathKey(f.path)}`);
+  if (f.type === "bool") return el.checked;
+  if (f.type === "int") return el.value === "" ? null : parseInt(el.value, 10);
+  if (f.type === "float") return el.value === "" ? null : parseFloat(el.value);
+  return el.value;
+}
+
+function renderEditGroups() {
+  const groups = {};
+  editFields.forEach(f => { (groups[f.group] ||= []).push(f); });
+
+  document.getElementById("editGroups").innerHTML = Object.entries(groups).map(([group, fields]) => `
+    <div class="edit-group-label">${group}</div>
+    ${fields.map(f => `
+      <div class="edit-row">
+        <div class="edit-row-text">
+          <span class="edit-row-label">${f.label}</span>
+          ${f.desc ? `<div class="edit-row-desc">${f.desc}</div>` : ""}
+        </div>
+        <div class="edit-input-wrap">
+          ${inputHtmlFor(f)}
+          ${f.unit ? `<span class="edit-unit">${f.unit}</span>` : ""}
+        </div>
+      </div>
+    `).join("")}
+  `).join("");
+
+  editFields.forEach(f => {
+    const key = pathKey(f.path);
+    editOriginal[key] = f.value;
+    const el = document.getElementById(`edit-${key}`);
+    const eventName = f.type === "bool" || f.type === "choice" || f.type === "time" ? "change" : "input";
+    el.addEventListener(eventName, () => {
+      const current = readInputValue(f);
+      el.classList.toggle("dirty", current !== editOriginal[key]);
+      updateSaveButtonState();
+    });
+  });
+}
+
+function updateSaveButtonState() {
+  const anyDirty = document.querySelectorAll("#editGroups .dirty").length > 0;
+  document.getElementById("editSaveBtn").disabled = !anyDirty;
+}
+
+function showEditBanner(kind, html) {
+  const banner = document.getElementById("editBanner");
+  banner.className = "edit-banner " + kind;
+  banner.innerHTML = html;
+  banner.style.display = "block";
+}
+
+async function loadSettings() {
+  try {
+    const data = await fetch("/api/settings").then(r => r.json());
+    editFields = data.fields;
+    renderEditGroups();
+    updateSaveButtonState();
+  } catch (e) {
+    console.error("Failed to load settings", e);
+  }
+}
+
+async function saveSettings() {
+  const dirtyEls = Array.from(document.querySelectorAll("#editGroups .dirty"));
+  const updates = editFields
+    .filter(f => dirtyEls.some(el => el.id === `edit-${pathKey(f.path)}`))
+    .map(f => ({ path: f.path, value: readInputValue(f) }));
+
+  if (!updates.length) return;
+
+  const btn = document.getElementById("editSaveBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showEditBanner("success", "Saved to <code>config.yaml</code>. <strong>Restart the engine/dashboard</strong> (Ctrl+C, then re-run) for these changes to actually govern trading.");
+      await loadSettings();
+    } else {
+      showEditBanner("error", "Not saved:<br>" + (data.errors || ["Unknown error"]).map(e => `&bull; ${e}`).join("<br>"));
+      updateSaveButtonState();
+    }
+  } catch (e) {
+    showEditBanner("error", "Not saved: request failed (" + e + ")");
+    updateSaveButtonState();
+  } finally {
+    btn.textContent = "Save Changes";
+  }
+}
+
+document.getElementById("editSaveBtn").addEventListener("click", saveSettings);
+loadSettings();
 
 async function refresh() {
   try {

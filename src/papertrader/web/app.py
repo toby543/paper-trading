@@ -16,9 +16,11 @@ import os
 from flask import Flask, jsonify, render_template, request
 
 from ..config import Config
+from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
 from .data_api import build_equity_curve, build_summary, build_trades
 from .filters import indian_currency
+from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,6 +65,56 @@ def create_app(engine: TradingEngine) -> Flask:
     def api_equity_curve():
         limit = request.args.get("limit", default=500, type=int)
         return jsonify(build_equity_curve(engine, limit=limit))
+
+    @app.get("/api/settings")
+    def api_get_settings():
+        fields = []
+        for spec in EDITABLE_SETTINGS:
+            fields.append({**spec, "path": list(spec["path"]), "value": get_value(cfg.raw, spec["path"])})
+        return jsonify({"fields": fields})
+
+    @app.post("/api/settings")
+    def api_update_settings():
+        payload = request.get_json(silent=True) or {}
+        raw_updates = payload.get("updates", [])
+        if not isinstance(raw_updates, list) or not raw_updates:
+            return jsonify({"ok": False, "errors": ["No changes submitted."]}), 400
+
+        coerced = []
+        errors = []
+        for item in raw_updates:
+            path = tuple(item.get("path", []))
+            try:
+                value = coerce_and_validate(path, item.get("value"))
+                coerced.append((list(path), value))
+            except ValueError as exc:
+                errors.append(f"{'.'.join(path)}: {exc}")
+
+        if errors:
+            return jsonify({"ok": False, "errors": errors}), 400
+
+        if not cfg.path:
+            return jsonify({"ok": False, "errors": ["No config file path is known for this running instance."]}), 500
+
+        try:
+            update_config_file(cfg.path, coerced)
+        except Exception as exc:  # noqa: BLE001 - surface any write failure to the UI, don't 500 silently
+            return jsonify({"ok": False, "errors": [f"Failed to save config.yaml: {exc}"]}), 500
+
+        # Reflect the change immediately in this process's in-memory config
+        # so a page refresh shows the new values right away. The running
+        # engine's already-constructed components (RiskManager, PaperBroker,
+        # MarketCalendar, MarketDataClient) were built from copies of the
+        # old values at startup and do NOT pick this up live -- a restart
+        # is still required for the change to actually govern trading,
+        # which the client surfaces after a successful save.
+        for path, value in coerced:
+            node = cfg.raw
+            for key in path[:-1]:
+                node = node.setdefault(key, {})
+            node[path[-1]] = value
+
+        return jsonify({"ok": True, "restart_required": True})
 
     return app
 
