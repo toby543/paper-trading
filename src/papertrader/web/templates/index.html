@@ -155,6 +155,19 @@
   .footer-note { margin-top: 22px; font-size: 11.5px; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .footer-note .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
 
+  /* ---------- strategy rules ---------- */
+  #rulesPanel { margin-top: 20px; }
+  .rules-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 28px; padding: 6px 18px 16px; }
+  .rules-col-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; margin: 10px 0 6px; }
+  .rule { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .rule:last-child { border-bottom: none; }
+  .rule > span:first-child { color: var(--ink-dim); }
+  .rule .mono { font-size: 12px; white-space: nowrap; }
+  .rule .mono.down { color: var(--bad); }
+  @media (max-width: 640px) {
+    .rules-grid { grid-template-columns: 1fr; }
+  }
+
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .stats { grid-template-columns: repeat(3, 1fr); }
@@ -263,6 +276,44 @@
       <div id="tickerBody"></div>
     </div>
 
+  </div>
+
+  <div class="panel" id="rulesPanel">
+    <div class="panel-head">
+      <h2>Strategy Rules</h2>
+      <span class="meta mono">from config.yaml</span>
+    </div>
+    <div class="rules-grid">
+      <div class="rules-col">
+        <div class="rules-col-label">Entry — all must pass</div>
+        <div class="rule"><span>Proximity to 52w high</span><span class="mono">&le; {{ strategy.get('proximity_to_52w_high_pct', '—') }}%</span></div>
+        <div class="rule"><span>Momentum</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
+        <div class="rule"><span>Trend</span><span class="mono">above {{ strategy.get('fast_ma_days', '—') }}&amp;{{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        {% if strategy.get('min_relative_strength_pct') is not none %}
+        <div class="rule"><span>Relative strength vs {{ regime.get('index_symbol', 'index') }}</span><span class="mono">&ge; +{{ strategy.get('min_relative_strength_pct') }}pp</span></div>
+        {% endif %}
+        {% if strategy.get('volume_confirmation', {}).get('enabled') %}
+        <div class="rule"><span>Volume confirmation</span><span class="mono">&ge; {{ strategy.volume_confirmation.get('min_volume_multiple', '—') }}&times; ({{ strategy.volume_confirmation.get('recent_days', '—') }}d/{{ strategy.volume_confirmation.get('baseline_days', '—') }}d)</span></div>
+        {% endif %}
+        {% if regime.get('enabled') %}
+        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+      </div>
+      <div class="rules-col">
+        <div class="rules-col-label">Exit — first to trigger wins</div>
+        <div class="rule"><span>Stop loss</span><span class="mono down">&minus;{{ risk.get('stop_loss_pct', '—') }}% from entry</span></div>
+        <div class="rule"><span>Trailing stop</span><span class="mono down">&minus;{{ risk.get('trailing_stop_pct', '—') }}% from peak close</span></div>
+        {% if risk.get('exit_below_fast_ma') %}
+        <div class="rule"><span>Momentum breakdown</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rules-col-label" style="margin-top: 14px;">Sizing &amp; exposure</div>
+        <div class="rule"><span>Position size</span><span class="mono">{{ risk.get('position_size_pct_of_equity', '—') }}% of equity</span></div>
+        <div class="rule"><span>Max open positions</span><span class="mono">{{ risk.get('max_open_positions', '—') }}</span></div>
+        <div class="rule"><span>Max cash deployed / scan</span><span class="mono">{{ risk.get('max_cash_deployed_per_scan_pct', '—') }}% of free cash</span></div>
+      </div>
+    </div>
   </div>
 
   <div class="footer-note">

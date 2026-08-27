@@ -33,6 +33,9 @@ def create_app(cfg: Config) -> Flask:
             "index.html",
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
+            strategy=cfg.get("strategy", default={}),
+            risk=cfg.get("risk", default={}),
+            regime=cfg.get("regime", default={}),
         )
 
     @app.get("/api/summary")
