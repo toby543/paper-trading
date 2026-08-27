@@ -49,17 +49,24 @@ def cmd_portfolio(args: argparse.Namespace) -> None:
     total_pnl = 0.0
     for symbol, pos in positions.items():
         try:
-            ltp = engine.data.get_quote(symbol).ltp
+            quote = engine.data.get_quote(symbol)
+            ltp = quote.ltp
+            week52_high = quote.week52_high
         except Exception:
             ltp = pos.avg_price
+            week52_high = None
+        if week52_high and week52_high > 0:
+            from_high = f"-{max(0.0, (week52_high - ltp) / week52_high * 100.0):.1f}%"
+        else:
+            from_high = "—"
         mv = pos.market_value(ltp)
         pnl = pos.unrealized_pnl(ltp)
         pnl_pct = pos.unrealized_pnl_pct(ltp)
         total_mv += mv
         total_pnl += pnl
-        rows.append([symbol, pos.quantity, f"{pos.avg_price:.2f}", f"{ltp:.2f}", f"{mv:.2f}", f"{pnl:+.2f}", f"{pnl_pct:+.2f}%"])
+        rows.append([symbol, pos.quantity, f"{pos.avg_price:.2f}", f"{ltp:.2f}", from_high, f"{mv:.2f}", f"{pnl:+.2f}", f"{pnl_pct:+.2f}%"])
 
-    print(tabulate(rows, headers=["Symbol", "Qty", "Avg Price", "LTP", "Mkt Value", "Unrl. P&L", "P&L %"], tablefmt="simple"))
+    print(tabulate(rows, headers=["Symbol", "Qty", "Avg Price", "LTP", "From 52W High", "Mkt Value", "Unrl. P&L", "P&L %"], tablefmt="simple"))
     print()
     print(f"Cash:              ₹{cash:,.2f}")
     print(f"Positions value:   ₹{total_mv:,.2f}")

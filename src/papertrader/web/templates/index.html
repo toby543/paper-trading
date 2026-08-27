@@ -273,7 +273,7 @@
           <table id="positionsTable">
             <thead>
               <tr>
-                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>
+                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>
               </tr>
             </thead>
             <tbody id="positionsBody"></tbody>
@@ -465,17 +465,21 @@ function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">No open positions — the next scan will look for 52-week-high momentum breakouts.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No open positions — the next scan will look for 52-week-high momentum breakouts.</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {
     const peakPct = p.highest_close_since_entry > 0 ? Math.min(100, (p.ltp / p.highest_close_since_entry) * 100) : 100;
+    const fromHigh = p.pct_from_52w_high === null || p.pct_from_52w_high === undefined
+      ? "—"
+      : (p.pct_from_52w_high <= 0.05 ? "At high" : `-${p.pct_from_52w_high.toFixed(1)}%`);
     return `
     <tr>
       <td class="sym">${p.symbol}<span class="exch">NSE</span></td>
       <td class="mono" data-label="Qty">${fmtInt(p.quantity)}</td>
       <td class="mono" data-label="Avg">${fmt(p.avg_price)}</td>
       <td class="mono" data-label="LTP">${fmt(p.ltp)}</td>
+      <td class="mono" data-label="From 52W High" title="${p.week52_high !== null && p.week52_high !== undefined ? "52w high: ₹" + fmt(p.week52_high) : ""}">${fromHigh}</td>
       <td class="mono" data-label="Mkt Value">${fmt(p.market_value)}</td>
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>

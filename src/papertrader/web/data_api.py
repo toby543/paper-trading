@@ -8,11 +8,20 @@ from datetime import datetime
 from ..strategy.momentum_52w_high import is_market_in_uptrend
 
 
-def _safe_ltp(engine, symbol: str, fallback: float) -> float:
+def _safe_quote(engine, symbol: str):
     try:
-        return engine.data.get_quote(symbol).ltp
+        return engine.data.get_quote(symbol)
     except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky quote
-        return fallback
+        return None
+
+
+def _pct_from_52w_high(week52_high: float | None, ltp: float) -> float | None:
+    """How far below its 52-week high the stock is trading, in percent.
+    Clamped at 0 if the quote's LTP is at/above the recorded high (a
+    fresh high the cached 52w figure hasn't caught up to yet)."""
+    if not week52_high or week52_high <= 0:
+        return None
+    return max(0.0, (week52_high - ltp) / week52_high * 100.0)
 
 
 def _market_regime(engine) -> dict:
@@ -37,7 +46,10 @@ def build_summary(engine) -> dict:
     position_rows = []
     positions_value = 0.0
     for symbol, pos in positions.items():
-        ltp = _safe_ltp(engine, symbol, pos.avg_price)
+        quote = _safe_quote(engine, symbol)
+        ltp = quote.ltp if quote else pos.avg_price
+        week52_high = quote.week52_high if quote else None
+        pct_from_high = _pct_from_52w_high(week52_high, ltp)
         mv = pos.market_value(ltp)
         positions_value += mv
         position_rows.append({
@@ -50,6 +62,8 @@ def build_summary(engine) -> dict:
             "unrealized_pnl_pct": round(pos.unrealized_pnl_pct(ltp), 2),
             "entry_date": pos.entry_date,
             "highest_close_since_entry": round(pos.highest_close_since_entry, 2),
+            "week52_high": round(week52_high, 2) if week52_high else None,
+            "pct_from_52w_high": round(pct_from_high, 2) if pct_from_high is not None else None,
         })
 
     total_equity = cash + positions_value
