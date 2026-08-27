@@ -168,6 +168,21 @@
     .rules-grid { grid-template-columns: 1fr; }
   }
 
+  /* ---------- all settings ---------- */
+  #settingsPanel { margin-top: 20px; }
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; padding: 6px 18px 16px; }
+  .settings-col-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; margin: 14px 0 6px; }
+  .settings-col-label:first-child { margin-top: 10px; }
+  .setting { padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .setting:last-child { border-bottom: none; }
+  .setting-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .setting-label { font-size: 12.5px; }
+  .setting-value { font-size: 12px; white-space: nowrap; }
+  .setting-desc { font-size: 11px; color: var(--ink-faint); margin-top: 2px; line-height: 1.4; max-width: 46ch; }
+  @media (max-width: 640px) {
+    .settings-grid { grid-template-columns: 1fr; }
+  }
+
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .stats { grid-template-columns: repeat(3, 1fr); }
@@ -316,8 +331,79 @@
     </div>
   </div>
 
+  <div class="panel" id="settingsPanel">
+    <div class="panel-head">
+      <h2>All Settings</h2>
+      <span class="meta mono">from config.yaml</span>
+    </div>
+    <div class="settings-grid">
+      <div>
+        <div class="settings-col-label">Account</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Starting capital</span><span class="setting-value mono">₹{{ account.get('starting_capital', 0)|inr }}</span></div>
+          <div class="setting-desc">Virtual capital seeded into a fresh ledger. Only applies the first time data/state.db is created — editing this later won't change an existing account's cash.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Ledger file</span><span class="setting-value mono">{{ account.get('state_file', '—') }}</span></div>
+          <div class="setting-desc">SQLite file holding cash, open positions, and the full trade history.</div>
+        </div>
+
+        <div class="settings-col-label">Universe</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Symbol list</span><span class="setting-value mono">{{ universe_cfg.get('file', '—') }}</span></div>
+          <div class="setting-desc">CSV of NSE symbols scanned every cycle. Edit this file to change which stocks are considered — no code changes needed.</div>
+        </div>
+
+        <div class="settings-col-label">Execution realism</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Slippage</span><span class="setting-value mono">{{ execution.get('slippage_bps', '—') }} bps</span></div>
+          <div class="setting-desc">Simulated fills are nudged against you by this many basis points, so paper P&L isn't unrealistically better than a real fill would be.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Flat charges</span><span class="setting-value mono">₹{{ execution.get('flat_charges_inr', 0)|inr }} / order</span></div>
+          <div class="setting-desc">Approximate brokerage + STT charged on every simulated buy and sell.</div>
+        </div>
+      </div>
+      <div>
+        <div class="settings-col-label">Market hours &amp; scheduling</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Session</span><span class="setting-value mono">{{ engine_cfg.get('market_open', '—') }}–{{ engine_cfg.get('market_close', '—') }} {{ engine_cfg.get('timezone', '') }}</span></div>
+          <div class="setting-desc">NSE trading window the engine treats as "market open" — it idles outside these hours and on holidays.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Entry scan interval</span><span class="setting-value mono">every {{ engine_cfg.get('scan_interval_minutes', '—') }} min</span></div>
+          <div class="setting-desc">How often the full universe is re-scanned for new 52-week-high momentum candidates.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Exit check interval</span><span class="setting-value mono">every {{ engine_cfg.get('exit_check_interval_minutes', '—') }} min</span></div>
+          <div class="setting-desc">How often open positions are rechecked for stop-loss / trailing-stop / momentum-breakdown — kept more frequent than entry scans.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Holiday calendar</span><span class="setting-value mono">{{ engine_cfg.get('holidays_file', '—') }}</span></div>
+          <div class="setting-desc">NSE trading holidays the engine treats as market-closed, in addition to weekends.</div>
+        </div>
+
+        <div class="settings-col-label">Data source</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Preferred / fallback</span><span class="setting-value mono">{{ data_source.get('preferred', '—')|upper }} &rarr; {{ data_source.get('fallback', '—')|upper }}</span></div>
+          <div class="setting-desc">NSE's own site is tried first for genuinely live quotes; Yahoo Finance (delayed) is used automatically if NSE is unreachable or blocks the request.</div>
+        </div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Request timeout / retries</span><span class="setting-value mono">{{ data_source.get('request_timeout_seconds', '—') }}s / {{ data_source.get('max_retries', '—') }}</span></div>
+          <div class="setting-desc">How long a single price request waits before giving up, and how many attempts before falling back.</div>
+        </div>
+
+        <div class="settings-col-label">Logging</div>
+        <div class="setting">
+          <div class="setting-top"><span class="setting-label">Log file / level</span><span class="setting-value mono">{{ logging_cfg.get('file', '—') }} ({{ logging_cfg.get('level', '—') }})</span></div>
+          <div class="setting-desc">Where scan activity, buys/sells, and warnings get written. Set to DEBUG for more detail while troubleshooting.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="footer-note">
-    <span>Simulated fills · slippage {{ slippage_bps }}bps · ₹{{ "%.0f"|format(flat_charges_inr) }} flat charge</span>
+    <span>Simulated fills · slippage {{ slippage_bps }}bps · ₹{{ flat_charges_inr|inr }} flat charge</span>
     <span class="sep"></span>
     <span>Momentum · 52-week-high strategy</span>
     <span class="sep"></span>

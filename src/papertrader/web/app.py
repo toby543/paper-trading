@@ -18,6 +18,7 @@ from flask import Flask, jsonify, render_template, request
 from ..config import Config
 from ..engine.scheduler import TradingEngine
 from .data_api import build_equity_curve, build_summary, build_trades
+from .filters import indian_currency
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,6 +29,7 @@ def create_app(engine: TradingEngine) -> Flask:
         template_folder=os.path.join(_HERE, "templates"),
         static_folder=os.path.join(_HERE, "static"),
     )
+    app.jinja_env.filters["inr"] = indian_currency
     app.config["ENGINE"] = engine
     cfg = engine.cfg
 
@@ -40,6 +42,12 @@ def create_app(engine: TradingEngine) -> Flask:
             strategy=cfg.get("strategy", default={}),
             risk=cfg.get("risk", default={}),
             regime=cfg.get("regime", default={}),
+            account=cfg.get("account", default={}),
+            universe_cfg=cfg.get("universe", default={}),
+            execution=cfg.get("execution", default={}),
+            engine_cfg=cfg.get("engine", default={}),
+            data_source=cfg.get("data_source", default={}),
+            logging_cfg=cfg.get("logging", default={}),
         )
 
     @app.get("/api/summary")
