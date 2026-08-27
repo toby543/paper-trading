@@ -1,9 +1,13 @@
 """Local read-only web dashboard for the paper trading account.
 
-Runs as its own process, reading the same SQLite ledger the trading
-engine (`python main.py run`) writes to. It does not place trades
-itself; it only displays live-marked positions, P&L, the equity curve
-and the trade history, refreshing itself every few seconds in-browser.
+Normally runs as its own process, reading the same SQLite ledger the
+trading engine (`python main.py run`) writes to -- it does not place
+trades itself; it only displays live-marked positions, P&L, the equity
+curve and the trade history, refreshing itself every few seconds in
+the browser. `create_app()` takes an existing TradingEngine so it can
+also be embedded in the same process as the engine (see
+`python main.py serve`, cli.py) sharing one engine instance instead of
+constructing a second one.
 """
 from __future__ import annotations
 
@@ -18,14 +22,14 @@ from .data_api import build_equity_curve, build_summary, build_trades
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def create_app(cfg: Config) -> Flask:
+def create_app(engine: TradingEngine) -> Flask:
     app = Flask(
         __name__,
         template_folder=os.path.join(_HERE, "templates"),
         static_folder=os.path.join(_HERE, "static"),
     )
-    engine = TradingEngine(cfg)
     app.config["ENGINE"] = engine
+    cfg = engine.cfg
 
     @app.get("/")
     def index():
@@ -56,5 +60,6 @@ def create_app(cfg: Config) -> Flask:
 
 
 def run_dashboard(cfg: Config, host: str = "127.0.0.1", port: int = 8000, debug: bool = False) -> None:
-    app = create_app(cfg)
+    engine = TradingEngine(cfg)
+    app = create_app(engine)
     app.run(host=host, port=port, debug=debug)

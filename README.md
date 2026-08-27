@@ -113,6 +113,20 @@ View trade history:
 python main.py history --limit 100
 ```
 
+### Run the engine and dashboard together
+
+```bash
+python main.py serve                    # http://127.0.0.1:8000
+python main.py serve --host 0.0.0.0 --port 8080
+```
+
+Runs the autonomous trading loop in a background thread and the web
+dashboard in the same process/terminal, sharing one `TradingEngine`
+instance — one command instead of two terminals. Ctrl+C stops both.
+This is the simplest way to run everything; use `run` and `web`
+separately (below) only if you specifically want them as independent
+processes (e.g. the engine on a server, the dashboard on your laptop).
+
 ### Web dashboard
 
 ```bash

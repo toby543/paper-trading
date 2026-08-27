@@ -5,6 +5,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 
 from tabulate import tabulate
 
@@ -74,6 +75,27 @@ def cmd_web(args: argparse.Namespace) -> None:
     run_dashboard(cfg, host=args.host, port=args.port)
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Run the autonomous trading loop and the web dashboard together in
+    one process: the engine loop runs in a background thread, the
+    dashboard's Flask server runs (blocking) in the main thread and
+    shares the same TradingEngine instance, so there's nothing else to
+    start separately -- Ctrl+C stops both."""
+    cfg = Config.load(args.config)
+    _setup_logging(cfg)
+    engine = TradingEngine(cfg)
+
+    engine_thread = threading.Thread(target=engine.run_forever, name="trading-engine", daemon=True)
+    engine_thread.start()
+
+    from .web.app import create_app
+
+    app = create_app(engine)
+    # use_reloader must stay off: Flask's reloader forks a second process,
+    # which would start a second copy of the engine thread too.
+    app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
+
+
 def cmd_history(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     engine = TradingEngine(cfg)
@@ -95,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8000)
     web.set_defaults(func=cmd_web)
+
+    serve = sub.add_parser("serve", help="Run the autonomous trading loop AND the web dashboard together, in one command")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.set_defaults(func=cmd_serve)
 
     hist = sub.add_parser("history", help="Show trade history")
     hist.add_argument("--limit", type=int, default=50)
