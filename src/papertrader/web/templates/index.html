@@ -219,6 +219,16 @@
   .edit-banner { margin: 12px 18px 0; padding: 10px 14px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; }
   .edit-banner.success { background: var(--good-wash); color: var(--good); }
   .edit-banner.error { background: var(--bad-wash); color: var(--bad); }
+  .edit-panel-head { cursor: pointer; user-select: none; }
+  .edit-collapse-toggle { display: flex; align-items: center; gap: 10px; }
+  .edit-collapse-btn {
+    background: none; border: none; color: var(--ink-faint); cursor: pointer;
+    font-size: 11px; line-height: 1; padding: 4px; border-radius: 3px;
+    transition: transform 0.15s ease;
+  }
+  .edit-collapse-btn:hover { color: var(--ink); background: var(--surface-2); }
+  #editPanel.collapsed .edit-collapse-btn { transform: rotate(180deg); }
+  #editPanel.collapsed #editBody { display: none; }
   @media (max-width: 640px) {
     .edit-groups { grid-template-columns: 1fr; }
     .edit-row { flex-wrap: wrap; }
@@ -444,15 +454,20 @@
   </div>
 
   <div class="panel" id="editPanel">
-    <div class="panel-head">
+    <div class="panel-head edit-panel-head" id="editPanelHead">
       <h2>Edit Settings</h2>
-      <span class="meta mono" id="editMeta">writes to config.yaml</span>
+      <span class="edit-collapse-toggle">
+        <span class="meta mono" id="editMeta">writes to config.yaml</span>
+        <button id="editCollapseBtn" class="edit-collapse-btn" aria-expanded="true" aria-controls="editBody" title="Collapse">&#9650;</button>
+      </span>
     </div>
-    <div id="editBanner" class="edit-banner" style="display:none;"></div>
-    <div id="editGroups" class="edit-groups"></div>
-    <div class="edit-actions">
-      <span id="editHint" class="edit-hint">Changes are saved to config.yaml but only take effect after you restart the engine/dashboard.</span>
-      <button id="editSaveBtn" class="edit-save-btn" disabled>Save Changes</button>
+    <div id="editBody">
+      <div id="editBanner" class="edit-banner" style="display:none;"></div>
+      <div id="editGroups" class="edit-groups"></div>
+      <div class="edit-actions">
+        <span id="editHint" class="edit-hint">Changes are saved to config.yaml but only take effect after you restart the engine/dashboard.</span>
+        <button id="editSaveBtn" class="edit-save-btn" disabled>Save Changes</button>
+      </div>
     </div>
   </div>
 
@@ -770,6 +785,37 @@ async function saveSettings() {
 
 document.getElementById("editSaveBtn").addEventListener("click", saveSettings);
 loadSettings();
+
+// ---- Collapse/expand the Edit Settings panel, remembered per-browser ----
+const EDIT_COLLAPSE_KEY = "papertrader.editSettingsCollapsed";
+
+function setEditCollapsed(collapsed) {
+  const panel = document.getElementById("editPanel");
+  const btn = document.getElementById("editCollapseBtn");
+  panel.classList.toggle("collapsed", collapsed);
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.title = collapsed ? "Expand" : "Collapse";
+  try {
+    localStorage.setItem(EDIT_COLLAPSE_KEY, collapsed ? "1" : "0");
+  } catch (e) {
+    // localStorage unavailable (private browsing, blocked site data, etc.) -- fine, just won't persist.
+  }
+}
+
+document.getElementById("editPanelHead").addEventListener("click", () => {
+  const panel = document.getElementById("editPanel");
+  setEditCollapsed(!panel.classList.contains("collapsed"));
+});
+
+(function restoreEditCollapsedState() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(EDIT_COLLAPSE_KEY);
+  } catch (e) {
+    // ignore -- default to expanded below
+  }
+  if (saved === "1") setEditCollapsed(true);
+})();
 
 async function refresh() {
   try {
