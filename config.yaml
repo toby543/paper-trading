@@ -59,6 +59,11 @@ risk:
   stop_loss_pct: 7.0
   # Trailing stop from the highest close recorded since entry.
   trailing_stop_pct: 10.0
+  # Optional hard take-profit: sell once price is this many percent above
+  # entry, regardless of trend. 0 = disabled (the default) -- momentum
+  # strategies are usually better served by the trailing stop above
+  # ("let winners run") than by capping upside at a fixed target.
+  take_profit_pct: 0
   # Exit if price closes below the fast moving average (momentum breakdown).
   exit_below_fast_ma: true
   # Never let a single scan commit more than this fraction of free cash.

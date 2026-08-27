@@ -34,10 +34,14 @@ rather than blocking every trade) if the underlying index/volume data
 can't be fetched for a given scan.
 
 Positions are exited on a **hard stop-loss** from entry, a **trailing
-stop** from the highest close since entry, or a **momentum breakdown**
-(close falls below the 50-day moving average) — whichever comes first.
-Exits always apply regardless of market regime (see below) — only new
-entries are gated.
+stop** from the highest close since entry, a **momentum breakdown**
+(close falls below the 50-day moving average), or an optional **take
+profit** target — whichever comes first. Take profit is off by default
+(`risk.take_profit_pct: 0`): momentum strategies are usually better
+served by the trailing stop's "let winners run" behavior than by
+capping upside at a fixed target, but it's there if you want a hard
+sell target anyway. Exits always apply regardless of market regime
+(see below) — only new entries are gated.
 
 **Market regime filter:** momentum strategies get badly hurt trading
 through a falling market, so by default new entries only happen while

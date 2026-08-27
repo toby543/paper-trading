@@ -184,6 +184,16 @@ def is_market_in_uptrend(index_history: pd.DataFrame, ma_days: int) -> bool:
 
 def check_exit(position: Position, quote: Quote, history: pd.DataFrame, cfg: dict) -> tuple[bool, str]:
     """Return (should_exit, reason)."""
+    # Optional hard take-profit. Off by default (0 or absent) -- momentum
+    # strategies are usually better served by the trailing stop below
+    # ("let winners run") than by capping upside at a fixed target, but
+    # it's here for anyone who wants one anyway.
+    take_profit_pct = cfg.get("take_profit_pct")
+    if take_profit_pct:
+        take_profit_price = position.avg_price * (1 + take_profit_pct / 100.0)
+        if quote.ltp >= take_profit_price:
+            return True, f"take_profit (+{take_profit_pct}% above entry {position.avg_price:.2f})"
+
     stop_loss_price = position.avg_price * (1 - cfg["stop_loss_pct"] / 100.0)
     if quote.ltp <= stop_loss_price:
         return True, f"stop_loss ({cfg['stop_loss_pct']}% below entry {position.avg_price:.2f})"

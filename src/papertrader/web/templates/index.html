@@ -373,6 +373,9 @@
       </div>
       <div class="rules-col">
         <div class="rules-col-label">Exit — first to trigger wins</div>
+        {% if risk.get('take_profit_pct') %}
+        <div class="rule"><span>Take profit</span><span class="mono up">+{{ risk.get('take_profit_pct') }}% from entry</span></div>
+        {% endif %}
         <div class="rule"><span>Stop loss</span><span class="mono down">&minus;{{ risk.get('stop_loss_pct', '—') }}% from entry</span></div>
         <div class="rule"><span>Trailing stop</span><span class="mono down">&minus;{{ risk.get('trailing_stop_pct', '—') }}% from peak close</span></div>
         {% if risk.get('exit_below_fast_ma') %}

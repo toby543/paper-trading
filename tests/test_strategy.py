@@ -196,3 +196,45 @@ def test_new_filters_are_backward_compatible_when_absent():
     assert cand is not None
     assert cand.relative_strength_pct is None
     assert cand.volume_multiple is None
+
+
+def test_take_profit_disabled_by_default_even_on_huge_gain():
+    hist = _uptrend_history()
+    pos = Position(symbol="TEST", quantity=10, avg_price=100.0, entry_date="2026-01-01", highest_close_since_entry=100.0)
+    quote = Quote(symbol="TEST", ltp=200.0, prev_close=195, week52_high=210, week52_low=90,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {"stop_loss_pct": 7.0, "trailing_stop_pct": 90.0, "exit_below_fast_ma": False, "take_profit_pct": 0}
+    should_exit, reason = check_exit(pos, quote, hist, cfg)
+    assert not should_exit
+
+
+def test_take_profit_triggers_at_target():
+    hist = _uptrend_history()
+    pos = Position(symbol="TEST", quantity=10, avg_price=100.0, entry_date="2026-01-01", highest_close_since_entry=100.0)
+    quote = Quote(symbol="TEST", ltp=125.0, prev_close=124, week52_high=130, week52_low=90,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {"stop_loss_pct": 7.0, "trailing_stop_pct": 90.0, "exit_below_fast_ma": False, "take_profit_pct": 25.0}
+    should_exit, reason = check_exit(pos, quote, hist, cfg)
+    assert should_exit
+    assert "take_profit" in reason
+
+
+def test_take_profit_does_not_trigger_below_target():
+    hist = _uptrend_history()
+    pos = Position(symbol="TEST", quantity=10, avg_price=100.0, entry_date="2026-01-01", highest_close_since_entry=100.0)
+    quote = Quote(symbol="TEST", ltp=120.0, prev_close=118, week52_high=130, week52_low=90,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {"stop_loss_pct": 7.0, "trailing_stop_pct": 90.0, "exit_below_fast_ma": False, "take_profit_pct": 25.0}
+    should_exit, reason = check_exit(pos, quote, hist, cfg)
+    assert not should_exit
+
+
+def test_stop_loss_still_works_when_take_profit_enabled():
+    hist = _uptrend_history()
+    pos = Position(symbol="TEST", quantity=10, avg_price=100.0, entry_date="2026-01-01", highest_close_since_entry=100.0)
+    quote = Quote(symbol="TEST", ltp=90.0, prev_close=92, week52_high=105, week52_low=85,
+                  volume=1_000_000, timestamp=datetime.now(), source="test")
+    cfg = {"stop_loss_pct": 7.0, "trailing_stop_pct": 90.0, "exit_below_fast_ma": False, "take_profit_pct": 25.0}
+    should_exit, reason = check_exit(pos, quote, hist, cfg)
+    assert should_exit
+    assert "stop_loss" in reason
