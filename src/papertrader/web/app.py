@@ -18,6 +18,7 @@ from flask import Flask, jsonify, render_template, request
 from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
+from .backtest_jobs import get_job, start_backtest_job
 from .data_api import build_candidates, build_equity_curve, build_summary, build_trades
 from .filters import indian_currency
 from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
@@ -75,6 +76,28 @@ def create_app(engine: TradingEngine) -> Flask:
         # it runs.
         limit = request.args.get("limit", default=20, type=int)
         return jsonify(build_candidates(engine, limit=limit))
+
+    @app.post("/api/backtest/run")
+    def api_backtest_run():
+        payload = request.get_json(silent=True) or {}
+        start = (payload.get("start") or "").strip()
+        end = (payload.get("end") or "").strip()
+        universe_file = (payload.get("universe_file") or "").strip() or None
+        if not start or not end:
+            return jsonify({"ok": False, "error": "Start and end dates are both required."}), 400
+        # Backtester itself validates start < end etc., but that happens
+        # inside the background thread (see backtest_jobs.py) -- any such
+        # error surfaces via the job's "error" status on the next poll,
+        # not as a synchronous 400 here.
+        job_id = start_backtest_job(cfg, start, end, universe_file=universe_file)
+        return jsonify({"ok": True, "job_id": job_id})
+
+    @app.get("/api/backtest/status/<job_id>")
+    def api_backtest_status(job_id: str):
+        job = get_job(job_id)
+        if job is None:
+            return jsonify({"ok": False, "error": "Unknown or expired job id."}), 404
+        return jsonify({"ok": True, "job": job})
 
     @app.get("/api/settings")
     def api_get_settings():

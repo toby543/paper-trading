@@ -19,6 +19,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -70,13 +71,24 @@ def _avg_daily_turnover(history: pd.DataFrame, days: int = 20) -> float:
 
 
 class Backtester:
-    def __init__(self, cfg: Config, start: str, end: str, lookback_buffer_days: int = 420):
+    def __init__(
+        self,
+        cfg: Config,
+        start: str,
+        end: str,
+        lookback_buffer_days: int = 420,
+        on_progress: Optional[Callable[[str, int, int], None]] = None,
+    ):
         self.cfg = cfg
         self.start = pd.Timestamp(start)
         self.end = pd.Timestamp(end)
         if self.end <= self.start:
             raise ValueError(f"end ({end}) must be after start ({start})")
         self.lookback_buffer_days = lookback_buffer_days
+        # Optional (stage, current, total) callback -- lets a caller (e.g.
+        # the web dashboard, running this in a background thread) surface
+        # progress without coupling this module to Flask/threading at all.
+        self._on_progress = on_progress or (lambda stage, current, total: None)
 
         self.strategy_cfg = cfg.get("strategy", default={})
         self.risk_cfg = cfg.get("risk", default={})
@@ -139,6 +151,7 @@ class Backtester:
                     self._history[symbol] = df
             except Exception as exc:  # noqa: BLE001 - one bad symbol must not abort the whole backtest
                 log.debug("Skipping %s: %s", symbol, exc)
+            self._on_progress("fetch", i + 1, len(self.universe))
             if (i + 1) % 50 == 0:
                 log.info("Fetch progress: %d/%d symbols (%d resolved so far)", i + 1, len(self.universe), len(self._history))
 
@@ -289,6 +302,7 @@ class Backtester:
             self._run_exits(day, trade_pnls, trade_log)
             self._run_entries(day, trade_log)
             equity_curve.append((str(day.date()), self._mark_to_market(day)))
+            self._on_progress("simulate", i + 1, len(trading_days))
             if (i + 1) % 50 == 0:
                 log.info("Backtest progress: %d/%d trading days simulated", i + 1, len(trading_days))
 

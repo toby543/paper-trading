@@ -150,6 +150,15 @@ A local, read-only dashboard (Flask) showing live-marked open positions,
 unrealized P&L, an equity curve, and recent trade history, self-refreshing
 every 10 seconds, with a responsive layout that works on a phone.
 
+Its **Backtest** panel runs the same replay as `python main.py backtest`
+(below) without leaving the browser: pick a start/end date and universe
+(default or Nifty 500), click "Run Backtest", and watch a live progress
+bar (fetch phase, then day-by-day simulation) followed by the same
+summary stats, equity curve, and trade log the CLI prints. It runs as a
+background job on the server so the page stays responsive while a long
+backtest is in flight — polling every 1.5s — and, like the Scanner
+Watchlist, is deliberately on-demand rather than auto-run.
+
 Its **Scanner Watchlist** panel previews which stocks currently qualify
 for the next buy scan — without placing any trades — via a "Scan Now"
 button. It's deliberately manual, not auto-refreshed like the rest of

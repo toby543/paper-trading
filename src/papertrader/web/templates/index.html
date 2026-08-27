@@ -227,6 +227,25 @@
   .edit-banner { margin: 12px 18px 0; padding: 10px 14px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; }
   .edit-banner.success { background: var(--good-wash); color: var(--good); }
   .edit-banner.error { background: var(--bad-wash); color: var(--bad); }
+  /* ---------- backtest ---------- */
+  #backtestPanel { margin-top: 20px; }
+  .backtest-form { display: flex; align-items: flex-end; gap: 14px; padding: 14px 18px; flex-wrap: wrap; }
+  .backtest-field { display: flex; flex-direction: column; gap: 5px; }
+  .backtest-field label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; }
+  .backtest-progress-wrap { display: flex; align-items: center; gap: 12px; padding: 0 18px 16px; }
+  .backtest-progress-bar { flex: 1; height: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .backtest-progress-bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.3s ease; }
+  #backtestProgressText { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; }
+  .backtest-stats { grid-template-columns: repeat(6, 1fr); margin: 0 18px 0; width: auto; }
+  #btTradesTable { margin-top: 4px; }
+  @media (max-width: 900px) {
+    .backtest-stats { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .backtest-stats { grid-template-columns: repeat(2, 1fr); }
+    .backtest-form { flex-direction: column; align-items: stretch; }
+  }
+
   .collapsible-head { cursor: pointer; user-select: none; }
   .collapse-toggle { display: flex; align-items: center; gap: 10px; }
   .collapse-btn {
@@ -377,6 +396,87 @@
             <tr class="empty-row"><td colspan="7">Click "Scan Now" to see which stocks currently qualify.</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="backtestPanel">
+    <div class="panel-head collapsible-head" id="backtestPanelHead">
+      <h2>Backtest</h2>
+      <span class="collapse-toggle">
+        <span class="meta mono" id="backtestMeta">not run yet</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="backtestBody" title="Collapse">&#9650;</button>
+      </span>
+    </div>
+    <div id="backtestBody" class="panel-body-collapsible">
+      <div class="watchlist-hint" style="padding: 14px 18px 0;">
+        Replays the exact same strategy/exit logic against historical daily bars instead of trading live —
+        see how a date range or the wider Nifty 500 universe would have performed. Fetches a full price
+        history up front and can take a while for a long range or the larger universe.
+      </div>
+      <div class="backtest-form">
+        <div class="backtest-field">
+          <label for="btStart">Start</label>
+          <input type="date" id="btStart" class="edit-input wide">
+        </div>
+        <div class="backtest-field">
+          <label for="btEnd">End</label>
+          <input type="date" id="btEnd" class="edit-input wide">
+        </div>
+        <div class="backtest-field">
+          <label for="btUniverse">Universe</label>
+          <select id="btUniverse" class="edit-input wide">
+            <option value="data/universe.csv" {{ 'selected' if universe_cfg.get('file', 'data/universe.csv') == 'data/universe.csv' else '' }}>Default (data/universe.csv)</option>
+            <option value="data/universe_nifty500.csv" {{ 'selected' if universe_cfg.get('file') == 'data/universe_nifty500.csv' else '' }}>Nifty 500 (data/universe_nifty500.csv)</option>
+          </select>
+        </div>
+        <button id="backtestRunBtn" class="edit-save-btn">Run Backtest</button>
+      </div>
+      <div id="backtestBanner" class="edit-banner" style="display:none;"></div>
+      <div id="backtestProgressWrap" class="backtest-progress-wrap" style="display:none;">
+        <div class="backtest-progress-bar"><i id="backtestProgressFill"></i></div>
+        <span class="mono" id="backtestProgressText"></span>
+      </div>
+      <div id="backtestResults" style="display:none;">
+        <div class="stats backtest-stats">
+          <div class="stat hero">
+            <div class="label">Total Return</div>
+            <div class="value mono" id="btTotalReturn">—</div>
+            <div class="sub mono" id="btEquity">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">CAGR</div>
+            <div class="value mono" id="btCagr">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Max Drawdown</div>
+            <div class="value mono down" id="btDrawdown">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Round-trip Trades</div>
+            <div class="value mono" id="btTrades">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Win Rate</div>
+            <div class="value mono" id="btWinRate">—</div>
+          </div>
+          <div class="stat">
+            <div class="label">Avg Win / Loss</div>
+            <div class="value mono" id="btAvgWinLoss" style="font-size: 14px;">—</div>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-legend" id="btChartLegend"></div>
+          <canvas id="btEquityCanvas"></canvas>
+        </div>
+        <div class="table-scroll">
+          <table id="btTradesTable">
+            <thead>
+              <tr><th>Date</th><th>Side</th><th>Symbol</th><th>Qty</th><th>Price</th><th>P&amp;L</th><th>Reason</th></tr>
+            </thead>
+            <tbody id="btTradesBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -641,8 +741,14 @@ function renderTrades(trades) {
   `).join("");
 }
 
-function renderEquityChart(curve) {
-  const canvas = document.getElementById("equityCanvas");
+function renderEquityChart(curve, opts) {
+  opts = opts || {};
+  const canvasId = opts.canvasId || "equityCanvas";
+  const legendId = opts.legendId || "chartLegend";
+  const metaId = "metaId" in opts ? opts.metaId : "equityMeta";
+  const emptyMessage = opts.emptyMessage || "Not enough equity history yet — check back after the next scan.";
+
+  const canvas = document.getElementById(canvasId);
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.parentElement.clientWidth;
   const cssH = 168;
@@ -658,19 +764,21 @@ function renderEquityChart(curve) {
   const inkFaint = styles.getPropertyValue("--ink-faint").trim();
 
   if (curve.length < 2) {
-    document.getElementById("chartLegend").innerHTML = "";
-    document.getElementById("equityMeta").textContent = "awaiting history";
+    document.getElementById(legendId).innerHTML = "";
+    const metaEl = document.getElementById(metaId);
+    if (metaEl) metaEl.textContent = "awaiting history";
     ctx.fillStyle = inkFaint;
     ctx.font = "12px 'IBM Plex Sans', sans-serif";
-    ctx.fillText("Not enough equity history yet — check back after the next scan.", 4, cssH / 2);
+    ctx.fillText(emptyMessage, 4, cssH / 2);
     return;
   }
 
   const series = curve.map(p => p.total_equity);
   const last = series[series.length - 1];
   const peak = Math.max(...series);
-  document.getElementById("equityMeta").textContent = "since " + shortDate(curve[0].timestamp);
-  document.getElementById("chartLegend").innerHTML =
+  const metaEl = document.getElementById(metaId);
+  if (metaEl) metaEl.textContent = "since " + shortDate(curve[0].timestamp);
+  document.getElementById(legendId).innerHTML =
     `<span>Total equity — <b class="mono">₹${fmt(last)}</b></span><span>Peak — <b class="mono">₹${fmt(peak)}</b></span>`;
 
   const padL = 4, padR = 4, padT = 10, padB = 18;
@@ -887,6 +995,153 @@ makeCollapsible("rulesPanel", "rulesPanelHead", "papertrader.rulesPanelCollapsed
 makeCollapsible("settingsPanel", "settingsPanelHead", "papertrader.settingsPanelCollapsed");
 makeCollapsible("editPanel", "editPanelHead", "papertrader.editSettingsCollapsed");
 makeCollapsible("watchlistPanel", "watchlistPanelHead", "papertrader.watchlistPanelCollapsed");
+makeCollapsible("backtestPanel", "backtestPanelHead", "papertrader.backtestPanelCollapsed");
+
+// ---- Backtest: run the strategy against historical data on demand ------
+let backtestPollTimer = null;
+
+function defaultBacktestDates() {
+  const end = new Date();
+  const start = new Date();
+  start.setFullYear(start.getFullYear() - 1);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  document.getElementById("btEnd").value = iso(end);
+  document.getElementById("btStart").value = iso(start);
+}
+defaultBacktestDates();
+
+function showBacktestBanner(kind, html) {
+  const banner = document.getElementById("backtestBanner");
+  banner.className = "edit-banner " + kind;
+  banner.innerHTML = html;
+  banner.style.display = "block";
+}
+
+function renderBacktestResult(result) {
+  document.getElementById("backtestResults").style.display = "block";
+  document.getElementById("btTotalReturn").textContent = (result.total_return_pct >= 0 ? "+" : "") + result.total_return_pct.toFixed(2) + "%";
+  document.getElementById("btTotalReturn").className = "value mono " + pnlClass(result.total_return_pct);
+  document.getElementById("btEquity").textContent = "₹" + fmt(result.starting_capital) + " → ₹" + fmt(result.ending_equity);
+  document.getElementById("btCagr").textContent = (result.cagr_pct >= 0 ? "+" : "") + result.cagr_pct.toFixed(2) + "%";
+  document.getElementById("btDrawdown").textContent = "-" + result.max_drawdown_pct.toFixed(2) + "%";
+  document.getElementById("btTrades").textContent = fmtInt(result.num_round_trips);
+  document.getElementById("btWinRate").textContent = result.win_rate_pct.toFixed(1) + "%";
+  document.getElementById("btAvgWinLoss").innerHTML =
+    `<span class="up">+${fmt(result.avg_win_inr)}</span> / <span class="down">${fmt(result.avg_loss_inr)}</span>`;
+
+  const curve = result.equity_curve.map(([date, equity]) => ({ timestamp: date, total_equity: equity }));
+  renderEquityChart(curve, {
+    canvasId: "btEquityCanvas", legendId: "btChartLegend", metaId: null,
+    emptyMessage: "No equity curve points for this range.",
+  });
+
+  const tbody = document.getElementById("btTradesBody");
+  if (!result.trade_log.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No trades over this date range — the strategy's filters didn't find a qualifying entry.</td></tr>`;
+  } else {
+    tbody.innerHTML = result.trade_log.map(t => `
+      <tr>
+        <td class="mono">${t.date}</td>
+        <td><span class="badge-side ${t.side.toLowerCase()}">${t.side}</span></td>
+        <td class="sym">${t.symbol}</td>
+        <td class="mono">${fmtInt(t.qty)}</td>
+        <td class="mono">${fmt(t.price)}</td>
+        <td class="mono ${t.pnl === null ? "" : pnlClass(t.pnl)}">${t.pnl === null ? "—" : (t.pnl >= 0 ? "+" : "") + fmt(t.pnl)}</td>
+        <td>${t.reason}</td>
+      </tr>
+    `).join("");
+  }
+
+  document.getElementById("backtestMeta").textContent =
+    `${result.start_date} → ${result.end_date} · ${result.symbols_with_data} symbols · ${result.num_round_trips} trades`;
+}
+
+function pollBacktestJob(jobId) {
+  clearInterval(backtestPollTimer);
+  backtestPollTimer = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/backtest/status/${jobId}`);
+      const data = await res.json();
+      if (!data.ok) {
+        clearInterval(backtestPollTimer);
+        showBacktestBanner("error", "Backtest failed: " + (data.error || "unknown error"));
+        resetBacktestButton();
+        return;
+      }
+      const job = data.job;
+      if (job.status === "running") {
+        const total = job.progress_total || 0;
+        const current = job.progress_current || 0;
+        const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+        document.getElementById("backtestProgressFill").style.width = pct.toFixed(0) + "%";
+        const stageLabel = job.stage === "fetch" ? "Fetching price history" : job.stage === "simulate" ? "Simulating trading days" : "Starting";
+        document.getElementById("backtestProgressText").textContent =
+          total > 0 ? `${stageLabel}: ${current}/${total}` : stageLabel + "…";
+      } else if (job.status === "done") {
+        clearInterval(backtestPollTimer);
+        document.getElementById("backtestProgressWrap").style.display = "none";
+        renderBacktestResult(job.result);
+        resetBacktestButton();
+      } else if (job.status === "error") {
+        clearInterval(backtestPollTimer);
+        document.getElementById("backtestProgressWrap").style.display = "none";
+        showBacktestBanner("error", "Backtest failed: " + (job.error || "unknown error"));
+        resetBacktestButton();
+      }
+    } catch (e) {
+      clearInterval(backtestPollTimer);
+      showBacktestBanner("error", "Lost contact with the backtest job: " + e);
+      resetBacktestButton();
+    }
+  }, 1500);
+}
+
+function resetBacktestButton() {
+  const btn = document.getElementById("backtestRunBtn");
+  btn.disabled = false;
+  btn.textContent = "Run Backtest";
+}
+
+async function runBacktest() {
+  const start = document.getElementById("btStart").value;
+  const end = document.getElementById("btEnd").value;
+  const universeFile = document.getElementById("btUniverse").value;
+  if (!start || !end) {
+    showBacktestBanner("error", "Pick both a start and an end date.");
+    return;
+  }
+
+  const btn = document.getElementById("backtestRunBtn");
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  document.getElementById("backtestBanner").style.display = "none";
+  document.getElementById("backtestResults").style.display = "none";
+  document.getElementById("backtestProgressWrap").style.display = "flex";
+  document.getElementById("backtestProgressFill").style.width = "0%";
+  document.getElementById("backtestProgressText").textContent = "Starting…";
+
+  try {
+    const res = await fetch("/api/backtest/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start, end, universe_file: universeFile }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showBacktestBanner("error", "Could not start backtest: " + (data.error || "unknown error"));
+      document.getElementById("backtestProgressWrap").style.display = "none";
+      resetBacktestButton();
+      return;
+    }
+    pollBacktestJob(data.job_id);
+  } catch (e) {
+    showBacktestBanner("error", "Could not start backtest: " + e);
+    document.getElementById("backtestProgressWrap").style.display = "none";
+    resetBacktestButton();
+  }
+}
+
+document.getElementById("backtestRunBtn").addEventListener("click", runBacktest);
 
 // ---- Scanner Watchlist: on-demand preview of current buy candidates ----
 function renderWatchlistNote(data) {
