@@ -189,7 +189,22 @@ All thresholds live in `config.yaml`:
 - `strategy.fast_ma_days` / `slow_ma_days` — trend-confirmation moving averages.
 - `risk.stop_loss_pct` / `trailing_stop_pct` — exit rules.
 - `risk.position_size_pct_of_equity` / `max_open_positions` — sizing & diversification.
-- `universe.file` — edit `data/universe.csv` to change which NSE stocks are scanned.
+- `universe.file` — edit `data/universe.csv` to change which NSE stocks are scanned,
+  or point it at `data/universe_nifty500.csv` (~495 symbols, included) for much
+  broader coverage:
+  ```yaml
+  universe:
+    file: data/universe_nifty500.csv
+  ```
+  A bigger universe means more candidates to evaluate each scan (roughly
+  proportionally slower — see the network/performance notes above) but a
+  better chance of finding something that clears every filter on a given day.
+  **Caveat:** this list was hand-compiled from training knowledge, not pulled
+  live from NSE, so it's an approximation of the real Nifty 500 and will drift
+  as the index gets periodically rebalanced. A stale/incorrect symbol just
+  gets silently skipped during a scan (no crash) — but if you want it exact,
+  cross-check or replace it with NSE's official current list (downloadable
+  from niftyindices.com).
 
 ## Testing
 
