@@ -106,6 +106,43 @@ def cmd_serve(args: argparse.Namespace) -> None:
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
 
 
+def cmd_backtest(args: argparse.Namespace) -> None:
+    cfg = Config.load(args.config)
+    _setup_logging(cfg)
+    from .backtest.engine import Backtester
+
+    bt = Backtester(cfg, start=args.start, end=args.end)
+    print(f"Backtesting {args.start} -> {args.end} against {len(bt.universe)} symbols "
+          f"(this fetches full history per symbol and can take a while)...")
+    result = bt.run()
+
+    print()
+    print(f"Backtest: {result.start_date} -> {result.end_date} ({result.trading_days} trading days, "
+          f"{result.symbols_with_data}/{len(bt.universe)} symbols had usable data)")
+    print(f"Starting capital:    ₹{result.starting_capital:,.2f}")
+    print(f"Ending equity:       ₹{result.ending_equity:,.2f}")
+    print(f"Total return:        {result.total_return_pct:+.2f}%")
+    print(f"CAGR:                {result.cagr_pct:+.2f}%")
+    print(f"Max drawdown:        -{result.max_drawdown_pct:.2f}%")
+    print(f"Round-trip trades:   {result.num_round_trips}")
+    print(f"Win rate:            {result.win_rate_pct:.1f}%")
+    print(f"Avg win / avg loss:  ₹{result.avg_win_inr:+,.2f} / ₹{result.avg_loss_inr:+,.2f}")
+
+    if args.trades:
+        print("\nTrade log:")
+        rows = [[t["date"], t["side"], t["symbol"], t["qty"], f"{t['price']:.2f}",
+                 "—" if t["pnl"] is None else f"{t['pnl']:+.2f}", t["reason"]] for t in result.trade_log]
+        print(tabulate(rows, headers=["Date", "Side", "Symbol", "Qty", "Price", "P&L", "Reason"], tablefmt="simple"))
+
+    if args.export:
+        import csv
+        with open(args.export, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["date", "equity"])
+            writer.writerows(result.equity_curve)
+        print(f"\nEquity curve written to {args.export}")
+
+
 def cmd_history(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     engine = TradingEngine(cfg)
@@ -136,6 +173,13 @@ def build_parser() -> argparse.ArgumentParser:
     hist = sub.add_parser("history", help="Show trade history")
     hist.add_argument("--limit", type=int, default=50)
     hist.set_defaults(func=cmd_history)
+
+    bt = sub.add_parser("backtest", help="Replay the strategy against historical data instead of trading live")
+    bt.add_argument("--start", required=True, help="Start date, YYYY-MM-DD")
+    bt.add_argument("--end", required=True, help="End date, YYYY-MM-DD")
+    bt.add_argument("--trades", action="store_true", help="Also print the full trade log")
+    bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
+    bt.set_defaults(func=cmd_backtest)
 
     return parser
 

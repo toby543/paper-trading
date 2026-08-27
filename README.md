@@ -85,6 +85,7 @@ src/papertrader/
   portfolio/{models,storage,broker}.py   Paper execution engine + persistence
   risk/risk_manager.py       Position sizing & exposure limits
   engine/{market_hours,scheduler}.py     Autonomous scan loop
+  backtest/{engine,metrics}.py     Historical replay of the same strategy/exit logic
   cli.py                     Command-line interface
 main.py                      Entry point
 tests/                       pytest unit tests (strategy, broker, calendar)
@@ -206,6 +207,43 @@ All thresholds live in `config.yaml`:
   cross-check or replace it with NSE's official current list (downloadable
   from niftyindices.com).
 
+## Backtesting
+
+```bash
+python main.py backtest --start 2023-01-01 --end 2025-01-01
+python main.py backtest --start 2023-01-01 --end 2025-01-01 --trades --export curve.csv
+```
+
+Replays the exact same strategy/exit code (`evaluate_candidate`,
+`check_exit`, `rank_candidates`, `is_market_in_uptrend`) day-by-day
+against historical daily bars fetched once per symbol up front, instead
+of waiting on live scans over months to see whether a strategy or config
+change actually works. It runs against a throwaway temp SQLite ledger
+(never your real `data/state.db`) but reuses `PaperBroker`/`RiskManager`
+unchanged, so position sizing, slippage, and charges match live trading
+exactly — the only thing that differs from `python main.py run` is where
+the price data comes from and that time is simulated instead of
+wall-clock, so there's no risk of backtest and live behavior quietly
+diverging.
+
+Reports starting/ending equity, total return, CAGR, max drawdown, number
+of round-trip trades, win rate, and average win/loss size. `--trades`
+also prints the full trade log; `--export` saves the daily equity curve
+to a CSV for charting elsewhere.
+
+**Caveats:**
+- It needs `momentum_lookback_days`/`slow_ma_days` worth of price history
+  *before* `--start` to compute moving averages and momentum correctly —
+  it fetches a ~420-day buffer automatically, but very early dates in a
+  long backtest may still show few/no candidates simply because the
+  buffer itself is still warming up.
+- A larger universe (e.g. the Nifty 500 list) or longer date range means
+  more symbols × more days to fetch and simulate — expect it to take a
+  while for anything beyond a small universe or a few months.
+- Past performance in a backtest is not a promise of future results —
+  it validates that the *logic* behaves as intended against history, not
+  that the strategy will keep working going forward.
+
 ## Testing
 
 ```bash
@@ -214,7 +252,8 @@ pytest
 
 Tests cover the strategy's entry/exit rules (using synthetic price
 series, no network needed), the paper broker's order/cash/position
-bookkeeping, and the NSE market-hours calendar.
+bookkeeping, the NSE market-hours calendar, and the backtest's summary
+statistics (drawdown, CAGR, win rate).
 
 ## Notes & limitations
 
