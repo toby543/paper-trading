@@ -191,7 +191,7 @@ All thresholds live in `config.yaml`:
 - `risk.stop_loss_pct` / `trailing_stop_pct` — exit rules.
 - `risk.position_size_pct_of_equity` / `max_open_positions` — sizing & diversification.
 - `universe.file` — edit `data/universe.csv` to change which NSE stocks are scanned,
-  or point it at `data/universe_nifty500.csv` (~495 symbols, included) for much
+  or point it at `data/universe_nifty500.csv` (~480 symbols, included) for much
   broader coverage:
   ```yaml
   universe:
