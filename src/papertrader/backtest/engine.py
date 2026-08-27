@@ -29,6 +29,7 @@ from ..data.universe import load_universe
 from ..portfolio.broker import InsufficientFundsError, PaperBroker
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
+from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import (
     Candidate,
     check_exit,
@@ -94,6 +95,15 @@ class Backtester:
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
         self.universe = load_universe(cfg.universe_file)
+
+        if self.strategy_cfg.get("mode") == "cross_sectional_momentum":
+            # This mode's lookback (default 252 trading days + 21 skipped)
+            # can exceed the generic 420-day buffer for a bigger
+            # lookback_days config -- make sure the fetch window is always
+            # wide enough for it, on top of whatever the caller passed.
+            cs_cfg = self.strategy_cfg.get("cross_sectional") or {}
+            needed = cs_cfg.get("lookback_days", 252) + cs_cfg.get("skip_recent_days", 21) + 30
+            self.lookback_buffer_days = max(self.lookback_buffer_days, needed)
 
         self.risk = RiskManager(
             max_open_positions=cfg.get("risk", "max_open_positions", default=10),
@@ -229,23 +239,41 @@ class Backtester:
         if not self._market_regime_ok(index_upto):
             return
 
-        candidates: list[Candidate] = []
-        for symbol in self.universe:
-            if symbol in positions:
-                continue
-            hist = self._history.get(symbol)
-            if hist is None:
-                continue
-            history_upto = hist.loc[:day]
-            quote = self._quote_for(symbol, history_upto)
-            if quote is None:
-                continue
-            turnover = _avg_daily_turnover(history_upto)
-            cand = evaluate_candidate(symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto)
-            if cand:
-                candidates.append(cand)
+        mode = self.strategy_cfg.get("mode", "52w_high")
 
-        ranked = rank_candidates(candidates)
+        if mode == "cross_sectional_momentum":
+            universe_data = []
+            for symbol in self.universe:
+                if symbol in positions:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                universe_data.append((symbol, quote, history_upto, turnover))
+            ranked = select_cross_sectional_candidates(universe_data, self.strategy_cfg)
+        else:
+            candidates: list[Candidate] = []
+            for symbol in self.universe:
+                if symbol in positions:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = evaluate_candidate(symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto)
+                if cand:
+                    candidates.append(cand)
+            ranked = rank_candidates(candidates)
+
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
         if not ranked:

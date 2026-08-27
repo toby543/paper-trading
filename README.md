@@ -13,7 +13,13 @@ local SQLite database.
 
 ## How it works
 
-**Strategy — 52-Week-High Momentum:**
+There are two selectable entry strategies (`strategy.mode` in
+`config.yaml`, or the "Strategy mode" field in the dashboard's Edit
+Settings panel). Both share the same liquidity/price-range/trend
+filters, the market regime filter, and all exit rules below — they only
+differ in how a stock qualifies as a BUY.
+
+**Strategy — 52-Week-High Momentum** (`strategy.mode: 52w_high`, the default):
 A stock is bought when it is (1) trading within a configurable band of
 its 52-week high, (2) has strong trailing momentum (e.g. ≥15% return
 over the last ~90 days), (3) is trading above its 50-day and 200-day
@@ -34,6 +40,28 @@ rather than blocking every trade) if the underlying index/volume data
 can't be fetched for a given scan. An optional price range
 (`strategy.min_ltp_inr`/`max_ltp_inr`, 0 = no bound) can also skip
 penny stocks or steer clear of very high-priced names.
+
+**Strategy — Cross-Sectional Momentum** (`strategy.mode: cross_sectional_momentum`):
+a "dual momentum" approach: instead of judging each stock independently
+against fixed thresholds, it computes every stock's trailing return over
+`strategy.cross_sectional.lookback_days` (default 252 trading days,
+i.e. ~12 months) ending `skip_recent_days` before today (default 21 —
+the classic "12-1" momentum window, which skips the most recent month to
+avoid short-term reversal noise), ranks the *whole universe* against
+each other, and buys only the top `top_pct` percentile (default top
+10%). A stock still has to pass the same trend-confirmation
+(fast/slow moving average), liquidity, and price-range filters as the
+52-week-high strategy, and is further required to have a *positive*
+trailing return of its own even at a very wide `top_pct` — this
+"absolute-return gate" is the other half of dual momentum (the market
+regime filter below being the market-wide half of it), so nothing gets
+bought purely for being the least-bad decliner in a falling universe.
+This mode tends to be more robust across different market regimes than
+proximity-to-52w-high (which favors strongly trending bull markets)
+since it ranks stocks relative to their peers rather than against a
+fixed level. Recommended if you want to compare the two head-to-head:
+switch the mode, then run the dashboard's Backtest panel (or `python
+main.py backtest`) against the same date range for both.
 
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, a **momentum breakdown**
@@ -194,7 +222,9 @@ Two supported ways to keep it running unattended:
 
 All thresholds live in `config.yaml`:
 
-- `strategy.proximity_to_52w_high_pct` — how close to the 52-week high a stock must be to qualify.
+- `strategy.mode` — `52w_high` (default) or `cross_sectional_momentum` (see above). A restart is required to switch, like any other engine-construction-time setting.
+- `strategy.cross_sectional.lookback_days` / `skip_recent_days` / `top_pct` — only used in `cross_sectional_momentum` mode: the trailing-return ranking window and the top percentile bought.
+- `strategy.proximity_to_52w_high_pct` — how close to the 52-week high a stock must be to qualify (52w_high mode only).
 - `strategy.min_momentum_return_pct` / `momentum_lookback_days` — trailing momentum filter.
 - `strategy.fast_ma_days` / `slow_ma_days` — trend-confirmation moving averages.
 - `risk.stop_loss_pct` / `trailing_stop_pct` — exit rules.

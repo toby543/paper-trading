@@ -20,6 +20,7 @@ from ..data.universe import load_universe
 from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
+from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate, evaluate_candidate, rank_candidates, check_exit, is_market_in_uptrend
 from .market_hours import MarketCalendar
 
@@ -100,6 +101,25 @@ class TradingEngine:
         and the dashboard's on-demand candidate-preview endpoint.
         """
         exclude_symbols = exclude_symbols if exclude_symbols is not None else set(self.broker.positions())
+        mode = self.strategy_cfg.get("mode", "52w_high")
+
+        if mode == "cross_sectional_momentum":
+            # Needs a longer lookback (default 252 + 21 skip days) than the
+            # "1y" period used elsewhere -- fetch a roomier window just for
+            # this mode rather than changing what exit-checks etc. pull.
+            universe_data = []
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="2y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    continue
+                universe_data.append((symbol, quote, history, turnover))
+            return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
 
         # Fetch the benchmark index once per scan (cached) so every
         # candidate's relative strength is judged against the same frame,
@@ -143,12 +163,13 @@ class TradingEngine:
             )
             return
 
+        mode = self.strategy_cfg.get("mode", "52w_high")
         ranked = self.find_candidates(exclude_symbols=set(positions))
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
 
         if not ranked:
-            log.info("No qualifying 52-week-high momentum candidates this scan.")
+            log.info("No qualifying %s candidates this scan.", mode)
             return
 
         free_cash = self.broker.cash()
@@ -166,15 +187,23 @@ class TradingEngine:
             if spent + cost_estimate > scan_budget:
                 log.info("Per-scan cash budget reached; deferring %s to next scan", cand.symbol)
                 continue
-            reason = (
-                f"momentum_52w_high score={cand.score:.1f} "
-                f"{cand.pct_from_52w_high:.1f}% off 52w-high, "
-                f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
-            )
-            if cand.relative_strength_pct is not None:
-                reason += f", RS {cand.relative_strength_pct:+.1f}pp vs index"
-            if cand.volume_multiple is not None:
-                reason += f", volume {cand.volume_multiple:.1f}x baseline"
+            if mode == "cross_sectional_momentum":
+                cs_cfg = self.strategy_cfg.get("cross_sectional") or {}
+                reason = (
+                    f"cross_sectional_momentum percentile={cand.score:.0f} "
+                    f"{cand.momentum_return_pct:.1f}% {cs_cfg.get('lookback_days', 252)}d return "
+                    f"(skip last {cs_cfg.get('skip_recent_days', 21)}d)"
+                )
+            else:
+                reason = (
+                    f"momentum_52w_high score={cand.score:.1f} "
+                    f"{cand.pct_from_52w_high:.1f}% off 52w-high, "
+                    f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
+                )
+                if cand.relative_strength_pct is not None:
+                    reason += f", RS {cand.relative_strength_pct:+.1f}pp vs index"
+                if cand.volume_multiple is not None:
+                    reason += f", volume {cand.volume_multiple:.1f}x baseline"
             try:
                 self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
                 spent += cost_estimate

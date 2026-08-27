@@ -13,6 +13,11 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # path: dotted tuple into config.yaml. group/label/desc/unit: for the UI.
 # type: bool | int | float | choice | time | str.
 EDITABLE_SETTINGS: list[dict] = [
+    {"path": ("strategy", "mode"), "type": "choice", "choices": ["52w_high", "cross_sectional_momentum"],
+     "group": "Strategy — Entry", "label": "Strategy mode", "unit": "",
+     "desc": "52w_high: accept/reject each stock independently. cross_sectional_momentum: "
+             "rank the whole universe by trailing return and buy only the top percentile "
+             "(see the Cross-sectional group below). Restart required to switch."},
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},
@@ -53,6 +58,16 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "max_ltp_inr"), "type": "float", "min": 0,
      "group": "Strategy — Entry", "label": "Max price", "unit": "₹ (0 = off)",
      "desc": "Skip stocks trading above this price."},
+
+    {"path": ("strategy", "cross_sectional", "lookback_days"), "type": "int", "min": 5, "max": 500,
+     "group": "Cross-sectional momentum", "label": "Lookback window", "unit": "days",
+     "desc": "Trailing-return window used to rank the universe. Only applies when strategy mode is cross_sectional_momentum."},
+    {"path": ("strategy", "cross_sectional", "skip_recent_days"), "type": "int", "min": 0, "max": 90,
+     "group": "Cross-sectional momentum", "label": "Skip recent days", "unit": "days",
+     "desc": "\"12-1\" style: ends the lookback this many days before today, to avoid short-term reversal noise. 0 disables the skip."},
+    {"path": ("strategy", "cross_sectional", "top_pct"), "type": "float", "min": 1, "max": 100,
+     "group": "Cross-sectional momentum", "label": "Top percentile", "unit": "% of universe",
+     "desc": "Buy only stocks ranked in this top percentile by trailing return."},
 
     {"path": ("regime", "enabled"), "type": "bool",
      "group": "Market regime", "label": "Regime filter", "unit": "",

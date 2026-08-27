@@ -485,14 +485,40 @@
     <div class="panel-head collapsible-head" id="rulesPanelHead">
       <h2>Strategy Rules</h2>
       <span class="collapse-toggle">
-        <span class="meta mono">from config.yaml</span>
+        <span class="meta mono">{{ strategy.get('mode', '52w_high') }} &middot; config.yaml</span>
         <button class="collapse-btn" aria-expanded="true" aria-controls="rulesBody" title="Collapse">&#9650;</button>
       </span>
     </div>
     <div id="rulesBody" class="panel-body-collapsible">
     <div class="rules-grid">
       <div class="rules-col">
-        <div class="rules-col-label">Entry — all must pass</div>
+        {% if strategy.get('mode') == 'cross_sectional_momentum' %}
+        {% set cs = strategy.get('cross_sectional', {}) %}
+        <div class="rules-col-label">Entry — cross-sectional momentum</div>
+        <div class="rule"><span>Ranking</span><span class="mono">top {{ cs.get('top_pct', '—') }}% of universe by return</span></div>
+        <div class="rule"><span>Lookback</span><span class="mono">{{ cs.get('lookback_days', '—') }}d{% if cs.get('skip_recent_days') %}, skip last {{ cs.get('skip_recent_days') }}d{% endif %}</span></div>
+        <div class="rule"><span>Absolute-return gate</span><span class="mono">own trailing return &gt; 0%</span></div>
+        <div class="rule"><span>Trend</span><span class="mono">above {{ strategy.get('fast_ma_days', '—') }}&amp;{{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        {% if regime.get('enabled') %}
+        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+        {% set min_ltp = strategy.get('min_ltp_inr') %}
+        {% set max_ltp = strategy.get('max_ltp_inr') %}
+        {% if min_ltp or max_ltp %}
+        <div class="rule"><span>Price range</span><span class="mono">
+          {%- if min_ltp and max_ltp -%}
+            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+          {%- elif min_ltp -%}
+            &ge; ₹{{ min_ltp|inr }}
+          {%- else -%}
+            &le; ₹{{ max_ltp|inr }}
+          {%- endif -%}
+        </span></div>
+        {% endif %}
+        {% else %}
+        <div class="rules-col-label">Entry — 52-week-high momentum, all must pass</div>
         <div class="rule"><span>Proximity to 52w high</span><span class="mono">&le; {{ strategy.get('proximity_to_52w_high_pct', '—') }}%</span></div>
         <div class="rule"><span>Momentum</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
         <div class="rule"><span>Trend</span><span class="mono">above {{ strategy.get('fast_ma_days', '—') }}&amp;{{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
@@ -519,6 +545,7 @@
             &le; ₹{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
+        {% endif %}
         {% endif %}
       </div>
       <div class="rules-col">

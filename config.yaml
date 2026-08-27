@@ -9,7 +9,20 @@ universe:
   file: data/universe.csv       # NSE symbols to scan (no .NS suffix)
 
 strategy:
-  name: momentum_52w_high
+  # Which strategy drives entry selection:
+  #   52w_high                 -- accept/reject each stock independently
+  #                                against the fixed thresholds below
+  #                                (proximity to its own 52-week high,
+  #                                an absolute momentum floor, etc).
+  #   cross_sectional_momentum -- rank the whole universe by trailing
+  #                                return each scan and buy only the top
+  #                                percentile ("dual momentum": relative
+  #                                strength vs. peers + the regime filter
+  #                                below as the absolute-return gate).
+  #                                See strategy.cross_sectional below.
+  # Both modes share the liquidity, price-range, and trend-confirmation
+  # (fast/slow MA) filters, the regime filter, and all exit rules.
+  mode: 52w_high
   # A stock qualifies as a BUY candidate when it is trading within this
   # percentage of its 52-week high...
   proximity_to_52w_high_pct: 5.0
@@ -44,6 +57,17 @@ strategy:
   # share count.
   min_ltp_inr: 0
   max_ltp_inr: 0
+  # Only used when strategy.mode is "cross_sectional_momentum" (above).
+  cross_sectional:
+    # Trailing-return window and the classic "12-1" skip of the most
+    # recent month, to avoid short-term reversal noise distorting the
+    # cross-sectional ranking. Set skip_recent_days: 0 to disable that
+    # and rank on the raw trailing return through the latest close.
+    lookback_days: 252
+    skip_recent_days: 21
+    # Buy only this top percentile of the universe by trailing return
+    # (after the liquidity/price-range/trend filters above are applied).
+    top_pct: 10.0
 
 regime:
   # Market regime filter: momentum strategies get badly hurt trading
