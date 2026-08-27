@@ -18,7 +18,7 @@ from flask import Flask, jsonify, render_template, request
 from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
-from .data_api import build_equity_curve, build_summary, build_trades
+from .data_api import build_candidates, build_equity_curve, build_summary, build_trades
 from .filters import indian_currency
 from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
 
@@ -65,6 +65,16 @@ def create_app(engine: TradingEngine) -> Flask:
     def api_equity_curve():
         limit = request.args.get("limit", default=500, type=int)
         return jsonify(build_equity_curve(engine, limit=limit))
+
+    @app.get("/api/candidates")
+    def api_candidates():
+        # Expensive (network calls across the whole universe) -- the
+        # dashboard triggers this on demand (a "Scan Now" button), never
+        # on the regular auto-refresh poll. threaded=True on app.run()
+        # below keeps this from blocking the rest of the dashboard while
+        # it runs.
+        limit = request.args.get("limit", default=20, type=int)
+        return jsonify(build_candidates(engine, limit=limit))
 
     @app.get("/api/settings")
     def api_get_settings():
@@ -122,4 +132,8 @@ def create_app(engine: TradingEngine) -> Flask:
 def run_dashboard(cfg: Config, host: str = "127.0.0.1", port: int = 8000, debug: bool = False) -> None:
     engine = TradingEngine(cfg)
     app = create_app(engine)
-    app.run(host=host, port=port, debug=debug)
+    # threaded=True: /api/candidates can take a while (network calls across
+    # the whole universe) -- without this, Werkzeug's dev server serves one
+    # request at a time and the rest of the dashboard would appear frozen
+    # while a candidate scan is running.
+    app.run(host=host, port=port, debug=debug, threaded=True)

@@ -147,6 +147,15 @@ A local, read-only dashboard (Flask) showing live-marked open positions,
 unrealized P&L, an equity curve, and recent trade history, self-refreshing
 every 10 seconds, with a responsive layout that works on a phone.
 
+Its **Scanner Watchlist** panel previews which stocks currently qualify
+for the next buy scan — without placing any trades — via a "Scan Now"
+button. It's deliberately manual, not auto-refreshed like the rest of
+the dashboard: evaluating the whole universe means a real NSE/Yahoo
+network call per symbol, so polling it every 10 seconds the way the
+other panels do would be slow and hammer the data source for no reason.
+Useful for checking what changing a setting (e.g. the benchmark index)
+would surface before it actually happens live.
+
 **To open it from your phone:** start it with `--host 0.0.0.0`, find the
 host machine's LAN IP (`ipconfig getifaddr en0` on Mac, `hostname -I` on
 Linux, `ipconfig` on Windows), then visit `http://<that-ip>:8000` from a

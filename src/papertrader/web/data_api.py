@@ -105,6 +105,42 @@ def build_trades(engine, limit: int = 100) -> list[dict]:
     ]
 
 
+def build_candidates(engine, limit: int = 20) -> dict:
+    """Preview of what the strategy currently finds worth buying, without
+    placing any trades. Expensive (network calls across the whole
+    universe) -- meant to be triggered on demand from the dashboard, not
+    auto-polled like the rest of /api/*."""
+    positions = engine.broker.positions()
+    room = engine.risk.room_for_new_positions(len(positions))
+    regime = _market_regime(engine)
+    regime_blocking = regime["enabled"] and regime["status"] == "down"
+
+    ranked = engine.find_candidates(exclude_symbols=set(positions))
+
+    rows = []
+    for cand in ranked[:limit]:
+        rows.append({
+            "symbol": cand.symbol,
+            "ltp": round(cand.ltp, 2),
+            "week52_high": round(cand.week52_high, 2),
+            "pct_from_52w_high": round(cand.pct_from_52w_high, 2),
+            "momentum_return_pct": round(cand.momentum_return_pct, 2),
+            "relative_strength_pct": round(cand.relative_strength_pct, 2) if cand.relative_strength_pct is not None else None,
+            "volume_multiple": round(cand.volume_multiple, 2) if cand.volume_multiple is not None else None,
+            "score": round(cand.score, 2),
+        })
+
+    return {
+        "as_of": datetime.now().isoformat(timespec="seconds"),
+        "index_symbol": regime["index_symbol"],
+        "regime_blocking": regime_blocking,
+        "room_available": room,
+        "max_positions": engine.risk.max_open_positions,
+        "total_qualifying": len(ranked),
+        "candidates": rows,
+    }
+
+
 def build_equity_curve(engine, limit: int = 500) -> list[dict]:
     rows = engine.storage.get_equity_curve(limit=limit)
     curve = [

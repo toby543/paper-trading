@@ -134,6 +134,14 @@
   .table-scroll { overflow-x: auto; }
   .empty-row td { text-align: center; color: var(--ink-faint); padding: 28px 16px; }
 
+  /* ---------- scanner watchlist ---------- */
+  .watchlist-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; flex-wrap: wrap; }
+  .watchlist-hint { font-size: 11.5px; color: var(--ink-faint); line-height: 1.4; max-width: 60ch; }
+  .watchlist-hint strong { color: var(--ink-dim); font-weight: 600; }
+  .watchlist-note { padding: 0 18px 12px; font-size: 12px; }
+  .watchlist-note.blocked { color: var(--bad); }
+  .watchlist-note.ok { color: var(--good); }
+
   .peak-track { display: inline-flex; align-items: center; gap: 6px; }
   .peak-bar { width: 46px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; border: 1px solid var(--border); }
   .peak-bar i { display: block; height: 100%; background: var(--accent); }
@@ -342,6 +350,35 @@
       <div id="tickerBody"></div>
     </div>
 
+  </div>
+
+  <div class="panel" id="watchlistPanel">
+    <div class="panel-head collapsible-head" id="watchlistPanelHead">
+      <h2>Scanner Watchlist</h2>
+      <span class="collapse-toggle">
+        <span class="meta mono" id="watchlistMeta">not scanned yet</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="watchlistBody" title="Collapse">&#9650;</button>
+      </span>
+    </div>
+    <div id="watchlistBody" class="panel-body-collapsible">
+      <div class="watchlist-toolbar">
+        <span class="watchlist-hint">Stocks that currently qualify for the next buy scan against <strong id="watchlistIndex">&mdash;</strong> — a preview, not a placed trade. Runs a full universe scan, so it can take a while.</span>
+        <button id="watchlistScanBtn" class="edit-save-btn">Scan Now</button>
+      </div>
+      <div id="watchlistBanner" class="edit-banner" style="display:none;"></div>
+      <div class="table-scroll">
+        <table id="watchlistTable">
+          <thead>
+            <tr>
+              <th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="watchlistTableBody">
+            <tr class="empty-row"><td colspan="7">Click "Scan Now" to see which stocks currently qualify.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <div class="panel" id="rulesPanel">
@@ -836,6 +873,70 @@ function makeCollapsible(panelId, headId, storageKey) {
 makeCollapsible("rulesPanel", "rulesPanelHead", "papertrader.rulesPanelCollapsed");
 makeCollapsible("settingsPanel", "settingsPanelHead", "papertrader.settingsPanelCollapsed");
 makeCollapsible("editPanel", "editPanelHead", "papertrader.editSettingsCollapsed");
+makeCollapsible("watchlistPanel", "watchlistPanelHead", "papertrader.watchlistPanelCollapsed");
+
+// ---- Scanner Watchlist: on-demand preview of current buy candidates ----
+function renderWatchlistNote(data) {
+  const banner = document.getElementById("watchlistBanner");
+  document.getElementById("watchlistIndex").textContent = data.index_symbol || "the benchmark index";
+
+  if (data.regime_blocking) {
+    banner.className = "edit-banner error";
+    banner.innerHTML = `Market regime filter is currently blocking new entries (${data.index_symbol} is below its own average) -- these candidates qualify on their own merits but would NOT be bought right now.`;
+    banner.style.display = "block";
+  } else if (data.room_available <= 0) {
+    banner.className = "edit-banner error";
+    banner.innerHTML = `No open-position room (${data.max_positions}/${data.max_positions} used) -- these candidates qualify but nothing new would be bought until a position exits.`;
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
+}
+
+function renderWatchlistTable(candidates) {
+  const tbody = document.getElementById("watchlistTableBody");
+  if (!candidates.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No stocks currently qualify against the strategy's filters.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = candidates.map(c => `
+    <tr>
+      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="From 52W High" title="52w high: ₹${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
+      <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
+      <td class="mono ${c.relative_strength_pct === null ? "" : (c.relative_strength_pct >= 0 ? "up" : "down")}" data-label="RS vs Index">${c.relative_strength_pct === null ? "—" : (c.relative_strength_pct >= 0 ? "+" : "") + c.relative_strength_pct.toFixed(1) + "pp"}</td>
+      <td class="mono" data-label="Volume">${c.volume_multiple === null ? "—" : c.volume_multiple.toFixed(1) + "×"}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    </tr>
+  `).join("");
+}
+
+async function scanWatchlist() {
+  const btn = document.getElementById("watchlistScanBtn");
+  const banner = document.getElementById("watchlistBanner");
+  btn.disabled = true;
+  btn.textContent = "Scanning…";
+  banner.style.display = "none";
+  document.getElementById("watchlistTableBody").innerHTML =
+    `<tr class="empty-row"><td colspan="7">Scanning the universe against NSE/Yahoo Finance -- this can take a while…</td></tr>`;
+
+  try {
+    const data = await fetch("/api/candidates?limit=15").then(r => r.json());
+    renderWatchlistNote(data);
+    renderWatchlistTable(data.candidates);
+    document.getElementById("watchlistMeta").textContent =
+      `${data.total_qualifying} qualifying · last scanned ${timeOf(data.as_of)}`;
+  } catch (e) {
+    document.getElementById("watchlistTableBody").innerHTML =
+      `<tr class="empty-row"><td colspan="7">Scan failed: ${e}</td></tr>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Scan Now";
+  }
+}
+
+document.getElementById("watchlistScanBtn").addEventListener("click", scanWatchlist);
 
 async function refresh() {
   try {

@@ -99,8 +99,11 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     app = create_app(engine)
     # use_reloader must stay off: Flask's reloader forks a second process,
-    # which would start a second copy of the engine thread too.
-    app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
+    # which would start a second copy of the engine thread too. threaded:
+    # /api/candidates can take a while (network calls across the whole
+    # universe) -- without it the dev server would serve one request at a
+    # time and the rest of the dashboard would appear frozen during a scan.
+    app.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
 
 
 def cmd_history(args: argparse.Namespace) -> None:

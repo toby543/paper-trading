@@ -20,7 +20,7 @@ from ..data.universe import load_universe
 from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
-from ..strategy.momentum_52w_high import evaluate_candidate, rank_candidates, check_exit, is_market_in_uptrend
+from ..strategy.momentum_52w_high import Candidate, evaluate_candidate, rank_candidates, check_exit, is_market_in_uptrend
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -89,6 +89,46 @@ class TradingEngine:
                 except ValueError as exc:
                     log.error("Failed to sell %s: %s", symbol, exc)
 
+    def find_candidates(self, exclude_symbols: set[str] | None = None) -> list[Candidate]:
+        """Evaluate the whole universe against the strategy right now and
+        return every currently-qualifying candidate, ranked. Read-only --
+        places no trades, and does NOT apply the room/regime short-circuits
+        scan_for_entries() uses (those exist purely to skip needless
+        network calls when we already know nothing can be bought; a
+        preview should still show what qualifies even if regime or room
+        currently blocks acting on it). Shared by scan_for_entries() below
+        and the dashboard's on-demand candidate-preview endpoint.
+        """
+        exclude_symbols = exclude_symbols if exclude_symbols is not None else set(self.broker.positions())
+
+        # Fetch the benchmark index once per scan (cached) so every
+        # candidate's relative strength is judged against the same frame,
+        # instead of a per-symbol network round trip.
+        index_history = None
+        if self.strategy_cfg.get("min_relative_strength_pct") is not None:
+            try:
+                index_history = self.data.get_index_history(self.regime_cfg.get("index_symbol", "^NSEI"))
+            except DataUnavailableError as exc:
+                log.warning("Could not fetch index history for relative-strength scoring (%s); skipping that filter this scan", exc)
+
+        candidates = []
+        for symbol in self.universe:
+            if symbol in exclude_symbols:
+                continue
+            try:
+                quote = self.data.get_quote(symbol)
+                history = self.data.get_history(symbol, period="1y")
+                turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+            except DataUnavailableError as exc:
+                log.debug("Skipping %s: %s", symbol, exc)
+                continue
+
+            cand = evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
+            if cand:
+                candidates.append(cand)
+
+        return rank_candidates(candidates)
+
     def scan_for_entries(self) -> None:
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))
@@ -103,33 +143,7 @@ class TradingEngine:
             )
             return
 
-        # Fetch the benchmark index once per scan (cached) so every
-        # candidate's relative strength is judged against the same frame,
-        # instead of a per-symbol network round trip.
-        index_history = None
-        if self.strategy_cfg.get("min_relative_strength_pct") is not None:
-            try:
-                index_history = self.data.get_index_history(self.regime_cfg.get("index_symbol", "^NSEI"))
-            except DataUnavailableError as exc:
-                log.warning("Could not fetch index history for relative-strength scoring (%s); skipping that filter this scan", exc)
-
-        candidates = []
-        for symbol in self.universe:
-            if symbol in positions:
-                continue
-            try:
-                quote = self.data.get_quote(symbol)
-                history = self.data.get_history(symbol, period="1y")
-                turnover = self.data.get_avg_daily_turnover(symbol, history=history)
-            except DataUnavailableError as exc:
-                log.debug("Skipping %s: %s", symbol, exc)
-                continue
-
-            cand = evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
-            if cand:
-                candidates.append(cand)
-
-        ranked = rank_candidates(candidates)
+        ranked = self.find_candidates(exclude_symbols=set(positions))
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
 
