@@ -19,24 +19,26 @@ def test_not_configured_before_setup():
 
 
 def test_setup_auth_writes_file_and_returns_totp_uri():
-    record = auth.setup_auth("correct horse battery staple", account_label="tester")
+    record = auth.setup_auth("nash", "correct horse battery staple", account_label="tester")
     assert auth.is_configured() is True
     assert "totp_uri" in record
     assert "tester" in record["totp_uri"]
 
     loaded = auth.load_auth_secrets()
+    assert loaded["username"] == "nash"
     assert loaded["totp_secret"] == record["totp_secret"]
     assert "flask_secret_key" in loaded
     assert len(loaded["flask_secret_key"]) >= 32  # hex-encoded 32 bytes -> 64 chars, sanity floor
 
 
-def test_verify_credentials_requires_both_password_and_code():
-    record = auth.setup_auth("correct horse battery staple")
+def test_verify_credentials_requires_username_password_and_code():
+    record = auth.setup_auth("nash", "correct horse battery staple")
     correct_code = pyotp.TOTP(record["totp_secret"]).now()
 
-    assert auth.verify_credentials("wrong password", correct_code, record) is False
-    assert auth.verify_credentials("correct horse battery staple", "000000", record) is False
-    assert auth.verify_credentials("correct horse battery staple", correct_code, record) is True
+    assert auth.verify_credentials("wrong-user", "correct horse battery staple", correct_code, record) is False
+    assert auth.verify_credentials("nash", "wrong password", correct_code, record) is False
+    assert auth.verify_credentials("nash", "correct horse battery staple", "000000", record) is False
+    assert auth.verify_credentials("nash", "correct horse battery staple", correct_code, record) is True
 
 
 def test_lockout_after_max_failed_attempts():

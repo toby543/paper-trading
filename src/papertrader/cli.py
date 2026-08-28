@@ -164,6 +164,12 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
     print("gates access to the web dashboard (python main.py web / serve).\n")
 
     while True:
+        username = input("Choose a username: ").strip()
+        if username:
+            break
+        print("Username can't be empty.\n")
+
+    while True:
         password = getpass.getpass("Choose a dashboard password: ")
         if len(password) < 8:
             print("Please use at least 8 characters.\n")
@@ -174,7 +180,7 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
             continue
         break
 
-    record = auth.setup_auth(password, account_label=args.label)
+    record = auth.setup_auth(username, password, account_label=args.label)
 
     print(f"\nSaved to {auth.AUTH_FILE} (never commit this file -- it's already in .gitignore).")
     print("\nNow add the 2FA secret to an authenticator app (Google Authenticator, Authy, etc.):")
@@ -184,8 +190,10 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
     print(f"    Secret key: {record['totp_secret']}")
     print("    Type:       Time-based (TOTP)")
     print(f"\n  Or, if your app supports pasting an otpauth:// URI directly:\n    {record['totp_uri']}")
-    print("\nOnce added, `python main.py web`/`serve` will require your password + the current")
-    print("6-digit code from that app to access the dashboard.")
+    print(f"\nOnce added, `python main.py web`/`serve` will require:")
+    print(f"  Username: {username}")
+    print(f"  Password: (the one you just chose)")
+    print(f"  Code:     the current 6-digit code from your authenticator app")
 
 
 def cmd_history(args: argparse.Namespace) -> None:

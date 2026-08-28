@@ -84,8 +84,12 @@
     {% set next_url = request.args.get('next') %}
     <form method="post" action="{{ url_for('login_submit', next=next_url) if next_url else url_for('login_submit') }}">
       <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+      </div>
+      <div class="field">
         <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
       </div>
       <div class="field">
         <label for="code">Authenticator Code</label>

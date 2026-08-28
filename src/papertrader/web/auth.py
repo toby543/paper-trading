@@ -51,13 +51,14 @@ def load_auth_secrets() -> dict | None:
         return json.load(fh)
 
 
-def setup_auth(password: str, account_label: str = "papertrader") -> dict:
+def setup_auth(username: str, password: str, account_label: str = "papertrader") -> dict:
     """Generate a new password hash + TOTP secret + Flask session secret
     key, write them to AUTH_FILE, and return the record (including the
     otpauth:// URI the caller should show the user once, for adding to
     an authenticator app)."""
     totp_secret = pyotp.random_base32()
     record = {
+        "username": username,
         "password_hash": generate_password_hash(password),
         "totp_secret": totp_secret,
         "flask_secret_key": secrets.token_hex(32),
@@ -96,7 +97,12 @@ def clear_failed_attempts(remote_addr: str | None) -> None:
     _failed_attempts.pop(_throttle_key(remote_addr), None)
 
 
-def verify_credentials(password: str, totp_code: str, secrets_record: dict) -> bool:
+def verify_credentials(username: str, password: str, totp_code: str, secrets_record: dict) -> bool:
+    # Constant-time comparison for the username too -- it's paired here
+    # with a hashed password + TOTP check, so there's no reason to let a
+    # plain `==` leak timing information about it for free.
+    if not secrets.compare_digest(username, secrets_record.get("username", "")):
+        return False
     if not check_password_hash(secrets_record["password_hash"], password):
         return False
     totp = pyotp.TOTP(secrets_record["totp_secret"])

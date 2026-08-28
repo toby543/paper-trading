@@ -104,16 +104,17 @@ def create_app(engine: TradingEngine) -> Flask:
                 error="Too many failed attempts. Wait 15 minutes before trying again.",
             ), 429
 
+        username = request.form.get("username", "")
         password = request.form.get("password", "")
         code = request.form.get("code", "")
-        if auth.verify_credentials(password, code, auth_secrets):
+        if auth.verify_credentials(username, password, code, auth_secrets):
             auth.clear_failed_attempts(request.remote_addr)
             session.permanent = True
             session["authenticated"] = True
             return redirect(_safe_next_path(request.args.get("next")) or url_for("index"))
 
         auth.record_failed_attempt(request.remote_addr)
-        return render_template("login.html", error="Incorrect password or code."), 401
+        return render_template("login.html", error="Incorrect username, password, or code."), 401
 
     @app.post("/logout")
     def logout():
