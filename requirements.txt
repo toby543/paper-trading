@@ -7,4 +7,5 @@ tabulate>=0.9
 tenacity>=8.2
 Flask>=3.0
 ruamel.yaml>=0.18
+pytest>=8.0
 
