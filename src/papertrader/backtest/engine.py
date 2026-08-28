@@ -182,6 +182,18 @@ class Backtester:
             return None
         last = history_upto.iloc[-1]
         prev = history_upto.iloc[-2]
+        # A symbol that gets suspended/delisted partway through the backtest
+        # window can have yfinance keep returning rows for it with NaN
+        # OHLC instead of just stopping. NaN compares False against
+        # everything (`nan <= x` and `nan > x` are both False), so it
+        # silently slips past every threshold check in evaluate_candidate/
+        # check_exit instead of being rejected -- and once it reaches
+        # mark-to-market or a trade price, NaN poisons the running
+        # cash/equity total for every day afterwards. Treat it the same as
+        # "no data today" (matches DataUnavailableError handling in live
+        # trading) rather than letting it through as a real quote.
+        if pd.isna(last["Close"]) or pd.isna(prev["Close"]):
+            return None
         window = history_upto.tail(_WEEK52_TRADING_DAYS)
         return Quote(
             symbol=symbol,
@@ -308,7 +320,15 @@ class Backtester:
                 continue
             history_upto = hist.loc[:day]
             if len(history_upto):
-                quotes[symbol] = float(history_upto.iloc[-1]["Close"])
+                close = float(history_upto.iloc[-1]["Close"])
+                # A NaN close (symbol suspended/delisted mid-window -- see
+                # the comment in _quote_for) must never enter this dict:
+                # `quotes.get(s, p.avg_price)` only falls back to avg_price
+                # when the key is *missing*, not when its value is NaN, and
+                # a single NaN here would permanently poison every equity
+                # value (and hence every backtest day) from this point on.
+                if not pd.isna(close):
+                    quotes[symbol] = close
         positions_value = sum(p.quantity * quotes.get(s, p.avg_price) for s, p in self.broker.positions().items())
         return self.broker.cash() + positions_value
 
