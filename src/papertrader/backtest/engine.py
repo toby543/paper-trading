@@ -349,7 +349,26 @@ class Backtester:
         for i, day in enumerate(trading_days):
             self._run_exits(day, trade_pnls, trade_log)
             self._run_entries(day, trade_log)
-            equity_curve.append((str(day.date()), self._mark_to_market(day)))
+            equity_today = self._mark_to_market(day)
+            if pd.isna(equity_today):
+                # Fail fast with the exact day/holdings instead of quietly
+                # finishing all remaining days with a poisoned NaN total --
+                # every subsequent equity value would be NaN too once this
+                # happens, so there is nothing useful left to compute.
+                cash = self.broker.cash()
+                positions = self.broker.positions()
+                detail = ", ".join(
+                    f"{sym}: qty={pos.quantity} avg_price={pos.avg_price}"
+                    for sym, pos in positions.items()
+                ) or "none"
+                raise RuntimeError(
+                    f"Equity became NaN/undefined on {day.date()}. Cash={cash!r}. "
+                    f"Open positions: {detail}. This means a trade or mark-to-market "
+                    f"picked up bad price data (e.g. a symbol suspended/delisted or "
+                    f"missing a data point mid-window) that wasn't caught -- "
+                    f"please report this with the date and symbols above."
+                )
+            equity_curve.append((str(day.date()), equity_today))
             self._on_progress("simulate", i + 1, len(trading_days))
             if (i + 1) % 50 == 0:
                 log.info("Backtest progress: %d/%d trading days simulated", i + 1, len(trading_days))
