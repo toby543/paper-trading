@@ -18,7 +18,7 @@ from functools import wraps
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
-from . import auth
+from . import auth, qr
 from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
@@ -184,6 +184,7 @@ def create_app(engine: TradingEngine) -> Flask:
             return render_template(
                 "enroll_2fa.html", error="Incorrect code -- try again.",
                 totp_uri=uri, totp_secret=store["users"][pending]["totp_secret_pending"], username=pending,
+                qr_data_uri=qr.totp_qr_data_uri(uri),
             ), 401
 
         auth.clear_failed_attempts(request.remote_addr)
@@ -198,6 +199,7 @@ def create_app(engine: TradingEngine) -> Flask:
         return render_template(
             "enroll_2fa.html", error=error,
             totp_uri=uri, totp_secret=store["users"][username]["totp_secret_pending"], username=username,
+            qr_data_uri=qr.totp_qr_data_uri(uri),
         )
 
     def _complete_login(username: str) -> None:

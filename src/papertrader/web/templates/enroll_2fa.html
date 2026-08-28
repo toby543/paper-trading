@@ -50,6 +50,17 @@
   .sub { font-size: 12px; color: var(--ink-dim); margin-bottom: 18px; line-height: 1.5; }
   .sub strong { color: var(--ink); }
 
+  .qr-wrap {
+    display: flex; justify-content: center; padding: 14px; margin-bottom: 16px;
+    background: #ffffff; border: 1px solid var(--border); border-radius: 4px;
+  }
+  .qr-wrap img { display: block; width: 176px; height: 176px; image-rendering: pixelated; }
+  .manual-entry { margin-bottom: 18px; }
+  .manual-entry summary {
+    font-size: 11.5px; color: var(--ink-faint); cursor: pointer; user-select: none; margin-bottom: 4px;
+  }
+  .manual-entry summary:hover { color: var(--ink-dim); }
+  .manual-entry .secret-box { margin-top: 8px; margin-bottom: 0; }
   .secret-box {
     background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
     padding: 12px 14px; margin-bottom: 18px;
@@ -83,19 +94,26 @@
     <div class="mark">Momentum <em>Desk</em></div>
     <div class="sub">
       First login for <strong>{{ username }}</strong> — set up two-factor authentication.
-      Open an authenticator app (Google Authenticator, Authy, 1Password, etc.),
-      choose "enter setup key manually", and add the key below.
+      Open an authenticator app (Google Authenticator, Authy, 1Password, etc.)
+      and scan the code below.
     </div>
 
     {% if error %}
     <div class="error">{{ error }}</div>
     {% endif %}
 
-    <div class="secret-box">
-      <div class="secret-label">Setup key</div>
-      <div class="secret-key mono">{{ totp_secret }}</div>
-      <div class="uri-row mono">{{ totp_uri }}</div>
+    <div class="qr-wrap">
+      <img src="{{ qr_data_uri }}" alt="Scan this QR code in your authenticator app" width="176" height="176">
     </div>
+
+    <details class="manual-entry">
+      <summary>Can't scan it? Enter the key manually</summary>
+      <div class="secret-box">
+        <div class="secret-label">Setup key</div>
+        <div class="secret-key mono">{{ totp_secret }}</div>
+        <div class="uri-row mono">{{ totp_uri }}</div>
+      </div>
+    </details>
 
     <form method="post" action="{{ url_for('login_enroll') }}">
       <div class="field">
