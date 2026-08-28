@@ -236,8 +236,11 @@
   .backtest-progress-bar { flex: 1; height: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
   .backtest-progress-bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.3s ease; }
   #backtestProgressText { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; }
-  .backtest-stats { grid-template-columns: repeat(6, 1fr); margin: 0 18px 0; width: auto; }
+  .backtest-stats { grid-template-columns: repeat(7, 1fr); margin: 0 18px 0; width: auto; }
   #btTradesTable { margin-top: 4px; }
+  @media (max-width: 1100px) {
+    .backtest-stats { grid-template-columns: repeat(4, 1fr); }
+  }
   @media (max-width: 900px) {
     .backtest-stats { grid-template-columns: repeat(3, 1fr); }
   }
@@ -463,6 +466,11 @@
           <div class="stat">
             <div class="label">Avg Win / Loss</div>
             <div class="value mono" id="btAvgWinLoss" style="font-size: 14px;">—</div>
+          </div>
+          <div class="stat">
+            <div class="label" id="btBenchmarkLabel">vs Benchmark</div>
+            <div class="value mono" id="btBenchmark" style="font-size: 14px;">—</div>
+            <div class="sub mono" id="btBenchmarkNote">—</div>
           </div>
         </div>
         <div class="chart-wrap">
@@ -1055,6 +1063,22 @@ function renderBacktestResult(result) {
   document.getElementById("btWinRate").textContent = result.win_rate_pct.toFixed(1) + "%";
   document.getElementById("btAvgWinLoss").innerHTML =
     `<span class="up">+${fmt(result.avg_win_inr)}</span> / <span class="down">${fmt(result.avg_loss_inr)}</span>`;
+
+  document.getElementById("btBenchmarkLabel").textContent = "vs " + (result.benchmark_symbol || "Benchmark").replace("^", "");
+  const bmEl = document.getElementById("btBenchmark");
+  const bmNoteEl = document.getElementById("btBenchmarkNote");
+  if (result.benchmark_total_return_pct === null || result.benchmark_total_return_pct === undefined) {
+    bmEl.textContent = "—";
+    bmEl.className = "value mono";
+    bmNoteEl.textContent = "benchmark unavailable";
+  } else {
+    const bm = result.benchmark_total_return_pct;
+    bmEl.textContent = (bm >= 0 ? "+" : "") + bm.toFixed(2) + "% buy & hold";
+    const beat = result.total_return_pct > bm;
+    bmEl.className = "value mono " + pnlClass(result.total_return_pct - bm);
+    bmNoteEl.textContent = beat ? "strategy beat it" : "strategy lagged it";
+    bmNoteEl.className = "sub mono " + (beat ? "up" : "down");
+  }
 
   const curve = result.equity_curve.map(([date, equity]) => ({ timestamp: date, total_equity: equity }));
   renderEquityChart(curve, {

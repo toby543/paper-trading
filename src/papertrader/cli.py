@@ -127,6 +127,12 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     print(f"Round-trip trades:   {result.num_round_trips}")
     print(f"Win rate:            {result.win_rate_pct:.1f}%")
     print(f"Avg win / avg loss:  ₹{result.avg_win_inr:+,.2f} / ₹{result.avg_loss_inr:+,.2f}")
+    if result.benchmark_total_return_pct is not None:
+        beat = "beat" if result.total_return_pct > result.benchmark_total_return_pct else "lagged"
+        print(f"Benchmark ({result.benchmark_symbol}) buy & hold: {result.benchmark_total_return_pct:+.2f}% "
+              f"total return, {result.benchmark_cagr_pct:+.2f}% CAGR -- strategy {beat} it")
+    else:
+        print(f"Benchmark ({result.benchmark_symbol}) buy & hold: unavailable (could not fetch index history)")
 
     if args.trades:
         print("\nTrade log:")

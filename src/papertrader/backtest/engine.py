@@ -61,6 +61,12 @@ class BacktestResult:
     win_rate_pct: float
     avg_win_inr: float
     avg_loss_inr: float
+    benchmark_symbol: str = ""
+    # None (not a genuine 0.0) when the benchmark index couldn't be
+    # fetched or didn't have at least two priced days in the window --
+    # distinguishes "no data" from "a real 0% return".
+    benchmark_total_return_pct: float | None = None
+    benchmark_cagr_pct: float | None = None
     equity_curve: list[tuple[str, float]] = field(default_factory=list)
     trade_log: list[dict] = field(default_factory=list)
 
@@ -205,6 +211,26 @@ class Backtester:
             timestamp=history_upto.index[-1].to_pydatetime(),
             source="backtest",
         )
+
+    def _benchmark_buy_and_hold(self) -> tuple[float | None, float | None]:
+        """Plain buy-and-hold return/CAGR of the benchmark index over
+        [start, end] -- the baseline any active strategy needs to beat to
+        be worth trading at all instead of just holding the index. None,
+        None if the index history is unavailable or too short (never a
+        fabricated 0.0, which would read as a real flat return)."""
+        if self._index_history is None:
+            return None, None
+        window = self._index_history.loc[self.start:self.end]
+        if len(window) < 2:
+            return None, None
+        start_price = float(window["Close"].iloc[0])
+        end_price = float(window["Close"].iloc[-1])
+        if pd.isna(start_price) or pd.isna(end_price) or start_price <= 0:
+            return None, None
+        total_return_pct = (end_price - start_price) / start_price * 100.0
+        elapsed_days = (window.index[-1] - window.index[0]).days
+        cagr = cagr_pct(start_price, end_price, elapsed_days) if elapsed_days > 0 else None
+        return total_return_pct, cagr
 
     def _market_regime_ok(self, index_upto: pd.DataFrame | None) -> bool:
         if not self.regime_cfg.get("enabled", False):
@@ -378,6 +404,7 @@ class Backtester:
         wins = [p for p in trade_pnls if p > 0]
         losses = [p for p in trade_pnls if p <= 0]
         elapsed_days = (self.end - self.start).days
+        benchmark_return_pct, benchmark_cagr = self._benchmark_buy_and_hold()
 
         return BacktestResult(
             start_date=str(self.start.date()),
@@ -394,6 +421,9 @@ class Backtester:
             win_rate_pct=win_rate_pct(trade_pnls),
             avg_win_inr=avg_value(wins),
             avg_loss_inr=avg_value(losses),
+            benchmark_symbol=self.regime_cfg.get("index_symbol", "^NSEI"),
+            benchmark_total_return_pct=benchmark_return_pct,
+            benchmark_cagr_pct=benchmark_cagr,
             equity_curve=equity_curve,
             trade_log=trade_log,
         )
