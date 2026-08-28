@@ -71,6 +71,12 @@
   .topbar-right { display: flex; align-items: center; gap: 18px; }
   .clock { font-size: 12px; color: var(--ink-dim); }
   .clock .zone { color: var(--ink-faint); }
+  .logout-btn {
+    font-family: "IBM Plex Sans", sans-serif; font-size: 11.5px; font-weight: 600;
+    background: none; color: var(--ink-faint); border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 11px; cursor: pointer;
+  }
+  .logout-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
 
   .pill {
     display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 9px; border-radius: 999px;
@@ -324,6 +330,9 @@
     <span class="pill" id="regimePill" style="display:none;"><span class="dot"></span><span id="regimePillText">—</span></span>
     <span class="pill closed" id="marketPill"><span class="dot"></span><span id="marketPillText">Market —</span></span>
     <span class="clock mono" id="clock">—</span>
+    <form method="post" action="{{ url_for('logout') }}" style="margin:0;">
+      <button type="submit" class="logout-btn" title="Sign out">Sign out</button>
+    </form>
   </div>
 </div>
 
@@ -680,6 +689,18 @@
 </div>
 
 <script>
+// Wraps fetch() so an expired/missing session (401 from any @api_login_required
+// route) sends the browser to the login page instead of every panel silently
+// failing to parse a login-page redirect or an {"ok": false} error shape.
+async function authFetch(url, opts) {
+  const res = await fetch(url, opts);
+  if (res.status === 401) {
+    window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
+    throw new Error("Not authenticated");
+  }
+  return res;
+}
+
 const fmt = (n) => Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInt = (n) => Number(n ?? 0).toLocaleString("en-IN");
 const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
@@ -952,7 +973,7 @@ function showEditBanner(kind, html) {
 
 async function loadSettings() {
   try {
-    const data = await fetch("/api/settings").then(r => r.json());
+    const data = await authFetch("/api/settings").then(r => r.json());
     editFields = data.fields;
     renderEditGroups();
     updateSaveButtonState();
@@ -974,7 +995,7 @@ async function saveSettings() {
   btn.textContent = "Saving…";
 
   try {
-    const res = await fetch("/api/settings", {
+    const res = await authFetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
@@ -1111,7 +1132,7 @@ function pollBacktestJob(jobId) {
   clearInterval(backtestPollTimer);
   backtestPollTimer = setInterval(async () => {
     try {
-      const res = await fetch(`/api/backtest/status/${jobId}`);
+      const res = await authFetch(`/api/backtest/status/${jobId}`);
       const data = await res.json();
       if (!data.ok) {
         clearInterval(backtestPollTimer);
@@ -1172,7 +1193,7 @@ async function runBacktest() {
   document.getElementById("backtestProgressText").textContent = "Starting…";
 
   try {
-    const res = await fetch("/api/backtest/run", {
+    const res = await authFetch("/api/backtest/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ start, end, universe_file: universeFile }),
@@ -1241,7 +1262,7 @@ async function scanWatchlist() {
     `<tr class="empty-row"><td colspan="7">Scanning the universe against NSE/Yahoo Finance -- this can take a while…</td></tr>`;
 
   try {
-    const data = await fetch("/api/candidates?limit=15").then(r => r.json());
+    const data = await authFetch("/api/candidates?limit=15").then(r => r.json());
     renderWatchlistNote(data);
     renderWatchlistTable(data.candidates);
     document.getElementById("watchlistMeta").textContent =
@@ -1260,9 +1281,9 @@ document.getElementById("watchlistScanBtn").addEventListener("click", scanWatchl
 async function refresh() {
   try {
     const [summary, trades, curve] = await Promise.all([
-      fetch("/api/summary").then(r => r.json()),
-      fetch("/api/trades?limit=50").then(r => r.json()),
-      fetch("/api/equity_curve").then(r => r.json()),
+      authFetch("/api/summary").then(r => r.json()),
+      authFetch("/api/trades?limit=50").then(r => r.json()),
+      authFetch("/api/equity_curve").then(r => r.json()),
     ]);
     renderStats(summary);
     renderPositions(summary);

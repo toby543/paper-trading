@@ -11,10 +11,14 @@ constructing a second one.
 """
 from __future__ import annotations
 
+import logging
 import os
+from datetime import timedelta
+from functools import wraps
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
+from . import auth
 from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
@@ -24,6 +28,18 @@ from .filters import indian_currency
 from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+log = logging.getLogger(__name__)
+
+
+def _safe_next_path(value: str | None) -> str | None:
+    """Only accept a same-site relative path for post-login redirect.
+    `next` is attacker-controllable (anyone can send someone a
+    `/login?next=...` link), so without this an absolute or
+    protocol-relative URL here would be a classic open-redirect --
+    e.g. `next=https://evil.example/phish` or `next=//evil.example`."""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return None
+    return value
 
 
 def create_app(engine: TradingEngine) -> Flask:
@@ -36,7 +52,76 @@ def create_app(engine: TradingEngine) -> Flask:
     app.config["ENGINE"] = engine
     cfg = engine.cfg
 
+    auth_secrets = auth.load_auth_secrets()
+    if auth_secrets is None:
+        # Backward-compatible: pure-localhost use never required a login.
+        # A random per-process key still gets a real (if throwaway)
+        # session secret rather than Flask's default of none.
+        app.secret_key = os.urandom(32)
+        log.warning(
+            "No authentication configured (no data/auth_secrets.json) -- this dashboard is "
+            "UNPROTECTED. Run `python main.py setup-auth` before exposing it beyond localhost."
+        )
+    else:
+        app.secret_key = auth_secrets["flask_secret_key"]
+    app.permanent_session_lifetime = timedelta(hours=12)
+
+    def login_required(view):
+        """For page routes: redirect to the login page (the browser is
+        expecting an HTML response either way)."""
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if auth_secrets is None or session.get("authenticated"):
+                return view(*args, **kwargs)
+            return redirect(url_for("login", next=request.path))
+        return wrapped
+
+    def api_login_required(view):
+        """For /api/* routes: a redirect would hand the frontend's
+        fetch() an HTML login page instead of JSON, which just fails to
+        parse -- return a 401 JSON error instead so the client can
+        actually react to it."""
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if auth_secrets is None or session.get("authenticated"):
+                return view(*args, **kwargs)
+            return jsonify({"ok": False, "error": "Not authenticated. Please log in again."}), 401
+        return wrapped
+
+    @app.get("/login")
+    def login():
+        if auth_secrets is None or session.get("authenticated"):
+            return redirect(url_for("index"))
+        return render_template("login.html", error=None)
+
+    @app.post("/login")
+    def login_submit():
+        if auth_secrets is None:
+            return redirect(url_for("index"))
+        if auth.is_locked_out(request.remote_addr):
+            return render_template(
+                "login.html",
+                error="Too many failed attempts. Wait 15 minutes before trying again.",
+            ), 429
+
+        password = request.form.get("password", "")
+        code = request.form.get("code", "")
+        if auth.verify_credentials(password, code, auth_secrets):
+            auth.clear_failed_attempts(request.remote_addr)
+            session.permanent = True
+            session["authenticated"] = True
+            return redirect(_safe_next_path(request.args.get("next")) or url_for("index"))
+
+        auth.record_failed_attempt(request.remote_addr)
+        return render_template("login.html", error="Incorrect password or code."), 401
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
     @app.get("/")
+    @login_required
     def index():
         return render_template(
             "index.html",
@@ -54,20 +139,24 @@ def create_app(engine: TradingEngine) -> Flask:
         )
 
     @app.get("/api/summary")
+    @api_login_required
     def api_summary():
         return jsonify(build_summary(engine))
 
     @app.get("/api/trades")
+    @api_login_required
     def api_trades():
         limit = request.args.get("limit", default=100, type=int)
         return jsonify(build_trades(engine, limit=limit))
 
     @app.get("/api/equity_curve")
+    @api_login_required
     def api_equity_curve():
         limit = request.args.get("limit", default=500, type=int)
         return jsonify(build_equity_curve(engine, limit=limit))
 
     @app.get("/api/candidates")
+    @api_login_required
     def api_candidates():
         # Expensive (network calls across the whole universe) -- the
         # dashboard triggers this on demand (a "Scan Now" button), never
@@ -78,6 +167,7 @@ def create_app(engine: TradingEngine) -> Flask:
         return jsonify(build_candidates(engine, limit=limit))
 
     @app.post("/api/backtest/run")
+    @api_login_required
     def api_backtest_run():
         payload = request.get_json(silent=True) or {}
         start = (payload.get("start") or "").strip()
@@ -93,6 +183,7 @@ def create_app(engine: TradingEngine) -> Flask:
         return jsonify({"ok": True, "job_id": job_id})
 
     @app.get("/api/backtest/status/<job_id>")
+    @api_login_required
     def api_backtest_status(job_id: str):
         job = get_job(job_id)
         if job is None:
@@ -100,6 +191,7 @@ def create_app(engine: TradingEngine) -> Flask:
         return jsonify({"ok": True, "job": job})
 
     @app.get("/api/settings")
+    @api_login_required
     def api_get_settings():
         fields = []
         for spec in EDITABLE_SETTINGS:
@@ -107,6 +199,7 @@ def create_app(engine: TradingEngine) -> Flask:
         return jsonify({"fields": fields})
 
     @app.post("/api/settings")
+    @api_login_required
     def api_update_settings():
         payload = request.get_json(silent=True) or {}
         raw_updates = payload.get("updates", [])

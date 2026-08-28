@@ -6,4 +6,5 @@ venv/
 *.egg-info/
 data/state.db
 data/papertrader.log
+data/auth_secrets.json
 .env

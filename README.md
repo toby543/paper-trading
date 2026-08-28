@@ -200,11 +200,51 @@ would surface before it actually happens live.
 host machine's LAN IP (`ipconfig getifaddr en0` on Mac, `hostname -I` on
 Linux, `ipconfig` on Windows), then visit `http://<that-ip>:8000` from a
 phone on the **same Wi-Fi**. This is Flask's development server — fine
-for personal/LAN use, but don't expose it directly to the internet.
+for personal/LAN use.
 
 It reads the same SQLite ledger the engine writes to —
 run it alongside `python main.py run` (or a cron-driven `once`) in a
 separate process/terminal; the dashboard never places trades itself.
+
+### Authentication (password + 2FA)
+
+By default the dashboard has **no login at all** — fine for pure
+localhost/LAN use, but the Edit Settings panel can change the live
+strategy config and the Backtest panel can kick off expensive scans, so
+anything reachable beyond your own network needs a real gate in front
+of it (e.g. if you're running this on a cloud VM with a public IP).
+
+Set it up once with:
+
+```bash
+python main.py setup-auth
+```
+
+This prompts for a password and generates a 2FA (TOTP) secret, writing
+both to `data/auth_secrets.json` — **never** committed to git (already
+in `.gitignore`; this repo is public, so double-check before ever
+force-adding files in `data/`). It prints a setup key/URI to add to an
+authenticator app (Google Authenticator, Authy, 1Password, etc. all
+support "enter setup key manually", no QR scanning needed since this is
+a terminal). Once configured, `python main.py web`/`serve` requires
+your password **and** the current 6-digit code to reach any page —
+without `data/auth_secrets.json` present, the dashboard runs exactly as
+before (unauthenticated), logging a startup warning either way.
+
+Failed login attempts are throttled (5 tries, then a 15-minute lockout
+per source IP) since a login form is exactly what automated scanners
+probe once something is reachable from the internet. Sessions last 12
+hours; use the "Sign out" button in the top bar to end one early, or
+`python main.py setup-auth --force` to reset the password/2FA secret
+(invalidates the old authenticator app entry).
+
+**This alone is not a substitute for network-level restrictions** —
+still lock down inbound access at the firewall/security-group level to
+just your own IP where you can, and prefer HTTPS (e.g. via a reverse
+proxy or a tunnel like Cloudflare Tunnel) over plain HTTP if this is
+reachable from the public internet, since Flask's dev server has no
+TLS of its own and a plain-HTTP login submits your password/code
+unencrypted over the network.
 
 ### Running continuously
 

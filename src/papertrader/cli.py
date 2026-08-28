@@ -149,6 +149,45 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         print(f"\nEquity curve written to {args.export}")
 
 
+def cmd_setup_auth(args: argparse.Namespace) -> None:
+    import getpass
+
+    from .web import auth
+
+    if auth.is_configured() and not args.force:
+        print(f"Authentication is already configured ({auth.AUTH_FILE}).")
+        print("Re-run with --force to overwrite it with a new password/2FA secret "
+              "(this will invalidate the old QR code/setup key in your authenticator app).")
+        return
+
+    print("Setting up dashboard login + 2FA. This does NOT affect trading -- it only")
+    print("gates access to the web dashboard (python main.py web / serve).\n")
+
+    while True:
+        password = getpass.getpass("Choose a dashboard password: ")
+        if len(password) < 8:
+            print("Please use at least 8 characters.\n")
+            continue
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            print("Passwords didn't match, try again.\n")
+            continue
+        break
+
+    record = auth.setup_auth(password, account_label=args.label)
+
+    print(f"\nSaved to {auth.AUTH_FILE} (never commit this file -- it's already in .gitignore).")
+    print("\nNow add the 2FA secret to an authenticator app (Google Authenticator, Authy, etc.):")
+    print("  Choose 'Enter setup key manually' (or scan is not available here since this is a")
+    print("  terminal, not a QR image) and enter:")
+    print(f"\n    Account:    Momentum Desk ({args.label})")
+    print(f"    Secret key: {record['totp_secret']}")
+    print("    Type:       Time-based (TOTP)")
+    print(f"\n  Or, if your app supports pasting an otpauth:// URI directly:\n    {record['totp_uri']}")
+    print("\nOnce added, `python main.py web`/`serve` will require your password + the current")
+    print("6-digit code from that app to access the dashboard.")
+
+
 def cmd_history(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     engine = TradingEngine(cfg)
@@ -186,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--trades", action="store_true", help="Also print the full trade log")
     bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
     bt.set_defaults(func=cmd_backtest)
+
+    setup_auth = sub.add_parser("setup-auth", help="Set up (or reset) the dashboard's password + 2FA login")
+    setup_auth.add_argument("--force", action="store_true", help="Overwrite existing credentials")
+    setup_auth.add_argument("--label", default="papertrader", help="Account label shown in your authenticator app")
+    setup_auth.set_defaults(func=cmd_setup_auth)
 
     return parser
 
