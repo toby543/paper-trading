@@ -214,29 +214,46 @@ strategy config and the Backtest panel can kick off expensive scans, so
 anything reachable beyond your own network needs a real gate in front
 of it (e.g. if you're running this on a cloud VM with a public IP).
 
-Set it up once with:
+Bootstrap the first (admin) account once with:
 
 ```bash
 python main.py setup-auth
 ```
 
-This prompts for a password and generates a 2FA (TOTP) secret, writing
-both to `data/auth_secrets.json` — **never** committed to git (already
-in `.gitignore`; this repo is public, so double-check before ever
-force-adding files in `data/`). It prints a setup key/URI to add to an
-authenticator app (Google Authenticator, Authy, 1Password, etc. all
-support "enter setup key manually", no QR scanning needed since this is
-a terminal). Once configured, `python main.py web`/`serve` requires
-your password **and** the current 6-digit code to reach any page —
-without `data/auth_secrets.json` present, the dashboard runs exactly as
-before (unauthenticated), logging a startup warning either way.
+This just asks for a username and password — **not** a 2FA code. Every
+account (this first one and any created later) sets up its own 2FA the
+first time it logs in from the browser: on first login you're shown a
+setup key/URI to add to an authenticator app (Google Authenticator,
+Authy, 1Password, etc. — "enter setup key manually", no QR scanning
+needed) and asked to enter one code back to confirm you saved it
+correctly before 2FA is actually turned on for that account. From then
+on, that account needs username + password + the current 6-digit code
+on every login.
+
+Credentials for every account live in `data/auth_secrets.json` —
+**never** committed to git (already in `.gitignore`; this repo is
+public, so double-check before ever force-adding files in `data/`).
+Without that file present, the dashboard runs exactly as before
+(unauthenticated), logging a startup warning either way.
+
+**Adding more users:** log in as an admin and use the **Users** link in
+the top bar (`/admin/users`, admin-only — a non-admin account can't
+reach it). From there you can create additional accounts (optionally
+also admins), delete one, or reset a user's 2FA if they lose their
+phone (clears their enrollment so they set it up again on next login).
+A new account you create there goes through the exact same first-login
+2FA setup as the bootstrap admin did — you never see or transmit
+anyone else's TOTP secret, since it's generated in their own browser
+session at first login, not by you.
 
 Failed login attempts are throttled (5 tries, then a 15-minute lockout
 per source IP) since a login form is exactly what automated scanners
 probe once something is reachable from the internet. Sessions last 12
-hours; use the "Sign out" button in the top bar to end one early, or
-`python main.py setup-auth --force` to reset the password/2FA secret
-(invalidates the old authenticator app entry).
+hours; use the "Sign out" button in the top bar to end one early.
+`python main.py setup-auth --force` wipes **every** account and 2FA
+enrollment and starts over from a single new admin — only use it if
+you're actually locked out, not to reset just one user (use the Users
+page's "Reset 2FA" or delete-and-recreate for that instead).
 
 **This alone is not a substitute for network-level restrictions** —
 still lock down inbound access at the firewall/security-group level to

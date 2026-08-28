@@ -154,14 +154,21 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
 
     from .web import auth
 
-    if auth.is_configured() and not args.force:
-        print(f"Authentication is already configured ({auth.AUTH_FILE}).")
-        print("Re-run with --force to overwrite it with a new password/2FA secret "
-              "(this will invalidate the old QR code/setup key in your authenticator app).")
-        return
+    if auth.is_configured():
+        if not args.force:
+            print(f"Authentication is already configured ({auth.AUTH_FILE}).")
+            print("This bootstraps the FIRST admin account only -- to add more users "
+                  "(admin or not), log in as an admin and use the Admin > Users page.")
+            print("Re-run with --force to wipe ALL existing users and start over "
+                  "(irreversible -- only do this if you're locked out).")
+            return
+        print("--force: deleting the existing auth store and every user/2FA enrollment in it.")
+        os.remove(auth.AUTH_FILE)
 
-    print("Setting up dashboard login + 2FA. This does NOT affect trading -- it only")
-    print("gates access to the web dashboard (python main.py web / serve).\n")
+    print("Bootstrapping the first (admin) dashboard account. This does NOT affect")
+    print("trading -- it only gates access to the web dashboard (python main.py web/serve).")
+    print("Two-factor authentication is set up separately, the first time this account")
+    print("logs in from the browser -- not here.\n")
 
     while True:
         username = input("Choose a username: ").strip()
@@ -180,20 +187,14 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
             continue
         break
 
-    record = auth.setup_auth(username, password, account_label=args.label)
+    auth.bootstrap_admin(username, password)
 
     print(f"\nSaved to {auth.AUTH_FILE} (never commit this file -- it's already in .gitignore).")
-    print("\nNow add the 2FA secret to an authenticator app (Google Authenticator, Authy, etc.):")
-    print("  Choose 'Enter setup key manually' (or scan is not available here since this is a")
-    print("  terminal, not a QR image) and enter:")
-    print(f"\n    Account:    Momentum Desk ({args.label})")
-    print(f"    Secret key: {record['totp_secret']}")
-    print("    Type:       Time-based (TOTP)")
-    print(f"\n  Or, if your app supports pasting an otpauth:// URI directly:\n    {record['totp_uri']}")
-    print(f"\nOnce added, `python main.py web`/`serve` will require:")
-    print(f"  Username: {username}")
-    print(f"  Password: (the one you just chose)")
-    print(f"  Code:     the current 6-digit code from your authenticator app")
+    print(f"\nStart the dashboard (`python main.py web` or `serve`) and log in as '{username}' with")
+    print("that password -- you'll be walked through 2FA setup (scan/enter a code into an")
+    print("authenticator app) right there on first login.")
+    print("\nOnce logged in, use the Admin > Users page to create additional accounts -- each")
+    print("new user goes through the same one-time 2FA setup on their own first login.")
 
 
 def cmd_history(args: argparse.Namespace) -> None:
@@ -234,9 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
     bt.set_defaults(func=cmd_backtest)
 
-    setup_auth = sub.add_parser("setup-auth", help="Set up (or reset) the dashboard's password + 2FA login")
-    setup_auth.add_argument("--force", action="store_true", help="Overwrite existing credentials")
-    setup_auth.add_argument("--label", default="papertrader", help="Account label shown in your authenticator app")
+    setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password only; 2FA is set up on first web login)")
+    setup_auth.add_argument("--force", action="store_true", help="Wipe ALL existing users/2FA and start over")
     setup_auth.set_defaults(func=cmd_setup_auth)
 
     return parser

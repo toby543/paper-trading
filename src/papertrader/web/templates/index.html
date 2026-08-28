@@ -330,6 +330,9 @@
     <span class="pill" id="regimePill" style="display:none;"><span class="dot"></span><span id="regimePillText">—</span></span>
     <span class="pill closed" id="marketPill"><span class="dot"></span><span id="marketPillText">Market —</span></span>
     <span class="clock mono" id="clock">—</span>
+    {% if is_admin %}
+    <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none; display:inline-block;">Users</a>
+    {% endif %}
     <form method="post" action="{{ url_for('logout') }}" style="margin:0;">
       <button type="submit" class="logout-btn" title="Sign out">Sign out</button>
     </form>

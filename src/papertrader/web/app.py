@@ -52,8 +52,14 @@ def create_app(engine: TradingEngine) -> Flask:
     app.config["ENGINE"] = engine
     cfg = engine.cfg
 
-    auth_secrets = auth.load_auth_secrets()
-    if auth_secrets is None:
+    def get_store():
+        # Re-read on every call rather than caching at startup: an admin
+        # creating/deleting a user via /admin/users must take effect
+        # immediately for other sessions, without a server restart.
+        return auth.load_auth_store()
+
+    boot_store = get_store()
+    if boot_store is None:
         # Backward-compatible: pure-localhost use never required a login.
         # A random per-process key still gets a real (if throwaway)
         # session secret rather than Flask's default of none.
@@ -63,7 +69,7 @@ def create_app(engine: TradingEngine) -> Flask:
             "UNPROTECTED. Run `python main.py setup-auth` before exposing it beyond localhost."
         )
     else:
-        app.secret_key = auth_secrets["flask_secret_key"]
+        app.secret_key = boot_store["flask_secret_key"]
     app.permanent_session_lifetime = timedelta(hours=12)
 
     def login_required(view):
@@ -71,7 +77,7 @@ def create_app(engine: TradingEngine) -> Flask:
         expecting an HTML response either way)."""
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if auth_secrets is None or session.get("authenticated"):
+            if get_store() is None or session.get("authenticated"):
                 return view(*args, **kwargs)
             return redirect(url_for("login", next=request.path))
         return wrapped
@@ -83,20 +89,43 @@ def create_app(engine: TradingEngine) -> Flask:
         actually react to it."""
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if auth_secrets is None or session.get("authenticated"):
+            if get_store() is None or session.get("authenticated"):
                 return view(*args, **kwargs)
             return jsonify({"ok": False, "error": "Not authenticated. Please log in again."}), 401
         return wrapped
 
+    def admin_required(view):
+        """User-management pages: authenticated AND the logged-in
+        account is flagged is_admin. Deliberately redirects to the
+        ordinary dashboard rather than the login page for a non-admin
+        who's otherwise logged in -- they're not unauthenticated, just
+        not allowed here."""
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            store = get_store()
+            if store is None:
+                return redirect(url_for("index"))
+            if not session.get("authenticated"):
+                return redirect(url_for("login", next=request.path))
+            if not auth.is_admin(store, session.get("username", "")):
+                return redirect(url_for("index"))
+            return view(*args, **kwargs)
+        return wrapped
+
     @app.get("/login")
     def login():
-        if auth_secrets is None or session.get("authenticated"):
+        store = get_store()
+        if store is None or session.get("authenticated"):
             return redirect(url_for("index"))
+        pending = session.get("pending_user")
+        if pending and pending in store["users"]:
+            return _render_pending_login_step(store, pending, error=None)
         return render_template("login.html", error=None)
 
     @app.post("/login")
     def login_submit():
-        if auth_secrets is None:
+        store = get_store()
+        if store is None:
             return redirect(url_for("index"))
         if auth.is_locked_out(request.remote_addr):
             return render_template(
@@ -106,26 +135,141 @@ def create_app(engine: TradingEngine) -> Flask:
 
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        code = request.form.get("code", "")
-        if auth.verify_credentials(username, password, code, auth_secrets):
-            auth.clear_failed_attempts(request.remote_addr)
-            session.permanent = True
-            session["authenticated"] = True
-            return redirect(_safe_next_path(request.args.get("next")) or url_for("index"))
+        if not auth.verify_password(store, username, password):
+            auth.record_failed_attempt(request.remote_addr)
+            return render_template("login.html", error="Incorrect username or password."), 401
 
-        auth.record_failed_attempt(request.remote_addr)
-        return render_template("login.html", error="Incorrect username, password, or code."), 401
+        session["pending_user"] = username
+        session["pending_next"] = _safe_next_path(request.args.get("next"))
+        return _render_pending_login_step(store, username, error=None)
+
+    @app.post("/login/verify")
+    def login_verify():
+        """Step 2 for an already-enrolled account: check the 6-digit code."""
+        pending = session.get("pending_user")
+        store = get_store()
+        if not pending or store is None or pending not in store["users"]:
+            return redirect(url_for("login"))
+        if auth.is_locked_out(request.remote_addr):
+            return render_template("verify_2fa.html", error="Too many failed attempts. Wait 15 minutes before trying again."), 429
+
+        code = request.form.get("code", "")
+        if not auth.verify_totp(store, pending, code):
+            auth.record_failed_attempt(request.remote_addr)
+            return render_template("verify_2fa.html", error="Incorrect code."), 401
+
+        auth.clear_failed_attempts(request.remote_addr)
+        _complete_login(pending)
+        return redirect(session.pop("pending_next", None) or url_for("index"))
+
+    @app.post("/login/enroll")
+    def login_enroll():
+        """Step 2 the FIRST time this account ever logs in: confirm the
+        user actually saved the just-shown TOTP secret before turning
+        2FA on for their account."""
+        pending = session.get("pending_user")
+        store = get_store()
+        if not pending or store is None or pending not in store["users"]:
+            return redirect(url_for("login"))
+        if auth.is_locked_out(request.remote_addr):
+            return render_template("login.html", error="Too many failed attempts. Wait 15 minutes before trying again."), 429
+
+        code = request.form.get("code", "")
+        if not auth.confirm_totp_enrollment(store, pending, code):
+            auth.record_failed_attempt(request.remote_addr)
+            # Wrong code: keep the SAME pending secret (don't regenerate)
+            # so the user can just retry against the QR/setup key they
+            # already have open, instead of it becoming a moving target.
+            uri = auth.start_totp_enrollment(store, pending)
+            return render_template(
+                "enroll_2fa.html", error="Incorrect code -- try again.",
+                totp_uri=uri, totp_secret=store["users"][pending]["totp_secret_pending"], username=pending,
+            ), 401
+
+        auth.clear_failed_attempts(request.remote_addr)
+        _complete_login(pending)
+        return redirect(session.pop("pending_next", None) or url_for("index"))
+
+    def _render_pending_login_step(store: dict, username: str, error: str | None):
+        user = store["users"][username]
+        if user["totp_enrolled"]:
+            return render_template("verify_2fa.html", error=error)
+        uri = auth.start_totp_enrollment(store, username)
+        return render_template(
+            "enroll_2fa.html", error=error,
+            totp_uri=uri, totp_secret=store["users"][username]["totp_secret_pending"], username=username,
+        )
+
+    def _complete_login(username: str) -> None:
+        session.pop("pending_user", None)
+        session.permanent = True
+        session["authenticated"] = True
+        session["username"] = username
 
     @app.post("/logout")
     def logout():
         session.clear()
         return redirect(url_for("login"))
 
+    def _users_view(store: dict) -> list[dict]:
+        return [
+            {"username": u, "is_admin": rec["is_admin"], "totp_enrolled": rec["totp_enrolled"]}
+            for u, rec in sorted(store["users"].items())
+        ]
+
+    @app.get("/admin/users")
+    @admin_required
+    def admin_users():
+        store = get_store()
+        return render_template(
+            "admin_users.html",
+            users=_users_view(store),
+            current_username=session.get("username"),
+            error=request.args.get("error"),
+            message=request.args.get("message"),
+        )
+
+    @app.post("/admin/users")
+    @admin_required
+    def admin_users_create():
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        is_admin_flag = request.form.get("is_admin") == "on"
+        if not username or len(password) < 8:
+            return redirect(url_for("admin_users", error="Username is required and password must be at least 8 characters."))
+        try:
+            auth.create_user(username, password, is_admin=is_admin_flag)
+        except auth.AuthError as exc:
+            return redirect(url_for("admin_users", error=str(exc)))
+        return redirect(url_for("admin_users", message=f"Created '{username}'. They'll set up 2FA on their own first login."))
+
+    @app.post("/admin/users/<username>/delete")
+    @admin_required
+    def admin_users_delete(username: str):
+        if username == session.get("username"):
+            return redirect(url_for("admin_users", error="You can't delete your own account while logged in as it."))
+        try:
+            auth.delete_user(username)
+        except auth.AuthError as exc:
+            return redirect(url_for("admin_users", error=str(exc)))
+        return redirect(url_for("admin_users", message=f"Deleted '{username}'."))
+
+    @app.post("/admin/users/<username>/reset-2fa")
+    @admin_required
+    def admin_users_reset_2fa(username: str):
+        try:
+            auth.reset_totp(username)
+        except auth.AuthError as exc:
+            return redirect(url_for("admin_users", error=str(exc)))
+        return redirect(url_for("admin_users", message=f"Reset 2FA for '{username}' -- they'll set it up again on their next login."))
+
     @app.get("/")
     @login_required
     def index():
+        store = get_store()
         return render_template(
             "index.html",
+            is_admin=bool(store and auth.is_admin(store, session.get("username", ""))),
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
             strategy=cfg.get("strategy", default={}),
