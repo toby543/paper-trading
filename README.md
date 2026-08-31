@@ -117,7 +117,6 @@ src/papertrader/
   cli.py                     Command-line interface
 main.py                      Entry point
 tests/                       pytest unit tests (strategy, broker, calendar)
-streamlit_app/                Optional read-only Streamlit viewer (see below)
 ```
 
 ## Setup
@@ -357,42 +356,6 @@ Tests cover the strategy's entry/exit rules (using synthetic price
 series, no network needed), the paper broker's order/cash/position
 bookkeeping, the NSE market-hours calendar, and the backtest's summary
 statistics (drawdown, CAGR, win rate).
-
-## Streamlit companion viewer
-
-`streamlit_app/dashboard.py` is an optional, separate read-only viewer
-for the account — it does **not** run the trading engine or hold any
-state of its own. It logs into the real Flask dashboard over HTTP using
-the same username/password/2FA flow a browser would, then polls its
-existing `/api/summary`, `/api/trades`, and `/api/equity_curve`
-endpoints and renders them with Streamlit.
-
-This exists because Streamlit Community Cloud can't host the Flask app
-itself: it only runs `streamlit run` scripts (not arbitrary Flask/WSGI
-apps), sleeps after 12 hours with no visitor traffic, and gives no
-durable disk for the SQLite ledger — none of which are compatible with
-an always-on trading engine. The Streamlit script is just an extra
-*view*; your Flask dashboard still needs to be reachable at some URL
-this script's process can reach (e.g. a VM's public IP:port) — pointing
-it at `127.0.0.1` only works if you also run the Streamlit script on
-that same machine.
-
-Run it locally:
-
-```bash
-pip install -r streamlit_app/requirements.txt
-streamlit run streamlit_app/dashboard.py
-```
-
-To deploy it on [Streamlit Community Cloud](https://streamlit.io/cloud)
-(free): point the app's main file at `streamlit_app/dashboard.py` —
-Streamlit Cloud automatically picks up `streamlit_app/requirements.txt`
-since it lives next to the entry point, so the main `requirements.txt`
-(Flask, yfinance, pandas, etc.) is left untouched. Enter your dashboard
-URL, username, password, and 2FA code in the sidebar once it's
-deployed. If your account hasn't finished 2FA enrollment yet, it'll
-tell you to do that from the main dashboard in a browser first — this
-viewer doesn't render the QR-code enrollment step itself.
 
 ## Notes & limitations
 
