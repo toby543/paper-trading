@@ -39,6 +39,7 @@ class Trade:
     charges: float
     reason: str
     timestamp: str
+    realized_pnl: float | None = None  # set for SELL trades only
 
     @property
     def gross_value(self) -> float:

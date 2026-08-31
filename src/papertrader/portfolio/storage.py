@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS trades (
     price REAL NOT NULL,
     charges REAL NOT NULL,
     reason TEXT NOT NULL,
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    realized_pnl REAL
 );
 
 CREATE TABLE IF NOT EXISTS equity_curve (
@@ -64,6 +65,9 @@ class Storage:
             row = conn.execute("SELECT cash FROM account WHERE id = 1").fetchone()
             if row is None:
                 conn.execute("INSERT INTO account (id, cash) VALUES (1, ?)", (starting_capital,))
+            existing_cols = {r["name"] for r in conn.execute("PRAGMA table_info(trades)").fetchall()}
+            if "realized_pnl" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
 
     # ---- account -----------------------------------------------------
     def get_cash(self) -> float:
@@ -111,9 +115,10 @@ class Storage:
     def record_trade(self, trade: Trade) -> None:
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO trades (symbol, side, quantity, price, charges, reason, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (trade.symbol, trade.side, trade.quantity, trade.price, trade.charges, trade.reason, trade.timestamp),
+                """INSERT INTO trades (symbol, side, quantity, price, charges, reason, timestamp, realized_pnl)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (trade.symbol, trade.side, trade.quantity, trade.price, trade.charges, trade.reason,
+                 trade.timestamp, trade.realized_pnl),
             )
 
     def get_trades(self, limit: int | None = None) -> list[Trade]:
@@ -126,9 +131,15 @@ class Storage:
             Trade(
                 id=r["id"], symbol=r["symbol"], side=r["side"], quantity=r["quantity"],
                 price=r["price"], charges=r["charges"], reason=r["reason"], timestamp=r["timestamp"],
+                realized_pnl=r["realized_pnl"] if "realized_pnl" in r.keys() else None,
             )
             for r in rows
         ]
+
+    def get_total_realized_pnl(self) -> float:
+        with self._conn() as conn:
+            row = conn.execute("SELECT SUM(realized_pnl) AS total FROM trades WHERE side = 'SELL'").fetchone()
+        return float(row["total"]) if row and row["total"] is not None else 0.0
 
     # ---- equity curve -----------------------------------------------------
     def record_equity(self, cash: float, positions_value: float) -> None:

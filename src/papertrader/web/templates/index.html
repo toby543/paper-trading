@@ -96,7 +96,7 @@
 
   /* ---------- stat strip ---------- */
   .stats {
-    display: grid; grid-template-columns: repeat(6, 1fr);
+    display: grid; grid-template-columns: repeat(7, 1fr);
     border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
     margin-bottom: 28px; background: var(--surface);
   }
@@ -273,7 +273,7 @@
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .stats { grid-template-columns: repeat(3, 1fr); }
-    .stat:nth-child(3) { border-right: none; }
+    .stat:nth-child(3n) { border-right: none; }
   }
   @media (max-width: 560px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -725,6 +725,7 @@ function renderStats(s) {
     { label: "Cash", value: "₹" + fmt(s.cash), sub: "available to deploy" },
     { label: "Positions Value", value: "₹" + fmt(s.positions_value), sub: s.open_positions + " holding" + (s.open_positions === 1 ? "" : "s") + ", marked live" },
     { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + "₹" + fmt(unrealized), sub: "on open positions", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
+    { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_realized_pnl), sub: "from closed sells", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
     { label: "Universe Scanned", value: fmtInt(s.universe_size), sub: "NSE symbols" },
   ];
@@ -794,6 +795,7 @@ function renderTrades(trades) {
       <div class="ticker-mid">
         <span class="ticker-sym">${t.symbol}</span>
         <span class="ticker-detail mono">${fmtInt(t.quantity)} @ ₹${fmt(t.price)}</span>
+        ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-detail mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}₹${fmt(t.realized_pnl)}</span>` : ""}
       </div>
       <div class="ticker-reason">${t.reason}</div>
     </div>

@@ -73,6 +73,7 @@ class PaperBroker:
         fill_price = self._fill_price(ltp, "SELL")
         proceeds = fill_price * quantity - self.flat_charges_inr
         now = datetime.now().isoformat(timespec="seconds")
+        realized_pnl = (fill_price - existing.avg_price) * quantity - self.flat_charges_inr
 
         remaining = existing.quantity - quantity
         if remaining == 0:
@@ -82,7 +83,7 @@ class PaperBroker:
             self.storage.upsert_position(existing)
 
         self.storage.set_cash(self.storage.get_cash() + proceeds)
-        trade = Trade(id=None, symbol=symbol, side="SELL", quantity=quantity, price=fill_price, charges=self.flat_charges_inr, reason=reason, timestamp=now)
+        trade = Trade(id=None, symbol=symbol, side="SELL", quantity=quantity, price=fill_price, charges=self.flat_charges_inr, reason=reason, timestamp=now, realized_pnl=realized_pnl)
         self.storage.record_trade(trade)
         log.info("SELL %-10s qty=%-6d price=%-10.2f reason=%s", symbol, quantity, fill_price, reason)
         return trade
