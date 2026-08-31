@@ -6,7 +6,10 @@ account:
   state_file: data/state.db     # SQLite file holding cash/positions/trades
 
 universe:
-  file: data/universe.csv       # NSE symbols to scan (no .NS suffix)
+  file: data/universe_nifty500.csv   # NSE symbols to scan (no .NS suffix). Loaded once at
+                                      # startup -- changing this needs a restart to take effect.
+                                      # data/universe.csv is a smaller ~100-symbol starter list;
+                                      # data/universe_nifty500.csv is the full cleaned Nifty 500.
 
 strategy:
   # Which strategy drives entry selection:

@@ -13,6 +13,12 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # path: dotted tuple into config.yaml. group/label/desc/unit: for the UI.
 # type: bool | int | float | choice | time | str.
 EDITABLE_SETTINGS: list[dict] = [
+    {"path": ("universe", "file"), "type": "choice",
+     "choices": ["data/universe.csv", "data/universe_nifty500.csv"],
+     "group": "Strategy — Entry", "label": "Universe file", "unit": "",
+     "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
+             "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "
+             "startup -- restart required for a change to take effect."},
     {"path": ("strategy", "mode"), "type": "choice", "choices": ["52w_high", "cross_sectional_momentum"],
      "group": "Strategy — Entry", "label": "Strategy mode", "unit": "",
      "desc": "52w_high: accept/reject each stock independently. cross_sectional_momentum: "
