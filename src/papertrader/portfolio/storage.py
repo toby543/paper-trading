@@ -68,6 +68,29 @@ class Storage:
             existing_cols = {r["name"] for r in conn.execute("PRAGMA table_info(trades)").fetchall()}
             if "realized_pnl" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
+            self._backfill_realized_pnl(conn)
+
+    def _backfill_realized_pnl(self, conn) -> None:
+        """Fill in realized_pnl for SELL trades recorded before that column
+        existed, by replaying the full trade history per symbol to
+        reconstruct the weighted-average cost at the time of each sell."""
+        rows = conn.execute(
+            "SELECT id, symbol, side, quantity, price, charges, realized_pnl FROM trades ORDER BY id ASC"
+        ).fetchall()
+        if not any(r["side"] == "SELL" and r["realized_pnl"] is None for r in rows):
+            return
+        avg_cost: dict[str, tuple[int, float]] = {}
+        for r in rows:
+            qty, avg = avg_cost.get(r["symbol"], (0, 0.0))
+            if r["side"] == "BUY":
+                new_qty = qty + r["quantity"]
+                new_avg = (avg * qty + r["price"] * r["quantity"]) / new_qty if new_qty else 0.0
+                avg_cost[r["symbol"]] = (new_qty, new_avg)
+            else:  # SELL
+                if r["realized_pnl"] is None:
+                    realized = (r["price"] - avg) * r["quantity"] - r["charges"]
+                    conn.execute("UPDATE trades SET realized_pnl = ? WHERE id = ?", (realized, r["id"]))
+                avg_cost[r["symbol"]] = (qty - r["quantity"], avg)
 
     # ---- account -----------------------------------------------------
     def get_cash(self) -> float:
