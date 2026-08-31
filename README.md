@@ -87,6 +87,26 @@ Settings panel offers common alternatives (Nifty Bank, Nifty IT, Nifty
 any other Yahoo Finance ticker directly; an unreachable/invalid ticker
 just fails that check open rather than blocking trading.
 
+**Sector concentration cap:** momentum rallies often cluster hard in one
+or two sectors (e.g. an all-IT or all-PSU-bank run), which can quietly
+turn a diversified-looking book into a handful of correlated bets.
+`risk.max_positions_per_sector` (default 3) caps how many open positions
+may share the same sector; sector is looked up via yfinance and cached
+for the life of the process. An unclassifiable symbol (unknown sector)
+never blocks a trade — it fails open, same as every other optional
+filter here. 0 disables the cap. Applies to both live trading and
+backtesting (sector is effectively static, so today's classification is
+a reasonable stand-in for the historical value).
+
+**Earnings-date blackout:** `strategy.earnings_blackout_days` (default 3,
+0 disables it) skips new entries when a stock has scheduled results
+within that many days, to avoid buying right into an earnings gap the
+strategy has no way to predict. This is best-effort and **live trading
+only** — it relies on yfinance's earnings calendar, which is missing for
+some smaller names (fails open, same philosophy as above) and isn't
+applied during backtesting, since a *historical* point-in-time earnings
+calendar isn't available from this data source.
+
 **Data:** real-time quotes and 52-week high/low come from the NSE
 website's own JSON API; historical daily bars used for moving averages
 and momentum returns come from Yahoo Finance (`.NS` tickers). If NSE is

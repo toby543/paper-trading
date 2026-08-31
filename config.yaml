@@ -57,6 +57,14 @@ strategy:
   # share count.
   min_ltp_inr: 0
   max_ltp_inr: 0
+  # Skip new entries if the stock has scheduled results within this many
+  # days (0 = disabled). Avoids buying into an earnings gap the strategy
+  # has no way to predict. Best-effort/live only: relies on yfinance's
+  # earnings calendar, which is missing for some smaller names (fails
+  # open -- unknown earnings date never blocks a trade) and isn't applied
+  # during backtesting, since a *historical* point-in-time earnings
+  # calendar isn't available from this data source.
+  earnings_blackout_days: 3
   # Only used when strategy.mode is "cross_sectional_momentum" (above).
   cross_sectional:
     # Trailing-return window and the classic "12-1" skip of the most
@@ -98,6 +106,12 @@ risk:
   exit_below_fast_ma: true
   # Never let a single scan commit more than this fraction of free cash.
   max_cash_deployed_per_scan_pct: 40.0
+  # Cap on open positions sharing the same sector, so a momentum rally
+  # concentrated in one sector (e.g. all-IT or all-PSU-bank) can't turn
+  # into an undiversified, correlated book. 0 = disabled. Sector is
+  # looked up via yfinance and fails open (never blocks a trade) if it
+  # can't be determined for a symbol.
+  max_positions_per_sector: 3
 
 execution:
   # Simulated slippage applied to paper fills.
