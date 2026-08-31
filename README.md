@@ -126,6 +126,22 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### One-click launchers (Windows / macOS)
+
+If you'd rather not run commands by hand, double-click:
+
+- **`start_windows.bat`** on Windows
+- **`start_mac.command`** on macOS
+
+Either one sets up a virtual environment and installs dependencies the
+first time you run it (every run after that starts straight up), walks
+you through `setup-auth` the first time (creating the dashboard's admin
+account), then starts the dashboard and opens it in your browser at
+`http://127.0.0.1:8000`. Python 3 must already be installed on the
+machine — these scripts automate the setup/run steps, they don't bundle
+Python itself. Leave the terminal/command window open while it's
+running; press Ctrl+C in it to stop the app.
+
 ## Usage
 
 Run the autonomous loop (blocks, trades continuously during market hours):
