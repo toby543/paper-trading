@@ -47,6 +47,17 @@ echo ""
 echo "Starting Momentum Desk -- http://127.0.0.1:8000"
 echo "Leave this window open while it's trading. Press Ctrl+C here to stop it."
 echo ""
-python main.py serve
+echo "This Mac won't go to sleep on its own while the app is running (caffeinate -i)."
+echo "Note: closing the lid still sleeps it regardless -- keep the lid open and"
+echo "plugged in, or connect an external display, if you need to run lid-closed."
+echo ""
+
+# caffeinate -i holds an assertion that prevents *idle* sleep for as long as
+# the process it wraps (python main.py serve) is running, and releases it
+# automatically the moment that process exits (Ctrl+C or otherwise) -- no
+# separate step to remember to undo. It does NOT prevent lid-closed
+# (clamshell) sleep; that needs the Mac plugged in with an external display,
+# regardless of caffeinate.
+caffeinate -i python main.py serve
 
 pause_and_exit 0
