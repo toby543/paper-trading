@@ -1,0 +1,21 @@
+[Unit]
+Description=Momentum Desk paper trading dashboard
+# Wait for a real network connection before starting -- the engine fetches
+# NSE/Yahoo Finance data immediately on startup, so starting before the
+# network is up would just mean a burst of failed requests to retry.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+ExecStart=__REPO_DIR__/.venv/bin/python __REPO_DIR__/main.py serve --host 0.0.0.0 --port 8000
+# --host 0.0.0.0 so the dashboard is reachable from other devices on the
+# same network (a phone, a laptop) -- 127.0.0.1 would only work from a
+# browser running on the Pi itself, which defeats the point of a headless box.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

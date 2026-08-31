@@ -142,6 +142,51 @@ machine — these scripts automate the setup/run steps, they don't bundle
 Python itself. Leave the terminal/command window open while it's
 running; press Ctrl+C in it to stop the app.
 
+### Always-on setup (Raspberry Pi)
+
+Unlike the Windows/Mac launchers above (which run in a terminal you keep
+open), a Raspberry Pi is normally headless and meant to run this 24/7 in
+the background. `deploy/raspberrypi/setup_pi.sh` sets it up as a
+`systemd` service instead — it starts on boot and restarts itself if it
+ever crashes:
+
+```bash
+git clone <your-repo-url>
+cd paper-trading
+bash deploy/raspberrypi/setup_pi.sh
+```
+
+This installs a 1GB swap file (if one doesn't already exist — a Pi's
+usable RAM is often tighter than advertised once Flask/pandas/numpy are
+all loaded together), creates the virtual environment and installs
+dependencies (Raspberry Pi OS's `pip` is preconfigured to use
+[piwheels.org](https://www.piwheels.org/) for precompiled ARM wheels of
+pandas/numpy, so this doesn't trigger a slow from-source build), walks
+you through `setup-auth` the first time, then installs and starts
+`deploy/raspberrypi/papertrader.service`. The dashboard binds to
+`0.0.0.0:8000` (not just `127.0.0.1`) so it's reachable from other
+devices on the same network — the script prints the URL to use
+(`http://<pi's-IP>:8000`) at the end.
+
+Useful commands afterward:
+
+```bash
+sudo systemctl status papertrader     # is it running?
+journalctl -u papertrader -f          # follow the logs
+sudo systemctl restart papertrader    # restart (e.g. after git pull)
+```
+
+To pick up a code update, `git pull` then `sudo systemctl restart
+papertrader` — you don't need to re-run `setup_pi.sh` unless
+`requirements.txt` changed or this is a fresh clone.
+
+A Pi Zero W/Zero 2 W or an original Pi 1 Model B (256–512MB RAM,
+single-core) will run this but slowly — consider pointing
+`universe.file` at the smaller `data/universe.csv` (~105 symbols)
+instead of the full Nifty 500 list on those boards. A Pi 2 Model B or
+newer (1GB+ RAM, quad-core) handles the full Nifty 500 universe
+comfortably.
+
 ## Usage
 
 Run the autonomous loop (blocks, trades continuously during market hours):
