@@ -46,7 +46,6 @@ class TradingEngine:
             max_open_positions=cfg.get("risk", "max_open_positions", default=10),
             position_size_pct_of_equity=cfg.get("risk", "position_size_pct_of_equity", default=8.0),
             max_cash_deployed_per_scan_pct=cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0),
-            max_positions_per_sector=cfg.get("risk", "max_positions_per_sector", default=0),
         )
         self.data = MarketDataClient(
             preferred=cfg.get("data_source", "preferred", default="nse"),
@@ -180,18 +179,6 @@ class TradingEngine:
         # candidates picked in this pass.
         equity = self.broker.equity({})
         spent = 0.0
-
-        # Seed sector counts from currently-held positions so a new buy is
-        # judged against the whole book, not just this scan's picks.
-        sector_counts: dict[str, int] = {}
-        if self.risk.max_positions_per_sector:
-            for held_symbol in positions:
-                held_sector = self.data.get_sector(held_symbol)
-                if held_sector:
-                    sector_counts[held_sector] = sector_counts.get(held_sector, 0) + 1
-
-        earnings_blackout_days = self.strategy_cfg.get("earnings_blackout_days", 0)
-
         for cand in ranked:
             qty = self.risk.position_size_shares(equity, cand.ltp)
             if qty <= 0:
@@ -200,20 +187,6 @@ class TradingEngine:
             if spent + cost_estimate > scan_budget:
                 log.info("Per-scan cash budget reached; deferring %s to next scan", cand.symbol)
                 continue
-
-            sector = self.data.get_sector(cand.symbol) if self.risk.max_positions_per_sector else None
-            if self.risk.sector_cap_reached(sector_counts, sector):
-                log.info("Sector cap reached for %s (%s); skipping %s this scan", sector, self.risk.max_positions_per_sector, cand.symbol)
-                continue
-
-            if earnings_blackout_days:
-                next_earnings = self.data.get_next_earnings_date(cand.symbol)
-                if next_earnings is not None:
-                    days_until = (next_earnings.date() - datetime.now().date()).days
-                    if 0 <= days_until <= earnings_blackout_days:
-                        log.info("Earnings blackout for %s (results in %d day(s)); skipping this scan", cand.symbol, days_until)
-                        continue
-
             if mode == "cross_sectional_momentum":
                 cs_cfg = self.strategy_cfg.get("cross_sectional") or {}
                 reason = (
@@ -231,13 +204,9 @@ class TradingEngine:
                     reason += f", RS {cand.relative_strength_pct:+.1f}pp vs index"
                 if cand.volume_multiple is not None:
                     reason += f", volume {cand.volume_multiple:.1f}x baseline"
-            if sector:
-                reason += f", sector={sector}"
             try:
                 self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
                 spent += cost_estimate
-                if sector:
-                    sector_counts[sector] = sector_counts.get(sector, 0) + 1
             except InsufficientFundsError as exc:
                 log.warning("Insufficient funds for %s: %s", cand.symbol, exc)
 

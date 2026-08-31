@@ -58,10 +58,6 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "max_ltp_inr"), "type": "float", "min": 0,
      "group": "Strategy — Entry", "label": "Max price", "unit": "₹ (0 = off)",
      "desc": "Skip stocks trading above this price."},
-    {"path": ("strategy", "earnings_blackout_days"), "type": "int", "min": 0, "max": 30,
-     "group": "Strategy — Entry", "label": "Earnings blackout", "unit": "days (0 = off)",
-     "desc": "Skip new entries with scheduled results within this many days. Live only -- "
-             "not applied during backtesting, since a historical earnings calendar isn't available."},
 
     {"path": ("strategy", "cross_sectional", "lookback_days"), "type": "int", "min": 5, "max": 500,
      "group": "Cross-sectional momentum", "label": "Lookback window", "unit": "days",
@@ -118,9 +114,6 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Risk — Exit & sizing", "label": "Max open positions", "unit": "", "desc": ""},
     {"path": ("risk", "max_cash_deployed_per_scan_pct"), "type": "float", "min": 1, "max": 100,
      "group": "Risk — Exit & sizing", "label": "Max cash deployed / scan", "unit": "% of free cash", "desc": ""},
-    {"path": ("risk", "max_positions_per_sector"), "type": "int", "min": 0, "max": 50,
-     "group": "Risk — Exit & sizing", "label": "Max per sector", "unit": "positions (0 = off)",
-     "desc": "Cap on open positions sharing the same sector, to limit correlated concentration risk."},
 
     {"path": ("execution", "slippage_bps"), "type": "float", "min": 0, "max": 1000,
      "group": "Execution realism", "label": "Slippage", "unit": "bps", "desc": ""},

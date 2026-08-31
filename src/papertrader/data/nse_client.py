@@ -104,12 +104,6 @@ class MarketDataClient:
         self.timeout = timeout
         self._nse = NSESession(timeout=timeout)
         self._history_cache: dict[str, pd.DataFrame] = {}
-        # Sector and earnings-date lookups hit yfinance's slower `.info` /
-        # calendar endpoints (nothing NSE-native serves this), and both are
-        # effectively static for the lifetime of one process run -- cache
-        # indefinitely per symbol rather than re-fetching every scan.
-        self._sector_cache: dict[str, Optional[str]] = {}
-        self._earnings_cache: dict[str, Optional[datetime]] = {}
         self._last_yfinance_call = 0.0
         # Once NSE fails once, its anti-bot layer is almost always blocking
         # this network for the rest of the run too. Retrying it per-symbol
@@ -207,50 +201,6 @@ class MarketDataClient:
         df.attrs["_fetched_at"] = now
         self._history_cache[cache_key] = df
         return df
-
-    # ---- sector / earnings (used by portfolio-construction filters) --
-    def get_sector(self, symbol: str) -> Optional[str]:
-        """GICS-style sector name for `symbol`, or None if it can't be
-        determined -- callers should fail open (never block a trade) on
-        None, since this is a diversification nicety, not a core signal."""
-        if symbol in self._sector_cache:
-            return self._sector_cache[symbol]
-        sector: Optional[str] = None
-        try:
-            import yfinance as yf
-
-            self._throttle_yfinance()
-            info = yf.Ticker(symbol + ".NS").info
-            sector = info.get("sector") or None
-        except Exception as exc:  # noqa: BLE001 - best-effort classification only
-            log.debug("Could not fetch sector for %s: %s", symbol, exc)
-        self._sector_cache[symbol] = sector
-        return sector
-
-    def get_next_earnings_date(self, symbol: str) -> Optional[datetime]:
-        """The next scheduled earnings date for `symbol`, or None if it's
-        unknown/unavailable. Best-effort: yfinance's earnings calendar is
-        itself sourced from estimates and can be missing, stale, or absent
-        for smaller names -- callers should fail open (never block a trade)
-        on None, same as every other optional filter in this codebase."""
-        if symbol in self._earnings_cache:
-            return self._earnings_cache[symbol]
-        next_date: Optional[datetime] = None
-        try:
-            import yfinance as yf
-
-            self._throttle_yfinance()
-            ticker = yf.Ticker(symbol + ".NS")
-            dates_df = ticker.get_earnings_dates(limit=4)
-            if dates_df is not None and not dates_df.empty:
-                now = pd.Timestamp.now(tz=dates_df.index.tz)
-                future = dates_df.index[dates_df.index >= now]
-                if len(future):
-                    next_date = future.min().to_pydatetime()
-        except Exception as exc:  # noqa: BLE001 - best-effort, never fatal
-            log.debug("Could not fetch earnings date for %s: %s", symbol, exc)
-        self._earnings_cache[symbol] = next_date
-        return next_date
 
     def get_avg_daily_turnover(self, symbol: str, days: int = 20, history: pd.DataFrame | None = None) -> float:
         # Reuse an already-fetched history frame when the caller has one

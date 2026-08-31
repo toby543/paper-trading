@@ -115,7 +115,6 @@ class Backtester:
             max_open_positions=cfg.get("risk", "max_open_positions", default=10),
             position_size_pct_of_equity=cfg.get("risk", "position_size_pct_of_equity", default=8.0),
             max_cash_deployed_per_scan_pct=cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0),
-            max_positions_per_sector=cfg.get("risk", "max_positions_per_sector", default=0),
         )
         self.starting_capital = float(cfg.get("account", "starting_capital", default=1_000_000.0))
 
@@ -130,12 +129,6 @@ class Backtester:
 
         self._history: dict[str, pd.DataFrame] = {}
         self._index_history: pd.DataFrame | None = None
-        # Sector is effectively static, so today's classification is a fine
-        # stand-in for "what it was back then" -- unlike a historical
-        # earnings calendar, there's no point-in-time data problem here.
-        # Fetched lazily (only for symbols that actually rank as
-        # candidates) and cached for the life of this backtest run.
-        self._sector_cache: dict[str, str | None] = {}
 
     def __del__(self):
         try:
@@ -239,20 +232,6 @@ class Backtester:
         cagr = cagr_pct(start_price, end_price, elapsed_days) if elapsed_days > 0 else None
         return total_return_pct, cagr
 
-    def _get_sector(self, symbol: str) -> str | None:
-        if symbol in self._sector_cache:
-            return self._sector_cache[symbol]
-        sector: str | None = None
-        try:
-            import yfinance as yf
-
-            info = yf.Ticker(symbol + ".NS").info
-            sector = info.get("sector") or None
-        except Exception as exc:  # noqa: BLE001 - best-effort classification only
-            log.debug("Could not fetch sector for %s: %s", symbol, exc)
-        self._sector_cache[symbol] = sector
-        return sector
-
     def _market_regime_ok(self, index_upto: pd.DataFrame | None) -> bool:
         if not self.regime_cfg.get("enabled", False):
             return True
@@ -342,14 +321,6 @@ class Backtester:
         scan_budget = self.risk.scan_cash_budget(free_cash)
         equity_now = self.broker.equity({})
         spent = 0.0
-
-        sector_counts: dict[str, int] = {}
-        if self.risk.max_positions_per_sector:
-            for held_symbol in positions:
-                held_sector = self._get_sector(held_symbol)
-                if held_sector:
-                    sector_counts[held_sector] = sector_counts.get(held_sector, 0) + 1
-
         for cand in ranked:
             qty = self.risk.position_size_shares(equity_now, cand.ltp)
             if qty <= 0:
@@ -357,19 +328,11 @@ class Backtester:
             cost_estimate = qty * cand.ltp
             if spent + cost_estimate > scan_budget:
                 continue
-
-            sector = self._get_sector(cand.symbol) if self.risk.max_positions_per_sector else None
-            if self.risk.sector_cap_reached(sector_counts, sector):
-                continue
-
-            reason = f"score={cand.score:.1f}" + (f", sector={sector}" if sector else "")
             try:
-                trade = self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
+                trade = self.broker.buy(cand.symbol, qty, cand.ltp, reason=f"score={cand.score:.1f}")
             except InsufficientFundsError:
                 continue
             spent += cost_estimate
-            if sector:
-                sector_counts[sector] = sector_counts.get(sector, 0) + 1
             trade_log.append({
                 "date": str(day.date()), "side": "BUY", "symbol": cand.symbol,
                 "qty": qty, "price": round(trade.price, 2), "reason": trade.reason, "pnl": None,
