@@ -79,6 +79,7 @@ def build_summary(engine) -> dict:
     total_pnl = total_equity - starting_capital
     total_pnl_pct = (total_pnl / starting_capital * 100.0) if starting_capital else 0.0
     total_realized_pnl = engine.storage.get_total_realized_pnl()
+    total_realized_pnl_pct = (total_realized_pnl / starting_capital * 100.0) if starting_capital else 0.0
 
     return {
         "as_of": datetime.now().isoformat(timespec="seconds"),
@@ -91,6 +92,7 @@ def build_summary(engine) -> dict:
         "total_pnl": round(total_pnl, 2),
         "total_pnl_pct": round(total_pnl_pct, 2),
         "total_realized_pnl": round(total_realized_pnl, 2),
+        "total_realized_pnl_pct": round(total_realized_pnl_pct, 2),
         "open_positions": len(positions),
         "max_positions": engine.risk.max_open_positions,
         "universe_size": len(engine.universe),

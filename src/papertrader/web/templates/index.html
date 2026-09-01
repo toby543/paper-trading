@@ -752,12 +752,14 @@ setInterval(tickClock, 1000);
 
 function renderStats(s) {
   const unrealized = s.positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+  const unrealizedCostBasis = s.positions.reduce((sum, p) => sum + p.avg_price * p.quantity, 0);
+  const unrealizedPct = unrealizedCostBasis ? (unrealized / unrealizedCostBasis * 100) : 0;
   const cards = [
     { label: "Total Equity", value: "₹" + fmt(s.total_equity), sub: (s.total_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_pnl) + " (" + (s.total_pnl_pct >= 0 ? "+" : "") + s.total_pnl_pct + "%)", subCls: pnlClass(s.total_pnl), hero: true },
     { label: "Cash", value: "₹" + fmt(s.cash), sub: "available to deploy" },
     { label: "Positions Value", value: "₹" + fmt(s.positions_value), sub: s.open_positions + " holding" + (s.open_positions === 1 ? "" : "s") + ", marked live" },
-    { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + "₹" + fmt(unrealized), sub: "on open positions", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
-    { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_realized_pnl), sub: "from closed sells", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
+    { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + "₹" + fmt(unrealized), sub: "on open positions (" + (unrealizedPct >= 0 ? "+" : "") + unrealizedPct.toFixed(2) + "%)", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
+    { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_realized_pnl), sub: "from closed sells (" + (s.total_realized_pnl_pct >= 0 ? "+" : "") + s.total_realized_pnl_pct + "%)", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
     { label: "Universe Scanned", value: fmtInt(s.universe_size),
       sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
