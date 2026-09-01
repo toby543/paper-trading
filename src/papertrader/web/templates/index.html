@@ -815,7 +815,7 @@ function renderTrades(trades) {
     <div class="ticker-item">
       <div class="ticker-top">
         <span class="badge-side ${t.side.toLowerCase()}">${t.side}</span>
-        <span class="ticker-time mono">${timeOf(t.timestamp)}</span>
+        <span class="ticker-time mono">${shortDate(t.timestamp)}, ${timeOf(t.timestamp)}</span>
       </div>
       <div class="ticker-mid">
         <span class="ticker-sym">${t.symbol}</span>
