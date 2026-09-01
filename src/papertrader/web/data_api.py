@@ -7,6 +7,15 @@ from datetime import datetime
 
 from ..strategy.momentum_52w_high import is_market_in_uptrend
 
+# label, Yahoo Finance ticker -- shown as sparkline cards on the dashboard,
+# independent of whatever regime.index_symbol is currently configured as
+# the strategy's benchmark.
+_INDEX_TILES = [
+    ("Nifty 50", "^NSEI"),
+    ("Nifty 500", "^CRSLDX"),
+    ("Sensex", "^BSESN"),
+]
+
 
 def _safe_quote(engine, symbol: str):
     try:
@@ -142,6 +151,40 @@ def build_candidates(engine, limit: int = 20) -> dict:
         "total_qualifying": len(ranked),
         "candidates": rows,
     }
+
+
+def build_index_charts(engine, period: str = "6mo") -> list[dict]:
+    """Sparkline data for the Nifty 50 / Nifty 500 / Sensex cards: each
+    stock's own price scale is wildly different (~25,000 vs. ~80,000), so
+    the series is normalized to % change from the first close in the
+    window rather than plotted at absolute levels."""
+    charts = []
+    for label, symbol in _INDEX_TILES:
+        try:
+            history = engine.data.get_index_history(symbol, period=period)
+        except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky index fetch
+            charts.append({"label": label, "symbol": symbol, "available": False, "points": [], "last_value": None, "total_return_pct": None})
+            continue
+
+        closes = history["Close"].dropna()
+        if len(closes) < 2:
+            charts.append({"label": label, "symbol": symbol, "available": False, "points": [], "last_value": None, "total_return_pct": None})
+            continue
+
+        base = float(closes.iloc[0])
+        points = [
+            {"date": idx.strftime("%Y-%m-%d"), "pct": round((float(v) - base) / base * 100.0, 2)}
+            for idx, v in closes.items()
+        ]
+        charts.append({
+            "label": label,
+            "symbol": symbol,
+            "available": True,
+            "points": points,
+            "last_value": round(float(closes.iloc[-1]), 2),
+            "total_return_pct": points[-1]["pct"],
+        })
+    return charts
 
 
 def build_equity_curve(engine, limit: int = 500) -> list[dict]:

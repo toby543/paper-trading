@@ -23,7 +23,7 @@ from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
-from .data_api import build_candidates, build_equity_curve, build_summary, build_trades
+from .data_api import build_candidates, build_equity_curve, build_index_charts, build_summary, build_trades
 from .filters import indian_currency
 from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
 
@@ -301,6 +301,12 @@ def create_app(engine: TradingEngine) -> Flask:
     def api_equity_curve():
         limit = request.args.get("limit", default=500, type=int)
         return jsonify(build_equity_curve(engine, limit=limit))
+
+    @app.get("/api/indices")
+    @api_login_required
+    def api_indices():
+        period = request.args.get("period", default="6mo")
+        return jsonify(build_index_charts(engine, period=period))
 
     @app.get("/api/candidates")
     @api_login_required
