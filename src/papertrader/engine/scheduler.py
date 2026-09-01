@@ -150,6 +150,14 @@ class TradingEngine:
         return rank_candidates(candidates)
 
     def scan_for_entries(self) -> None:
+        # Recorded unconditionally, before any early-exit below: this marks
+        # "the engine attempted a scan cycle just now" (i.e. it's alive and
+        # running), not narrowly "the universe was actually searched" --
+        # otherwise a fully-invested account (no room for new positions)
+        # would show a permanently stale/"not yet scanned" timestamp on the
+        # dashboard even while the engine keeps running normally.
+        self.storage.set_last_scan_at(datetime.now().isoformat(timespec="seconds"))
+
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))
         if room <= 0:
@@ -165,7 +173,6 @@ class TradingEngine:
 
         mode = self.strategy_cfg.get("mode", "52w_high")
         ranked = self.find_candidates(exclude_symbols=set(positions))
-        self.storage.set_last_scan_at(datetime.now().isoformat(timespec="seconds"))
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
 
