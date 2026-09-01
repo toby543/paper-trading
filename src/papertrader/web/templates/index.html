@@ -759,7 +759,8 @@ function renderStats(s) {
     { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + "₹" + fmt(unrealized), sub: "on open positions", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
     { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_realized_pnl), sub: "from closed sells", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
-    { label: "Universe Scanned", value: fmtInt(s.universe_size), sub: "NSE symbols" },
+    { label: "Universe Scanned", value: fmtInt(s.universe_size),
+      sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
   ];
   document.getElementById("stats").innerHTML = cards.map(c => `
     <div class="stat ${c.hero ? "hero" : ""}">
@@ -1150,9 +1151,12 @@ function makeCollapsible(panelId, headId, storageKey) {
   try {
     saved = localStorage.getItem(storageKey);
   } catch (e) {
-    // ignore -- default to expanded below
+    // ignore -- default to collapsed below
   }
-  if (saved === "1") setCollapsed(true);
+  // Default to collapsed on a first-ever visit (or if localStorage is
+  // unavailable); only stay expanded if this browser explicitly
+  // remembered an earlier "expand" choice for this panel.
+  if (saved !== "0") setCollapsed(true);
 }
 
 makeCollapsible("rulesPanel", "rulesPanelHead", "papertrader.rulesPanelCollapsed");

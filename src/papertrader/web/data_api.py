@@ -94,6 +94,7 @@ def build_summary(engine) -> dict:
         "open_positions": len(positions),
         "max_positions": engine.risk.max_open_positions,
         "universe_size": len(engine.universe),
+        "last_scan_at": engine.storage.get_last_scan_at(),
         "positions": sorted(position_rows, key=lambda r: r["market_value"], reverse=True),
     }
 

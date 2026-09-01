@@ -11,7 +11,8 @@ from .models import Position, Trade
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    cash REAL NOT NULL
+    cash REAL NOT NULL,
+    last_scan_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -69,6 +70,9 @@ class Storage:
             if "realized_pnl" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
             self._backfill_realized_pnl(conn)
+            account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
+            if "last_scan_at" not in account_cols:
+                conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")
 
     def _backfill_realized_pnl(self, conn) -> None:
         """Fill in realized_pnl for SELL trades recorded before that column
@@ -101,6 +105,15 @@ class Storage:
     def set_cash(self, cash: float) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE account SET cash = ? WHERE id = 1", (cash,))
+
+    def get_last_scan_at(self) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT last_scan_at FROM account WHERE id = 1").fetchone()
+            return row["last_scan_at"] if row else None
+
+    def set_last_scan_at(self, timestamp: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE account SET last_scan_at = ? WHERE id = 1", (timestamp,))
 
     # ---- positions -----------------------------------------------------
     def get_positions(self) -> dict[str, Position]:

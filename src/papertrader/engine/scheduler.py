@@ -165,6 +165,7 @@ class TradingEngine:
 
         mode = self.strategy_cfg.get("mode", "52w_high")
         ranked = self.find_candidates(exclude_symbols=set(positions))
+        self.storage.set_last_scan_at(datetime.now().isoformat(timespec="seconds"))
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
 
