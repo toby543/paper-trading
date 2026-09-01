@@ -73,6 +73,14 @@ capping upside at a fixed target, but it's there if you want a hard
 sell target anyway. Exits always apply regardless of market regime
 (see below) — only new entries are gated.
 
+**Re-entry cooldown:** without a safeguard here, a stock stopped out on
+a small dip that still passes the entry filters would get immediately
+rebought the same scan (or the next one) — a whipsaw that looks like
+the engine buying and selling the same names back-to-back.
+`risk.reentry_cooldown_days` (default 3, 0 disables it) blocks buying a
+symbol again for that many days after selling it, in both live trading
+and backtesting.
+
 **Market regime filter:** momentum strategies get badly hurt trading
 through a falling market, so by default new entries only happen while
 the Nifty 50 index itself is trading above its own 200-day moving

@@ -101,6 +101,13 @@ risk:
   exit_below_fast_ma: true
   # Never let a single scan commit more than this fraction of free cash.
   max_cash_deployed_per_scan_pct: 40.0
+  # Days after a sell (stop-loss, trailing-stop, or momentum-breakdown)
+  # before the same symbol can be bought again. Without this, a stock
+  # stopped out on a small dip that still passes the entry filters gets
+  # immediately rebought the same scan or the next one -- a whipsaw that
+  # looks like the engine buying and selling the same names back-to-back.
+  # 0 disables the cooldown.
+  reentry_cooldown_days: 3
 
 execution:
   # Simulated slippage applied to paper fills.

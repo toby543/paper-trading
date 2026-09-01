@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..config import Config
 from ..data.nse_client import MarketDataClient, DataUnavailableError
@@ -149,6 +149,17 @@ class TradingEngine:
 
         return rank_candidates(candidates)
 
+    def _recently_sold_symbols(self) -> set[str]:
+        """Symbols sold within risk.reentry_cooldown_days -- blocks a stock
+        stopped out on a dip from being immediately rebought this scan or
+        the next one, which otherwise looks like the engine buying and
+        selling the same names back-to-back. 0/absent disables the cooldown."""
+        cooldown_days = self.risk_cfg.get("reentry_cooldown_days", 3)
+        if not cooldown_days:
+            return set()
+        cutoff = (datetime.now() - timedelta(days=cooldown_days)).isoformat(timespec="seconds")
+        return self.storage.get_recently_sold_symbols(cutoff)
+
     def scan_for_entries(self) -> None:
         # Recorded unconditionally, before any early-exit below: this marks
         # "the engine attempted a scan cycle just now" (i.e. it's alive and
@@ -172,7 +183,8 @@ class TradingEngine:
             return
 
         mode = self.strategy_cfg.get("mode", "52w_high")
-        ranked = self.find_candidates(exclude_symbols=set(positions))
+        exclude = set(positions) | self._recently_sold_symbols()
+        ranked = self.find_candidates(exclude_symbols=exclude)
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
 

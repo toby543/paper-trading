@@ -172,6 +172,17 @@ class Storage:
             for r in rows
         ]
 
+    def get_recently_sold_symbols(self, cutoff_timestamp: str) -> set[str]:
+        """Symbols with a SELL trade at or after `cutoff_timestamp` --
+        used to enforce a re-entry cooldown so a stock stopped out on a
+        dip isn't immediately rebought the same scan or the next one."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM trades WHERE side = 'SELL' AND timestamp >= ?",
+                (cutoff_timestamp,),
+            ).fetchall()
+        return {r["symbol"] for r in rows}
+
     def get_total_realized_pnl(self) -> float:
         with self._conn() as conn:
             row = conn.execute("SELECT SUM(realized_pnl) AS total FROM trades WHERE side = 'SELL'").fetchone()

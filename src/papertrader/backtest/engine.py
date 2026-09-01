@@ -129,6 +129,11 @@ class Backtester:
 
         self._history: dict[str, pd.DataFrame] = {}
         self._index_history: pd.DataFrame | None = None
+        # Simulated-day of each symbol's last sell, for the re-entry
+        # cooldown below. Trade.timestamp itself always stores real
+        # wall-clock time (see PaperBroker.sell), not the simulated day, so
+        # it can't be used for this -- tracked separately here instead.
+        self._sold_on: dict[str, pd.Timestamp] = {}
 
     def __del__(self):
         try:
@@ -260,6 +265,7 @@ class Backtester:
                 trade = self.broker.sell(symbol, pre_qty, quote.ltp, reason)
             except ValueError:
                 continue
+            self._sold_on[symbol] = day
             realized = pre_qty * (trade.price - pre_avg) - trade.charges
             trade_pnls.append(realized)
             trade_log.append({
@@ -278,11 +284,16 @@ class Backtester:
             return
 
         mode = self.strategy_cfg.get("mode", "52w_high")
+        cooldown_days = self.risk_cfg.get("reentry_cooldown_days", 3)
+        cooldown_blocked = (
+            {s for s, sold_day in self._sold_on.items() if (day - sold_day).days < cooldown_days}
+            if cooldown_days else set()
+        )
 
         if mode == "cross_sectional_momentum":
             universe_data = []
             for symbol in self.universe:
-                if symbol in positions:
+                if symbol in positions or symbol in cooldown_blocked:
                     continue
                 hist = self._history.get(symbol)
                 if hist is None:
@@ -297,7 +308,7 @@ class Backtester:
         else:
             candidates: list[Candidate] = []
             for symbol in self.universe:
-                if symbol in positions:
+                if symbol in positions or symbol in cooldown_blocked:
                     continue
                 hist = self._history.get(symbol)
                 if hist is None:

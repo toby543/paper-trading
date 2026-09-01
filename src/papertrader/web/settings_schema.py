@@ -120,6 +120,10 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Risk — Exit & sizing", "label": "Max open positions", "unit": "", "desc": ""},
     {"path": ("risk", "max_cash_deployed_per_scan_pct"), "type": "float", "min": 1, "max": 100,
      "group": "Risk — Exit & sizing", "label": "Max cash deployed / scan", "unit": "% of free cash", "desc": ""},
+    {"path": ("risk", "reentry_cooldown_days"), "type": "int", "min": 0, "max": 60,
+     "group": "Risk — Exit & sizing", "label": "Re-entry cooldown", "unit": "days (0 = off)",
+     "desc": "Blocks buying a symbol again for this many days after selling it -- prevents a "
+             "stock stopped out on a dip from being immediately rebought the same scan."},
 
     {"path": ("execution", "slippage_bps"), "type": "float", "min": 0, "max": 1000,
      "group": "Execution realism", "label": "Slippage", "unit": "bps", "desc": ""},
