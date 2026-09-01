@@ -118,6 +118,12 @@
   .panel-head { display: flex; align-items: baseline; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--border); }
   .panel-head h2 { font-family: "Fraunces", ui-serif, Georgia, serif; font-weight: 500; font-size: 15px; margin: 0; letter-spacing: -0.005em; }
   .panel-head .meta { font-size: 11px; color: var(--ink-faint); }
+  .period-select {
+    background: var(--surface-2); color: var(--ink-dim); border: 1px solid var(--border);
+    border-radius: 3px; padding: 3px 6px; cursor: pointer;
+  }
+  .period-select:hover { color: var(--ink); }
+  .period-select:focus { outline: none; border-color: var(--accent); }
 
   /* ---------- equity chart ---------- */
   .chart-wrap { padding: 18px 18px 14px; }
@@ -384,7 +390,13 @@
       <div class="panel">
         <div class="panel-head">
           <h2>Market Indices</h2>
-          <span class="meta mono">6mo</span>
+          <select id="indicesPeriod" class="meta mono period-select">
+            <option value="1mo">1mo</option>
+            <option value="3mo">3mo</option>
+            <option value="6mo" selected>6mo</option>
+            <option value="1y">1y</option>
+            <option value="2y">2y</option>
+          </select>
         </div>
         <div class="indices-grid" id="indicesGrid"></div>
       </div>
@@ -1405,20 +1417,30 @@ async function scanWatchlist() {
 
 document.getElementById("watchlistScanBtn").addEventListener("click", scanWatchlist);
 
+async function refreshIndices() {
+  try {
+    const period = document.getElementById("indicesPeriod").value;
+    const indices = await authFetch("/api/indices?period=" + encodeURIComponent(period)).then(r => r.json());
+    renderIndexCharts(indices);
+  } catch (e) {
+    console.error("Market indices refresh failed", e);
+  }
+}
+document.getElementById("indicesPeriod").addEventListener("change", refreshIndices);
+
 async function refresh() {
   try {
-    const [summary, trades, curve, indices, perf] = await Promise.all([
+    const [summary, trades, curve, perf] = await Promise.all([
       authFetch("/api/summary").then(r => r.json()),
       authFetch("/api/trades?limit=50").then(r => r.json()),
       authFetch("/api/equity_curve").then(r => r.json()),
-      authFetch("/api/indices").then(r => r.json()),
       authFetch("/api/performance").then(r => r.json()),
     ]);
     renderStats(summary);
     renderPositions(summary);
     renderTrades(trades);
     renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf) });
-    renderIndexCharts(indices);
+    refreshIndices();
   } catch (e) {
     console.error("Dashboard refresh failed", e);
   }
