@@ -121,7 +121,7 @@
 
   /* ---------- equity chart ---------- */
   .chart-wrap { padding: 18px 18px 14px; }
-  .chart-legend { display: flex; gap: 18px; margin-bottom: 4px; font-size: 11.5px; color: var(--ink-dim); }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 4px; font-size: 11.5px; color: var(--ink-dim); }
   .chart-legend b { color: var(--ink); font-weight: 500; }
   canvas#equityCanvas { width: 100%; height: 168px; display: block; }
 
@@ -835,6 +835,18 @@ function renderTrades(trades) {
   `).join("");
 }
 
+function perfComparisonHtml(perf) {
+  if (!perf || !perf.available) return "";
+  const stratCls = pnlClass(perf.strategy_return_pct);
+  let html = `<span>You — <b class="mono ${stratCls}">${perf.strategy_return_pct >= 0 ? "+" : ""}${perf.strategy_return_pct}%</b></span>`;
+  if (perf.benchmark_available) {
+    const bmCls = pnlClass(perf.benchmark_return_pct);
+    const bmLabel = (perf.benchmark_symbol || "").replace("^", "");
+    html += `<span>${bmLabel} — <b class="mono ${bmCls}">${perf.benchmark_return_pct >= 0 ? "+" : ""}${perf.benchmark_return_pct}%</b></span>`;
+  }
+  return html;
+}
+
 function renderEquityChart(curve, opts) {
   opts = opts || {};
   const canvasId = opts.canvasId || "equityCanvas";
@@ -873,7 +885,8 @@ function renderEquityChart(curve, opts) {
   const metaEl = document.getElementById(metaId);
   if (metaEl) metaEl.textContent = "since " + shortDate(curve[0].timestamp);
   document.getElementById(legendId).innerHTML =
-    `<span>Total equity — <b class="mono">₹${fmt(last)}</b></span><span>Peak — <b class="mono">₹${fmt(peak)}</b></span>`;
+    `<span>Total equity — <b class="mono">₹${fmt(last)}</b></span><span>Peak — <b class="mono">₹${fmt(peak)}</b></span>` +
+    (opts.perfHtml || "");
 
   const padL = 4, padR = 4, padT = 10, padB = 18;
   const min = Math.min(...series), max = Math.max(...series);
@@ -1392,16 +1405,17 @@ document.getElementById("watchlistScanBtn").addEventListener("click", scanWatchl
 
 async function refresh() {
   try {
-    const [summary, trades, curve, indices] = await Promise.all([
+    const [summary, trades, curve, indices, perf] = await Promise.all([
       authFetch("/api/summary").then(r => r.json()),
       authFetch("/api/trades?limit=50").then(r => r.json()),
       authFetch("/api/equity_curve").then(r => r.json()),
       authFetch("/api/indices").then(r => r.json()),
+      authFetch("/api/performance").then(r => r.json()),
     ]);
     renderStats(summary);
     renderPositions(summary);
     renderTrades(trades);
-    renderEquityChart(curve);
+    renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf) });
     renderIndexCharts(indices);
   } catch (e) {
     console.error("Dashboard refresh failed", e);

@@ -201,3 +201,53 @@ def build_equity_curve(engine, limit: int = 500) -> list[dict]:
     ]
     curve.reverse()  # storage returns newest-first; charts want chronological order
     return curve
+
+
+def build_performance_comparison(engine) -> dict:
+    """Compares the live strategy's total-equity return since its first
+    recorded equity-curve point against a plain buy-and-hold return of the
+    configured benchmark index over that same window -- answers "is this
+    actually beating the market" rather than just showing the raw equity
+    curve on its own. Never fabricates a benchmark return when the index
+    history can't be fetched; the strategy's own return is still shown."""
+    rows = engine.storage.get_equity_curve(limit=100000)
+    if len(rows) < 2:
+        return {"available": False}
+
+    first, last = rows[-1], rows[0]  # storage returns newest-first
+    starting_equity = float(first["total_equity"])
+    current_equity = float(last["total_equity"])
+    if starting_equity <= 0:
+        return {"available": False}
+    strategy_return_pct = round((current_equity - starting_equity) / starting_equity * 100.0, 2)
+
+    index_symbol = engine.regime_cfg.get("index_symbol", "^NSEI")
+    benchmark_return_pct = None
+    benchmark_available = False
+    try:
+        history = engine.data.get_index_history(index_symbol, period="2y")
+        closes = history["Close"].dropna()
+        if len(closes) >= 2:
+            target_date = str(first["timestamp"])[:10]
+            start_price = None
+            for idx, price in closes.items():
+                if idx.strftime("%Y-%m-%d") >= target_date:
+                    start_price = float(price)
+                    break
+            if start_price is None:
+                start_price = float(closes.iloc[0])
+            end_price = float(closes.iloc[-1])
+            if start_price > 0:
+                benchmark_return_pct = round((end_price - start_price) / start_price * 100.0, 2)
+                benchmark_available = True
+    except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky index fetch
+        pass
+
+    return {
+        "available": True,
+        "since": first["timestamp"],
+        "strategy_return_pct": strategy_return_pct,
+        "benchmark_symbol": index_symbol,
+        "benchmark_available": benchmark_available,
+        "benchmark_return_pct": benchmark_return_pct,
+    }
