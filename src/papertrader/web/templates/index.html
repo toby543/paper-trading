@@ -301,19 +301,19 @@
     .brand { flex-wrap: wrap; row-gap: 4px; }
   }
 
-  /* ---------- positions table -> cards on narrow screens ---------- */
+  /* ---------- tables -> cards on narrow screens ---------- */
   @media (max-width: 640px) {
-    #positionsTable thead { display: none; }
-    #positionsBody { display: block; }
-    #positionsBody tr {
+    #positionsTable thead, #watchlistTable thead, #btTradesTable thead { display: none; }
+    #positionsBody, #watchlistTableBody, #btTradesBody { display: block; }
+    #positionsBody tr, #watchlistTableBody tr, #btTradesBody tr {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px 12px;
       padding: 14px 16px;
       border-bottom: 1px solid var(--border);
     }
-    #positionsBody tr.empty-row { display: block; }
-    #positionsBody td {
+    #positionsBody tr.empty-row, #watchlistTableBody tr.empty-row, #btTradesBody tr.empty-row { display: block; }
+    #positionsBody td, #watchlistTableBody td, #btTradesBody td {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
@@ -323,16 +323,23 @@
       border-bottom: none;
       white-space: normal;
     }
-    #positionsBody td::before {
+    #positionsBody td::before, #watchlistTableBody td::before, #btTradesBody td::before {
       content: attr(data-label);
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
       color: var(--ink-faint);
     }
-    #positionsBody td.sym { grid-column: 1 / -1; flex-direction: row; align-items: baseline; gap: 6px; }
-    #positionsBody td.sym::before { content: none; }
+    #positionsBody td.sym, #watchlistTableBody td.sym, #btTradesBody td.sym {
+      grid-column: 1 / -1; flex-direction: row; align-items: baseline; gap: 6px;
+    }
+    #positionsBody td.sym::before, #watchlistTableBody td.sym::before, #btTradesBody td.sym::before { content: none; }
     #positionsBody td.sym .exch { margin-left: 0; }
+
+    /* backtest trade cards: side badge sits next to the date, symbol and
+       the reason text each get their own full-width row */
+    #btTradesBody td.bt-side::before { content: none; }
+    #btTradesBody td.bt-reason { grid-column: 1 / -1; font-size: 12px; color: var(--ink-faint); }
   }
 </style>
 </head>
@@ -1214,13 +1221,13 @@ function renderBacktestResult(result) {
   } else {
     tbody.innerHTML = result.trade_log.map(t => `
       <tr>
-        <td class="mono">${t.date}</td>
-        <td><span class="badge-side ${t.side.toLowerCase()}">${t.side}</span></td>
+        <td class="mono" data-label="Date">${t.date}</td>
+        <td class="bt-side"><span class="badge-side ${t.side.toLowerCase()}">${t.side}</span></td>
         <td class="sym">${t.symbol}</td>
-        <td class="mono">${fmtInt(t.qty)}</td>
-        <td class="mono">${fmt(t.price)}</td>
-        <td class="mono ${t.pnl === null ? "" : pnlClass(t.pnl)}">${t.pnl === null ? "—" : (t.pnl >= 0 ? "+" : "") + fmt(t.pnl)}</td>
-        <td>${t.reason}</td>
+        <td class="mono" data-label="Qty">${fmtInt(t.qty)}</td>
+        <td class="mono" data-label="Price">${fmt(t.price)}</td>
+        <td class="mono ${t.pnl === null ? "" : pnlClass(t.pnl)}" data-label="P&amp;L">${t.pnl === null ? "—" : (t.pnl >= 0 ? "+" : "") + fmt(t.pnl)}</td>
+        <td class="bt-reason" data-label="Reason">${t.reason}</td>
       </tr>
     `).join("");
   }
