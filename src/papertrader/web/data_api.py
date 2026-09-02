@@ -3,6 +3,7 @@ serializable dicts for the web dashboard. Kept separate from app.py so
 this logic can be exercised without a running Flask server."""
 from __future__ import annotations
 
+import math
 from datetime import datetime
 
 from ..strategy.momentum_52w_high import is_market_in_uptrend
@@ -19,9 +20,23 @@ _INDEX_TILES = [
 
 def _safe_quote(engine, symbol: str):
     try:
-        return engine.data.get_quote(symbol)
+        quote = engine.data.get_quote(symbol)
     except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky quote
         return None
+    # A suspended/halted symbol can make the yfinance fallback return a
+    # quote object whose LTP is NaN (its most recent daily bar has no
+    # trades) while week52_high -- computed from the whole history, which
+    # pandas' max() skips NaNs in -- still looks perfectly valid. NaN
+    # compares False against everything ("nan <= x" and "nan > x" are both
+    # False in Python), so it silently slips past every check downstream
+    # and then poisons the running positions_value/total_equity sum for
+    # the *entire* portfolio, not just this one symbol -- and since NaN
+    # isn't valid JSON, the browser's JSON.parse() then throws on the
+    # whole /api/summary response, breaking every panel on the dashboard,
+    # not just this position's row. Treat it the same as "no quote".
+    if quote is None or math.isnan(quote.ltp):
+        return None
+    return quote
 
 
 def _pct_from_52w_high(week52_high: float | None, ltp: float) -> float | None:
