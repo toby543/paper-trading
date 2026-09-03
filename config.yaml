@@ -28,10 +28,10 @@ strategy:
   mode: 52w_high
   # A stock qualifies as a BUY candidate when it is trading within this
   # percentage of its 52-week high...
-  proximity_to_52w_high_pct: 5.0
+  proximity_to_52w_high_pct: 4.0
   # ...and has delivered at least this much return over the lookback window...
-  momentum_lookback_days: 90
-  min_momentum_return_pct: 15.0
+  momentum_lookback_days: 252
+  min_momentum_return_pct: 18.0
   # ...and is trading above both moving averages (trend confirmation).
   fast_ma_days: 50
   slow_ma_days: 200
@@ -43,7 +43,7 @@ strategy:
   # least this many percentage points -- a stock merely drifting up with
   # a rising market isn't the same signal as one genuinely leading it.
   # Uses regime.index_symbol as the benchmark. Comment out to disable.
-  min_relative_strength_pct: 5.0
+  min_relative_strength_pct: 8.0
   # Volume confirmation: require recent trading activity to be running
   # hot relative to the stock's own baseline before treating a move near
   # the 52-week high as a real breakout rather than a quiet drift.
@@ -51,7 +51,7 @@ strategy:
     enabled: true
     recent_days: 10
     baseline_days: 50
-    min_volume_multiple: 1.2
+    min_volume_multiple: 1.5
   # How many top-ranked new candidates to buy per scan.
   max_new_positions_per_scan: 3
   # Optional LTP (last traded price) range filter. 0 = no bound on that
@@ -91,7 +91,7 @@ risk:
   # Hard stop-loss from entry price.
   stop_loss_pct: 7.0
   # Trailing stop from the highest close recorded since entry.
-  trailing_stop_pct: 10.0
+  trailing_stop_pct: 12.0
   # Optional hard take-profit: sell once price is this many percent above
   # entry, regardless of trend. 0 = disabled (the default) -- momentum
   # strategies are usually better served by the trailing stop above
@@ -107,7 +107,7 @@ risk:
   # immediately rebought the same scan or the next one -- a whipsaw that
   # looks like the engine buying and selling the same names back-to-back.
   # 0 disables the cooldown.
-  reentry_cooldown_days: 3
+  reentry_cooldown_days: 5
 
 execution:
   # Simulated slippage applied to paper fills.
@@ -130,8 +130,8 @@ data_source:
   # "yfinance" automatically if it is unreachable or blocked.
   preferred: nse
   fallback: yfinance
-  request_timeout_seconds: 10
-  max_retries: 3
+  request_timeout_seconds: 15
+  max_retries: 5
 
 logging:
   file: data/papertrader.log
