@@ -254,6 +254,17 @@ class TradingEngine:
         last_full_scan = 0.0
         log.info("Autonomous trading engine started. Universe size=%d", len(self.universe))
         while True:
+            # Hot-reload config if it has changed (e.g., via dashboard)
+            if self.cfg.reload():
+                self.strategy_cfg = self.cfg.get("strategy", default={})
+                self.risk_cfg = self.cfg.get("risk", default={})
+                self.regime_cfg = self.cfg.get("regime", default={})
+                self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
+                self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+                self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
+                log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
+
             now_dt = self.calendar.now()
             if not self.calendar.is_market_open(now_dt):
                 log.info("Market closed (%s). Sleeping 5 minutes...", now_dt.strftime("%Y-%m-%d %H:%M %Z"))

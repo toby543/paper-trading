@@ -400,6 +400,40 @@ def create_app(engine: TradingEngine) -> Flask:
 
         return jsonify({"ok": True, "restart_required": True})
 
+    @app.post("/api/reload-config")
+    @api_login_required
+    def api_reload_config():
+        """Hot-reload configuration from disk without restarting the service.
+        Updates running engine components with new config values."""
+        if not cfg.reload():
+            return jsonify({"ok": False, "error": "No changes to config file"}), 400
+
+        engine = app.config["ENGINE"]
+
+        # Reload components that can be updated live (don't affect in-flight trades)
+        try:
+            engine.strategy_cfg = cfg.get("strategy", default={})
+            engine.risk_cfg = cfg.get("risk", default={})
+            engine.regime_cfg = cfg.get("regime", default={})
+
+            # Update RiskManager with new risk settings
+            engine.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
+            engine.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+            engine.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+
+            # Update data source timeout settings
+            engine.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
+
+            log.info("Configuration hot-reloaded successfully. Changes applied to running engine.")
+            return jsonify({
+                "ok": True,
+                "message": "Configuration reloaded successfully. Risk management and strategy settings are now active.",
+                "note": "Strategy mode changes (52w_high ↔ cross_sectional) require a restart to take effect."
+            }), 200
+        except Exception as e:
+            log.error("Failed to apply reloaded config to engine: %s", e)
+            return jsonify({"ok": False, "error": f"Failed to apply config: {e}"}), 500
+
     return app
 
 
