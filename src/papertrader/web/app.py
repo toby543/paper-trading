@@ -290,6 +290,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         active_profile = cfg.get("active_profile", default="52w_high")
         active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
         active_state_file = cfg.get_profile_state_file(active_profile)
+        active_state_file_short = os.path.basename(active_state_file)
 
         # Build strategy config with profile-specific mode
         strategy = cfg.get("strategy", default={})
@@ -312,6 +313,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             profiles=cfg.list_profiles(),
             active_profile=active_profile,
             active_state_file=active_state_file,
+            active_state_file_short=active_state_file_short,
             multi_profile_mode=cfg.is_multi_profile_mode(),
         )
 
