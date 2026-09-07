@@ -309,24 +309,37 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             return jsonify({"ok": False, "error": "Unknown or expired job id."}), 404
         return jsonify({"ok": True, "job": job})
 
+    def _is_profile_scoped_setting(path: tuple) -> bool:
+        """True for settings that live under each profile rather than as
+        one value shared by all of them: every "strategy.*" field (see
+        Config.get_profile_strategy_config), plus starting_capital --
+        which has its own profiles.<name>.starting_capital field
+        (Config.get_profile_starting_capital) entirely separate from the
+        legacy global account.starting_capital fallback."""
+        return bool(path) and (path[0] == "strategy" or path == ("account", "starting_capital"))
+
     @app.get("/api/settings")
     @api_login_required
     def api_get_settings():
         """Every field's current value, resolved against whichever
-        profile the dashboard is currently viewing: a "strategy.*" field
-        shows that profile's own merged strategy config (its overrides
-        layered over the shared base), so switching the profile dropdown
-        and reopening this panel shows and edits that profile's own
-        settings, not some other profile's."""
+        profile the dashboard is currently viewing: a profile-scoped
+        field (strategy.* or starting_capital) shows that profile's own
+        value, so switching the profile dropdown and reopening this
+        panel shows and edits that profile's own settings, not some
+        other profile's."""
         active_profile = cfg.get("active_profile", default="52w_high")
-        effective_raw = {**cfg.raw, "strategy": cfg.get_profile_strategy_config(active_profile)}
+        effective_raw = {
+            **cfg.raw,
+            "strategy": cfg.get_profile_strategy_config(active_profile),
+            "account": {**cfg.get("account", default={}), "starting_capital": cfg.get_profile_starting_capital(active_profile)},
+        }
         fields = []
         for spec in EDITABLE_SETTINGS:
             fields.append({
                 **spec,
                 "path": list(spec["path"]),
                 "value": get_value(effective_raw, spec["path"]),
-                "profile_scoped": spec["path"][0] == "strategy",
+                "profile_scoped": _is_profile_scoped_setting(spec["path"]),
             })
         return jsonify({
             "fields": fields,
@@ -337,14 +350,17 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     @app.post("/api/settings")
     @api_login_required
     def api_update_settings():
-        """Save edited settings. A "strategy.*" field is validated against
-        its logical path (strategy.proximity_to_52w_high_pct etc.) but
-        actually written under the CURRENTLY VIEWED profile's own
-        overrides (profiles.<active_profile>.strategy.*) rather than the
-        shared top-level strategy: block -- that's what makes each
-        profile's strategy independently editable. Everything else
-        (risk, regime, execution, engine, data_source, universe) stays a
-        single global value shared by every profile, same as before."""
+        """Save edited settings. A profile-scoped field (strategy.* or
+        starting_capital) is validated against its logical path
+        (strategy.proximity_to_52w_high_pct, account.starting_capital)
+        but actually written under the CURRENTLY VIEWED profile's own
+        section -- profiles.<active_profile>.strategy.* or
+        profiles.<active_profile>.starting_capital respectively --
+        rather than the shared/legacy global fields. That's what makes
+        each profile's strategy and capital independently editable.
+        Everything else (risk, regime, execution, engine, data_source,
+        universe) stays a single global value shared by every profile,
+        same as before."""
         payload = request.get_json(silent=True) or {}
         raw_updates = payload.get("updates", [])
         if not isinstance(raw_updates, list) or not raw_updates:
@@ -363,6 +379,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                 continue
             if logical_path and logical_path[0] == "strategy":
                 write_path = ["profiles", active_profile, "strategy", *logical_path[1:]]
+            elif logical_path == ("account", "starting_capital"):
+                write_path = ["profiles", active_profile, "starting_capital"]
             else:
                 write_path = list(logical_path)
             coerced.append((write_path, value))

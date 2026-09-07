@@ -15,10 +15,11 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 EDITABLE_SETTINGS: list[dict] = [
     {"path": ("universe", "file"), "type": "choice",
      "choices": ["data/universe.csv", "data/universe_nifty500.csv"],
-     "group": "Strategy — Entry", "label": "Universe file", "unit": "",
+     "group": "Universe", "label": "Universe file", "unit": "",
      "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
              "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "
-             "startup -- restart required for a change to take effect."},
+             "startup -- restart required for a change to take effect. Shared by every "
+             "profile, not specific to any one of them."},
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},
@@ -154,7 +155,8 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Logging", "label": "Log level", "unit": "", "desc": ""},
     {"path": ("account", "starting_capital"), "type": "float", "min": 0,
      "group": "Account", "label": "Starting capital", "unit": "₹",
-     "desc": "Only applies the first time data/state.db is created."},
+     "desc": "This profile's own starting capital. Only applies the first time its ledger "
+             "database is created -- has no effect on a profile that's already traded."},
 ]
 
 _BY_PATH = {tuple(entry["path"]): entry for entry in EDITABLE_SETTINGS}

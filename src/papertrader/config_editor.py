@@ -39,11 +39,15 @@ def update_config_file(path: str, updates: list[tuple[list[str], object]]) -> No
                 data = yaml.load(fh)
             log.info("Loaded config from %s", path)
 
-            # Apply updates
+            # Apply updates. setdefault (not plain indexing) so a path
+            # whose intermediate dicts don't exist yet in the file gets
+            # them created on the fly -- e.g. the first time a setting is
+            # saved for a newly-added profile that doesn't have a full
+            # strategy: block pre-populated yet.
             for key_path, value in updates:
                 node = data
                 for key in key_path[:-1]:
-                    node = node[key]
+                    node = node.setdefault(key, {})
                 old_value = node.get(key_path[-1])
                 node[key_path[-1]] = value
                 log.info("Updated %s: %s -> %s", ".".join(key_path), old_value, value)
