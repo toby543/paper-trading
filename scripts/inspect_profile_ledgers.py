@@ -9,10 +9,14 @@ Usage:
     python scripts/inspect_profile_ledgers.py
 """
 import sqlite3
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from papertrader.config import Config  # noqa: E402
+
 REPO_ROOT = Path(__file__).parent.parent
-DATA_DIR = REPO_ROOT / "data"
 
 
 def inspect(db_path: Path) -> None:
@@ -52,5 +56,12 @@ def inspect(db_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    for name in ["state_52w_high.db", "state_cross_sectional.db", "state_consolidation.db", "state.db"]:
-        inspect(DATA_DIR / name)
+    cfg = Config.load()
+    profiles = cfg.list_profiles()
+    if not profiles:
+        # No profiles configured -- fall back to the single legacy ledger.
+        inspect(Path(cfg.state_file))
+    else:
+        for profile_name, display_name in profiles.items():
+            print(f"\n########## Profile: {display_name} ({profile_name}) ##########")
+            inspect(Path(cfg.get_profile_state_file(profile_name)))

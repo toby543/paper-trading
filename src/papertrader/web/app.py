@@ -289,7 +289,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         store = get_store()
         active_profile = cfg.get("active_profile", default="52w_high")
         active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
-        active_state_file = cfg.get("profiles", active_profile, "state_file", default=cfg.state_file)
+        active_state_file = cfg.get_profile_state_file(active_profile)
 
         # Build strategy config with profile-specific mode
         strategy = cfg.get("strategy", default={})
@@ -467,7 +467,9 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             return jsonify({
                 "ok": True,
                 "message": "Configuration reloaded successfully. Risk management and strategy settings are now active.",
-                "note": "Changing which strategy a profile uses (strategy_mode in config.yaml) requires a restart to take effect."
+                "note": "Each profile's strategy_mode (in config.yaml) is picked up live too. "
+                        "Only the standalone strategy.mode field edited via 'Edit Settings' has no effect while any "
+                        "profile is configured, since every profile always uses its own strategy_mode instead."
             }), 200
         except Exception as e:
             log.error("Failed to apply reloaded config to engine(s): %s", e)
