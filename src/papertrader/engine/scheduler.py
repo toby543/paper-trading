@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 class TradingEngine:
     def __init__(self, cfg: Config, profile_name: str | None = None):
         self.cfg = cfg
-        self.profile_name = profile_name or cfg.get("active_profile", "52w_high")
+        self.profile_name = profile_name or cfg.get("active_profile", default="52w_high")
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
             market_open=cfg.get("engine", "market_open", default="09:15"),
@@ -74,7 +74,7 @@ class TradingEngine:
             log.info("Config reload result: %s", reloaded)
 
             # Get updated active profile
-            new_profile = self.cfg.get("active_profile", "52w_high")
+            new_profile = self.cfg.get("active_profile", default="52w_high")
             log.info("Active profile from config: %s (current profile_name: %s)", new_profile, self.profile_name)
 
             if new_profile == self.profile_name:
@@ -360,7 +360,9 @@ class TradingEngine:
         while True:
             # Hot-reload config if it has changed (e.g., via dashboard)
             if self.cfg.reload():
-                self.strategy_cfg = self.cfg.get("strategy", default={})
+                strategy_cfg = self.cfg.get("strategy", default={})
+                strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(self.profile_name)
+                self.strategy_cfg = strategy_cfg
                 self.risk_cfg = self.cfg.get("risk", default={})
                 self.regime_cfg = self.cfg.get("regime", default={})
                 self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)

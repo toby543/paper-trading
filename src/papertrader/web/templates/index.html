@@ -1243,76 +1243,40 @@ document.getElementById("reloadConfigBtn").addEventListener("click", async funct
 // ---- Profile selector: switch between strategy profiles ----
 async function switchProfile(profileName) {
   const banner = document.getElementById("editBanner");
-  console.log("Attempting to switch to profile:", profileName);
 
   try {
-    console.log("Sending profile switch request for:", profileName);
     const res = await authFetch("/api/set-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile: profileName })
     });
     const data = await res.json();
-    console.log("Profile switch response:", res.status, data);
 
     if (res.ok) {
       banner.className = "edit-banner success";
       banner.innerHTML = "<strong>Profile switched!</strong> " + data.message + "<br/>" + (data.note || "");
       banner.style.display = "block";
-      console.log("✓ Profile switch successful, reloading page in 1.5 seconds");
       // Reload page after 1.5 seconds to show updated profile info and data
       setTimeout(() => location.reload(), 1500);
     } else {
       banner.className = "edit-banner error";
       banner.textContent = data.error || "Failed to switch profile.";
       banner.style.display = "block";
-      console.error("✗ Profile switch failed:", data);
       setTimeout(() => location.reload(), 1500);
     }
   } catch (err) {
     banner.className = "edit-banner error";
     banner.textContent = "Error: " + err.message;
     banner.style.display = "block";
-    console.error("✗ Profile switch error:", err);
     setTimeout(() => location.reload(), 1500);
   }
 }
 
 const profileSelector = document.getElementById("profileSelector");
 if (profileSelector) {
-  // Log initial state for debugging
-  console.log("Profile selector initialized. Current value:", profileSelector.value);
-  console.log("Available profiles:", Array.from(profileSelector.options).map(o => `${o.value}:${o.text}`));
-
-  let lastValue = profileSelector.value;
-
-  // Handle change event
   profileSelector.addEventListener("change", function() {
-    console.log("Change event fired. New value:", this.value);
-    lastValue = this.value;
-    updateSelectedOption(this.value);
     switchProfile(this.value);
   });
-
-  // Polling fallback: check if value changed every 100ms
-  // This handles cases where the native change event doesn't fire
-  setInterval(() => {
-    const currentValue = profileSelector.value;
-    if (currentValue !== lastValue) {
-      console.log("Value changed (via polling). New value:", currentValue);
-      lastValue = currentValue;
-      updateSelectedOption(currentValue);
-      switchProfile(currentValue);
-    }
-  }, 100);
-
-  // Manually update which option is marked as selected
-  function updateSelectedOption(value) {
-    for (let opt of profileSelector.options) {
-      opt.selected = (opt.value === value);
-    }
-    console.log("Updated selected option to:", value);
-  }
 }
 
 loadSettings();
