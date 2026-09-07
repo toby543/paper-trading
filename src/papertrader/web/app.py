@@ -454,7 +454,7 @@ def create_app(engine: TradingEngine) -> Flask:
         if not profile_name:
             return jsonify({"ok": False, "error": "Profile name is required"}), 400
 
-        profiles = cfg.get("profiles", {})
+        profiles = cfg.get("profiles", default={})
         if profile_name not in profiles:
             return jsonify({"ok": False, "error": f"Unknown profile: {profile_name}"}), 400
 
