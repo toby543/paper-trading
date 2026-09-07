@@ -23,7 +23,11 @@ strategy:
   #                                strength vs. peers + the regime filter
   #                                below as the absolute-return gate).
   #                                See strategy.cross_sectional below.
-  # Both modes share the liquidity, price-range, and trend-confirmation
+  #   consolidation_breakout   -- identify stocks in tight consolidation
+  #                                breaking out on strong volume. Requires
+  #                                clear uptrend (price > 50/200 DMA).
+  #                                See strategy.consolidation_breakout below.
+  # All modes share the liquidity, price-range, and trend-confirmation
   # (fast/slow MA) filters, the regime filter, and all exit rules.
   mode: 52w_high
   # A stock qualifies as a BUY candidate when it is trading within this
@@ -71,6 +75,18 @@ strategy:
     # Buy only this top percentile of the universe by trailing return
     # (after the liquidity/price-range/trend filters above are applied).
     top_pct: 10.0
+
+  # Only used when strategy.mode is "consolidation_breakout" (above).
+  consolidation_breakout:
+    # Days to look back to detect a tight consolidation/base.
+    consolidation_days: 10
+    # Volume multiplier for breakout confirmation.
+    # A breakout must occur on volume >= this multiple of the 20-day average.
+    volume_multiple: 2.0
+    # Phase 2: Screening filters for market cap and beta (to be enabled).
+    # market_cap_min_cr: 20000      # Minimum market cap in crores (₹)
+    # beta_max: 1.0                 # Maximum beta (volatility filter)
+    # index_list: ["NIFTY 50", "NIFTY NEXT 50"]  # Sector leaders only
 
 regime:
   # Market regime filter: momentum strategies get badly hurt trading

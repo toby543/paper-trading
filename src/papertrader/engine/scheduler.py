@@ -21,7 +21,8 @@ from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
-from ..strategy.momentum_52w_high import Candidate, evaluate_candidate, rank_candidates, check_exit, is_market_in_uptrend
+from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
+from ..strategy import consolidation_breakout
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class TradingEngine:
 
     def check_exits(self) -> None:
         positions = self.broker.positions()
+        mode = self.strategy_cfg.get("mode", "52w_high")
         for symbol, pos in positions.items():
             try:
                 quote = self.data.get_quote(symbol)
@@ -83,14 +85,18 @@ class TradingEngine:
                 continue
 
             self.broker.update_trailing_high(symbol, quote.ltp)
-            should_exit, reason = check_exit(pos, quote, history, {**self.risk_cfg, **self.strategy_cfg})
+            cfg = {**self.risk_cfg, **self.strategy_cfg}
+            if mode == "consolidation_breakout":
+                should_exit, reason = consolidation_breakout.check_exit(pos, quote, history, cfg)
+            else:
+                should_exit, reason = exit_52w(pos, quote, history, cfg)
             if should_exit:
                 try:
                     self.broker.sell(symbol, pos.quantity, quote.ltp, reason)
                 except ValueError as exc:
                     log.error("Failed to sell %s: %s", symbol, exc)
 
-    def find_candidates(self, exclude_symbols: set[str] | None = None) -> list[Candidate]:
+    def find_candidates(self, exclude_symbols: set[str] | None = None) -> list:
         """Evaluate the whole universe against the strategy right now and
         return every currently-qualifying candidate, ranked. Read-only --
         places no trades, and does NOT apply the room/regime short-circuits
@@ -121,6 +127,26 @@ class TradingEngine:
                 universe_data.append((symbol, quote, history, turnover))
             return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
 
+        if mode == "consolidation_breakout":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    continue
+
+                cand = consolidation_breakout.evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg)
+                if cand:
+                    candidates.append(cand)
+
+            return consolidation_breakout.rank_candidates(candidates)
+
+        # Default: 52w_high strategy
         # Fetch the benchmark index once per scan (cached) so every
         # candidate's relative strength is judged against the same frame,
         # instead of a per-symbol network round trip.
@@ -143,11 +169,11 @@ class TradingEngine:
                 log.debug("Skipping %s: %s", symbol, exc)
                 continue
 
-            cand = evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
+            cand = eval_52w(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
             if cand:
                 candidates.append(cand)
 
-        return rank_candidates(candidates)
+        return rank_52w(candidates)
 
     def _recently_sold_symbols(self) -> set[str]:
         """Symbols sold within risk.reentry_cooldown_days -- blocks a stock
@@ -213,6 +239,13 @@ class TradingEngine:
                     f"cross_sectional_momentum percentile={cand.score:.0f} "
                     f"{cand.momentum_return_pct:.1f}% {cs_cfg.get('lookback_days', 252)}d return "
                     f"(skip last {cs_cfg.get('skip_recent_days', 21)}d)"
+                )
+            elif mode == "consolidation_breakout":
+                reason = (
+                    f"consolidation_breakout score={cand.score:.1f} "
+                    f"breakout high ₹{cand.consolidation_high:.2f}, "
+                    f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
+                    f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline"
                 )
             else:
                 reason = (
