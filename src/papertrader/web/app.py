@@ -468,7 +468,7 @@ def create_app(engine: TradingEngine) -> Flask:
             display_name = profile_cfg.get("display_name", profile_name)
 
             # Update config file
-            update_config_file(cfg.path, [["active_profile", profile_name]])
+            update_config_file(cfg.path, [(["active_profile"], profile_name)])
             cfg.set_active_profile(profile_name)
 
             # Reload engine with new profile if it's available (running in same process)
@@ -483,7 +483,8 @@ def create_app(engine: TradingEngine) -> Flask:
                     reload_msg = "Engine reloaded automatically with new profile, ledger, and strategy."
                     log.info("Engine reloaded for profile: %s (strategy: %s)", profile_name, profile_strategy)
                 except Exception as e:
-                    log.warning("Could not auto-reload engine: %s (will need manual restart)", e)
+                    log.exception("Could not auto-reload engine: %s (will need manual restart)", e)
+                    # Even if reload fails, config was updated, so notify user
 
             log.info("Switched to profile: %s (strategy: %s)", profile_name, profile_strategy)
             return jsonify({
