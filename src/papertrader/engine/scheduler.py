@@ -44,9 +44,12 @@ class TradingEngine:
             market_close=cfg.get("engine", "market_close", default="15:30"),
             holidays_file=cfg.holidays_file,
         )
-        # Use profile-specific starting capital when initializing storage
+        # Use profile-specific starting capital and ledger path -- must be
+        # resolved against self.profile_name explicitly (not cfg.state_file,
+        # which depends on the config's single global active_profile and
+        # would give every engine the same ledger in multi_profile_mode).
         starting_capital = cfg.get_profile_starting_capital(self.profile_name)
-        self.storage = Storage(cfg.state_file, starting_capital)
+        self.storage = Storage(cfg.get_profile_state_file(self.profile_name), starting_capital)
         self.broker = PaperBroker(
             self.storage,
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
@@ -97,7 +100,7 @@ class TradingEngine:
             log.info("Profile changed to: %s, reinitializing engine...", new_profile)
 
             starting_capital = self.cfg.get_profile_starting_capital(new_profile)
-            state_file = self.cfg.state_file
+            state_file = self.cfg.get_profile_state_file(new_profile)
             log.info("Loading profile %s: state_file=%s, starting_capital=%.0f",
                      new_profile, state_file, starting_capital)
 

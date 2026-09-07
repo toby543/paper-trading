@@ -131,6 +131,24 @@ class Config:
         # Fallback to global starting capital
         return float(self.get("account", "starting_capital", default=1_000_000.0))
 
+    def get_profile_state_file(self, profile_name: str | None = None) -> str:
+        """Ledger path for a specific profile (or active profile if not
+        specified). Unlike the state_file property below, this always
+        resolves against the requested profile_name -- needed so that in
+        multi_profile_mode, where several TradingEngine instances share
+        one Config object, each engine gets ITS OWN profile's ledger
+        instead of whatever the config's single global active_profile
+        happens to be set to."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        profiles = self.get("profiles", default={})
+        if profile_name and profile_name in profiles and "state_file" in profiles[profile_name]:
+            return _resolve(profiles[profile_name]["state_file"])
+
+        # Fallback to account.state_file for backward compatibility
+        return _resolve(self.get("account", "state_file", default="data/state.db"))
+
     @property
     def state_file(self) -> str:
         # Use profile-specific state file if profiles are configured
