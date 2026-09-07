@@ -128,6 +128,15 @@ class TradingEngine:
             return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
 
         if mode == "consolidation_breakout":
+            # Fetch index history for beta calculation if Phase 2 screening is enabled
+            index_history = None
+            cb_cfg = self.strategy_cfg.get("consolidation_breakout") or {}
+            if cb_cfg.get("beta_max"):
+                try:
+                    index_history = self.data.get_index_history(self.regime_cfg.get("index_symbol", "^NSEI"))
+                except DataUnavailableError as exc:
+                    log.debug("Could not fetch index history for beta calculation: %s", exc)
+
             candidates = []
             for symbol in self.universe:
                 if symbol in exclude_symbols:
@@ -140,7 +149,14 @@ class TradingEngine:
                     log.debug("Skipping %s: %s", symbol, exc)
                     continue
 
-                cand = consolidation_breakout.evaluate_candidate(symbol, quote, history, turnover, self.strategy_cfg)
+                # Phase 2: Market cap and index membership would be fetched here
+                # For now, pass None and they default to no filter
+                cand = consolidation_breakout.evaluate_candidate(
+                    symbol, quote, history, turnover, self.strategy_cfg,
+                    index_history=index_history,
+                    market_cap_cr=None,  # TODO: fetch from NSE metadata
+                    in_nifty_index=None,  # TODO: check against Nifty 50/Next 50 lists
+                )
                 if cand:
                     candidates.append(cand)
 

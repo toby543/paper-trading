@@ -19,11 +19,12 @@ EDITABLE_SETTINGS: list[dict] = [
      "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
              "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "
              "startup -- restart required for a change to take effect."},
-    {"path": ("strategy", "mode"), "type": "choice", "choices": ["52w_high", "cross_sectional_momentum"],
+    {"path": ("strategy", "mode"), "type": "choice", "choices": ["52w_high", "cross_sectional_momentum", "consolidation_breakout"],
      "group": "Strategy — Entry", "label": "Strategy mode", "unit": "",
      "desc": "52w_high: accept/reject each stock independently. cross_sectional_momentum: "
-             "rank the whole universe by trailing return and buy only the top percentile "
-             "(see the Cross-sectional group below). Restart required to switch."},
+             "rank the whole universe by trailing return and buy only the top percentile. "
+             "consolidation_breakout: identify stocks breaking out above tight consolidation on volume. "
+             "Restart required to switch."},
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},
@@ -74,6 +75,13 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "cross_sectional", "top_pct"), "type": "float", "min": 1, "max": 100,
      "group": "Cross-sectional momentum", "label": "Top percentile", "unit": "% of universe",
      "desc": "Buy only stocks ranked in this top percentile by trailing return."},
+
+    {"path": ("strategy", "consolidation_breakout", "consolidation_days"), "type": "int", "min": 2, "max": 50,
+     "group": "Consolidation breakout", "label": "Consolidation period", "unit": "days",
+     "desc": "How many days the stock must hold a tight consolidation before breaking out. Only applies when strategy mode is consolidation_breakout."},
+    {"path": ("strategy", "consolidation_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
+     "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
+     "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
 
     {"path": ("regime", "enabled"), "type": "bool",
      "group": "Market regime", "label": "Regime filter", "unit": "",

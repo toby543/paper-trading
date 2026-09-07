@@ -31,12 +31,13 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import (
-    Candidate,
-    check_exit,
-    evaluate_candidate,
+    Candidate as Candidate52w,
+    check_exit as exit_52w,
+    evaluate_candidate as eval_52w,
     is_market_in_uptrend,
-    rank_candidates,
+    rank_candidates as rank_52w,
 )
+from ..strategy import consolidation_breakout
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
@@ -246,6 +247,7 @@ class Backtester:
 
     # ------------------------------------------------------------------
     def _run_exits(self, day: pd.Timestamp, trade_pnls: list[float], trade_log: list[dict]) -> None:
+        mode = self.strategy_cfg.get("mode", "52w_high")
         for symbol, pos in list(self.broker.positions().items()):
             hist = self._history.get(symbol)
             if hist is None:
@@ -256,7 +258,11 @@ class Backtester:
                 continue
 
             self.broker.update_trailing_high(symbol, quote.ltp)
-            should_exit, reason = check_exit(pos, quote, history_upto, {**self.risk_cfg, **self.strategy_cfg})
+            cfg = {**self.risk_cfg, **self.strategy_cfg}
+            if mode == "consolidation_breakout":
+                should_exit, reason = consolidation_breakout.check_exit(pos, quote, history_upto, cfg)
+            else:
+                should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
                 continue
 
@@ -305,8 +311,8 @@ class Backtester:
                 turnover = _avg_daily_turnover(history_upto)
                 universe_data.append((symbol, quote, history_upto, turnover))
             ranked = select_cross_sectional_candidates(universe_data, self.strategy_cfg)
-        else:
-            candidates: list[Candidate] = []
+        elif mode == "consolidation_breakout":
+            candidates = []
             for symbol in self.universe:
                 if symbol in positions or symbol in cooldown_blocked:
                     continue
@@ -318,10 +324,29 @@ class Backtester:
                 if quote is None:
                     continue
                 turnover = _avg_daily_turnover(history_upto)
-                cand = evaluate_candidate(symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto)
+                cand = consolidation_breakout.evaluate_candidate(
+                    symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto
+                )
                 if cand:
                     candidates.append(cand)
-            ranked = rank_candidates(candidates)
+            ranked = consolidation_breakout.rank_candidates(candidates)
+        else:
+            candidates: list[Candidate52w] = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = eval_52w(symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto)
+                if cand:
+                    candidates.append(cand)
+            ranked = rank_52w(candidates)
 
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]

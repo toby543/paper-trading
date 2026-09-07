@@ -1,10 +1,13 @@
-"""Consolidation breakout momentum strategy.
+"""Consolidation breakout momentum strategy with Phase 2 screening.
 
 Entry filters:
   1. Stock in clear uptrend (price > 50 DMA > 200 DMA)
   2. Forms tight consolidation/base for several days
   3. Breaks out above base high on strong volume (≥ 2× average)
   4. Entry: At or just above breakout level
+  5. (Phase 2) Market cap > ₹20,000 crore
+  6. (Phase 2) Beta ≤ 1.0 (avoid wild volatility)
+  7. (Phase 2) Part of Nifty 50 / Nifty Next 50 / sector leaders
   
 Exit rules:
   1. Hard stop-loss at or below consolidation low
@@ -15,6 +18,7 @@ Exit rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import pandas as pd
 
@@ -34,6 +38,7 @@ class Candidate:
     score: float
     beta: float | None = None
     market_cap_cr: float | None = None
+    in_index: bool | None = None
 
 
 def _moving_average(history: pd.DataFrame, window: int) -> float | None:
@@ -59,6 +64,46 @@ def _avg_volume(history: pd.DataFrame, window: int) -> float | None:
     try:
         return float(history["Volume"].tail(window).mean())
     except (KeyError, TypeError):
+        return None
+
+
+def _calculate_beta(history: pd.DataFrame, market_history: pd.DataFrame, window: int = 252) -> float | None:
+    """Calculate stock beta relative to market index (e.g., Nifty 50).
+    
+    Beta = covariance(stock returns, market returns) / variance(market returns)
+    """
+    if len(history) < window or len(market_history) < window:
+        return None
+    
+    try:
+        # Calculate daily returns
+        stock_closes = history["Close"].tail(window)
+        market_closes = market_history["Close"].tail(window)
+        
+        if len(stock_closes) < 2 or len(market_closes) < 2:
+            return None
+        
+        stock_returns = stock_closes.pct_change().dropna()
+        market_returns = market_closes.pct_change().dropna()
+        
+        if len(stock_returns) < 2 or len(market_returns) < 2:
+            return None
+        
+        # Align lengths
+        min_len = min(len(stock_returns), len(market_returns))
+        stock_returns = stock_returns.iloc[-min_len:]
+        market_returns = market_returns.iloc[-min_len:]
+        
+        # Calculate covariance and variance
+        covariance = (stock_returns * market_returns).mean() - (stock_returns.mean() * market_returns.mean())
+        variance = market_returns.var()
+        
+        if variance == 0:
+            return None
+        
+        beta = covariance / variance
+        return float(beta) if not math.isnan(beta) else None
+    except (KeyError, TypeError, ValueError):
         return None
 
 
@@ -108,6 +153,9 @@ def evaluate_candidate(
     history: pd.DataFrame,
     avg_daily_turnover: float,
     cfg: dict,
+    index_history: pd.DataFrame | None = None,
+    market_cap_cr: float | None = None,
+    in_nifty_index: bool | None = None,
 ) -> Candidate | None:
     """Return a Candidate if symbol currently qualifies for consolidation breakout entry."""
     
@@ -140,14 +188,39 @@ def evaluate_candidate(
     if not _detect_breakout(history, consolidation_high, volume_multiple):
         return None
     
-    # Momentum check (optional)
+    # Momentum check
     momentum = _momentum_return_pct(history, cfg.get("momentum_lookback_days", 21))
     if momentum is None or momentum < cfg.get("min_momentum_return_pct", 5.0):
+        return None
+    
+    # Phase 2: Market cap filter
+    cb_cfg = cfg.get("consolidation_breakout") or {}
+    market_cap_min = cb_cfg.get("market_cap_min_cr")
+    if market_cap_min and market_cap_cr and market_cap_cr < market_cap_min:
+        return None
+    
+    # Phase 2: Beta filter
+    beta = None
+    beta_max = cb_cfg.get("beta_max")
+    if index_history is not None and beta_max:
+        beta = _calculate_beta(history, index_history)
+        if beta is not None and beta > beta_max:
+            return None
+    
+    # Phase 2: Index membership filter
+    index_list = cb_cfg.get("index_list")
+    if index_list and in_nifty_index is False:
         return None
     
     # Score: higher momentum and closer to breakout level score higher
     distance_from_breakout = max(0, consolidation_high - quote.ltp)
     score = momentum - (distance_from_breakout / consolidation_high) * 10.0
+    
+    # Bonus for large-cap, low-beta stocks
+    if market_cap_cr and market_cap_cr > market_cap_min:
+        score += min(2.0, (market_cap_cr - market_cap_min) / market_cap_min)
+    if beta is not None and beta < 1.0:
+        score += 1.0
     
     return Candidate(
         symbol=symbol,
@@ -158,6 +231,9 @@ def evaluate_candidate(
         avg_volume=_avg_volume(history, 20) or 0.0,
         momentum_return_pct=momentum,
         score=score,
+        beta=beta,
+        market_cap_cr=market_cap_cr,
+        in_index=in_nifty_index,
     )
 
 
