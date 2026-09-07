@@ -271,6 +271,9 @@ def create_app(engine: TradingEngine) -> Flask:
         store = get_store()
         active_profile = cfg.get("active_profile", "52w_high")
         active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
+        profiles_list = cfg.list_profiles()
+        log.info("Rendering dashboard: active_profile=%s, profiles=%s, strategy=%s",
+                 active_profile, profiles_list, active_strategy_mode)
 
         # Build strategy config with profile-specific mode
         strategy = cfg.get("strategy", default={})
