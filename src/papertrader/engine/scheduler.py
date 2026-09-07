@@ -66,14 +66,12 @@ class TradingEngine:
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
         )
         self.universe = load_universe(cfg.universe_file)
-        # Use profile-specific strategy mode. Copy the dict -- cfg.get()
-        # returns the actual nested dict inside cfg.raw, and in
-        # multi_profile_mode several TradingEngine instances share the
-        # same Config object, so mutating it in place here would leak
-        # this engine's "mode" into every other engine's strategy_cfg.
-        strategy_cfg = dict(cfg.get("strategy", default={}))
-        strategy_cfg["mode"] = cfg.get_profile_strategy_mode(self.profile_name)
-        self.strategy_cfg = strategy_cfg
+        # Profile-specific strategy parameters (mode + any overrides that
+        # profile's own strategy: block sets) merged over the shared
+        # base. Always a fresh dict -- safe even with several
+        # TradingEngine instances sharing this same Config object in
+        # multi_profile_mode.
+        self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
 
@@ -111,10 +109,7 @@ class TradingEngine:
                 flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
             )
 
-            # Copy -- see the __init__ comment on why this can't mutate
-            # cfg's own dict in place.
-            new_strategy_cfg = dict(self.cfg.get("strategy", default={}))
-            new_strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
+            new_strategy_cfg = self.cfg.get_profile_strategy_config(new_profile)
             new_risk_cfg = self.cfg.get("risk", default={})
             new_regime_cfg = self.cfg.get("regime", default={})
 
@@ -379,12 +374,10 @@ class TradingEngine:
         log.info("Autonomous trading engine started. Universe size=%d", len(self.universe))
         while True:
             # Hot-reload config if it has changed (e.g., via dashboard).
-            # Copy strategy dict -- see __init__ comment on shared Config.
             # Held under the lock alongside reload_profile()'s own swap so
             # the two can't interleave and leave stale values in place.
             if self.cfg.reload():
-                strategy_cfg = dict(self.cfg.get("strategy", default={}))
-                strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(self.profile_name)
+                strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
                 with self._state_lock:
                     self.strategy_cfg = strategy_cfg
                     self.risk_cfg = self.cfg.get("risk", default={})

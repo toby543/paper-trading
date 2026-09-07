@@ -19,6 +19,20 @@ def _resolve(path: str) -> str:
     return os.path.join(REPO_ROOT, path)
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """New dict with `override` layered onto `base`: a nested dict value
+    (e.g. volume_confirmation, cross_sectional) is merged key-by-key
+    rather than replaced wholesale, so a profile can tweak just one
+    nested field without needing to repeat the whole sub-block."""
+    result = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 @dataclass
 class Config:
     raw: dict[str, Any] = field(repr=False)
@@ -113,6 +127,27 @@ class Config:
 
         # Fallback to global strategy mode
         return self.get("strategy", "mode", default="52w_high")
+
+    def get_profile_strategy_config(self, profile_name: str | None = None) -> dict[str, Any]:
+        """Full strategy parameter set for a profile: the top-level
+        `strategy:` section as a base, with that profile's own
+        `profiles.<name>.strategy:` block layered on top (only the
+        fields it actually overrides -- anything it doesn't set falls
+        through to the shared base). This is what lets each profile
+        tune its own moving averages, momentum thresholds, etc.
+        independently instead of every profile being forced to share
+        one global set of values. Always returns a fresh dict, safe to
+        mutate -- never a live reference into cfg.raw."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        base = dict(self.get("strategy", default={}))
+        profiles = self.get("profiles", default={})
+        profile_cfg = (profiles.get(profile_name) or {}) if profile_name else {}
+        overrides = profile_cfg.get("strategy") or {}
+        merged = _deep_merge(base, overrides)
+        merged["mode"] = self.get_profile_strategy_mode(profile_name)
+        return merged
 
     def is_multi_profile_mode(self) -> bool:
         """Check if multi-profile mode is enabled (run all profiles simultaneously)."""

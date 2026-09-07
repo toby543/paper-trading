@@ -19,12 +19,6 @@ EDITABLE_SETTINGS: list[dict] = [
      "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
              "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "
              "startup -- restart required for a change to take effect."},
-    {"path": ("strategy", "mode"), "type": "choice", "choices": ["52w_high", "cross_sectional_momentum", "consolidation_breakout"],
-     "group": "Strategy — Entry", "label": "Strategy mode", "unit": "",
-     "desc": "52w_high: accept/reject each stock independently. cross_sectional_momentum: "
-             "rank the whole universe by trailing return and buy only the top percentile. "
-             "consolidation_breakout: identify stocks breaking out above tight consolidation on volume. "
-             "Restart required to switch."},
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},

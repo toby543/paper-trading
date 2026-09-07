@@ -9,6 +9,12 @@
 # - 52w_high: Your primary account (existing trades preserved here)
 # - cross_sectional: Independent copy of capital for cross-sectional momentum
 # - consolidation_breakout: Independent copy of capital for consolidation breakout
+#
+# Each profile also has its own `strategy:` block below, letting it tune its
+# own moving averages, momentum thresholds, etc. independently of the other
+# profiles -- editable per-profile from the dashboard's Edit Settings panel.
+# A field a profile doesn't set there falls back to the top-level `strategy:`
+# section further down this file.
 
 # Profile selector: which profile to use (52w_high, cross_sectional, consolidation_breakout, or custom name)
 # Each profile maintains separate positions, cash, and trade history
@@ -30,6 +36,22 @@ profiles:
     # Strategy mode for this profile
     strategy_mode: 52w_high
     # This is your PRIMARY profile where existing trades and positions continue
+    strategy:
+      proximity_to_52w_high_pct: 4.0
+      momentum_lookback_days: 252
+      min_momentum_return_pct: 18.0
+      fast_ma_days: 50
+      slow_ma_days: 200
+      min_avg_daily_turnover_inr: 50000000
+      min_relative_strength_pct: 8.0
+      volume_confirmation:
+        enabled: true
+        recent_days: 10
+        baseline_days: 50
+        min_volume_multiple: 1.5
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
 
   cross_sectional:
     display_name: "Cross-Sectional Momentum"
@@ -38,6 +60,17 @@ profiles:
     starting_capital: 100000.0
     strategy_mode: cross_sectional_momentum
     # This profile starts fresh with new capital
+    strategy:
+      fast_ma_days: 50
+      slow_ma_days: 200
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
+      cross_sectional:
+        lookback_days: 252
+        skip_recent_days: 21
+        top_pct: 10.0
 
   consolidation_breakout:
     display_name: "Consolidation Breakout"
@@ -46,6 +79,20 @@ profiles:
     starting_capital: 100000.0
     strategy_mode: consolidation_breakout
     # This profile starts fresh with new capital
+    strategy:
+      # Shorter, looser momentum check than 52w_high's -- appropriate for
+      # a breakout-off-a-base setup rather than a sustained 52-week trend.
+      momentum_lookback_days: 21
+      min_momentum_return_pct: 5.0
+      fast_ma_days: 50
+      slow_ma_days: 200
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
+      consolidation_breakout:
+        consolidation_days: 10
+        volume_multiple: 2.0
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile
@@ -61,7 +108,16 @@ universe:
                                       # data/universe_nifty500.csv is the full cleaned Nifty 500.
 
 strategy:
-  # Which strategy drives entry selection:
+  # Shared base/fallback strategy parameters. Each profile above has its
+  # own `strategy:` block that overrides whatever fields it wants to tune
+  # independently -- anything a profile doesn't set there falls through
+  # to these values. Only matters directly if no profiles are configured
+  # at all (legacy non-profile mode) or you add a profile without its own
+  # strategy: block.
+  #
+  # Which strategy drives entry selection (profile.strategy_mode picks
+  # this per profile; this `mode` field only matters as the fallback
+  # above):
   #   52w_high                 -- accept/reject each stock independently
   #                                against the fixed thresholds below
   #                                (proximity to its own 52-week high,

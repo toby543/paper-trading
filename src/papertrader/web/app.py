@@ -216,13 +216,14 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     def index():
         store = get_store()
         active_profile = cfg.get("active_profile", default="52w_high")
-        active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
         active_state_file = cfg.get_profile_state_file(active_profile)
         active_state_file_short = os.path.basename(active_state_file)
 
-        # Build strategy config with profile-specific mode
-        strategy = cfg.get("strategy", default={})
-        strategy = {**strategy, "mode": active_strategy_mode}
+        # This profile's own strategy parameters (mode + any of its own
+        # overrides merged over the shared base) -- what actually governs
+        # its live trading and what the Strategy Rules / Edit Settings
+        # panels display and edit.
+        strategy = cfg.get_profile_strategy_config(active_profile)
 
         return render_template(
             "index.html",
@@ -311,28 +312,60 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     @app.get("/api/settings")
     @api_login_required
     def api_get_settings():
+        """Every field's current value, resolved against whichever
+        profile the dashboard is currently viewing: a "strategy.*" field
+        shows that profile's own merged strategy config (its overrides
+        layered over the shared base), so switching the profile dropdown
+        and reopening this panel shows and edits that profile's own
+        settings, not some other profile's."""
+        active_profile = cfg.get("active_profile", default="52w_high")
+        effective_raw = {**cfg.raw, "strategy": cfg.get_profile_strategy_config(active_profile)}
         fields = []
         for spec in EDITABLE_SETTINGS:
-            fields.append({**spec, "path": list(spec["path"]), "value": get_value(cfg.raw, spec["path"])})
-        return jsonify({"fields": fields})
+            fields.append({
+                **spec,
+                "path": list(spec["path"]),
+                "value": get_value(effective_raw, spec["path"]),
+                "profile_scoped": spec["path"][0] == "strategy",
+            })
+        return jsonify({
+            "fields": fields,
+            "active_profile": active_profile,
+            "active_profile_display": cfg.list_profiles().get(active_profile, active_profile),
+        })
 
     @app.post("/api/settings")
     @api_login_required
     def api_update_settings():
+        """Save edited settings. A "strategy.*" field is validated against
+        its logical path (strategy.proximity_to_52w_high_pct etc.) but
+        actually written under the CURRENTLY VIEWED profile's own
+        overrides (profiles.<active_profile>.strategy.*) rather than the
+        shared top-level strategy: block -- that's what makes each
+        profile's strategy independently editable. Everything else
+        (risk, regime, execution, engine, data_source, universe) stays a
+        single global value shared by every profile, same as before."""
         payload = request.get_json(silent=True) or {}
         raw_updates = payload.get("updates", [])
         if not isinstance(raw_updates, list) or not raw_updates:
             return jsonify({"ok": False, "errors": ["No changes submitted."]}), 400
 
+        active_profile = cfg.get("active_profile", default="52w_high")
+
         coerced = []
         errors = []
         for item in raw_updates:
-            path = tuple(item.get("path", []))
+            logical_path = tuple(item.get("path", []))
             try:
-                value = coerce_and_validate(path, item.get("value"))
-                coerced.append((list(path), value))
+                value = coerce_and_validate(logical_path, item.get("value"))
             except ValueError as exc:
-                errors.append(f"{'.'.join(path)}: {exc}")
+                errors.append(f"{'.'.join(logical_path)}: {exc}")
+                continue
+            if logical_path and logical_path[0] == "strategy":
+                write_path = ["profiles", active_profile, "strategy", *logical_path[1:]]
+            else:
+                write_path = list(logical_path)
+            coerced.append((write_path, value))
 
         if errors:
             return jsonify({"ok": False, "errors": errors}), 400
@@ -372,12 +405,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         # Reload components that can be updated live (don't affect in-flight trades)
         try:
             for eng in engines.values():
-                # Copy -- cfg.get() returns the live dict inside cfg.raw,
-                # and every engine shares this same Config object, so
-                # mutating it in place would leak one engine's "mode"
-                # into all the others.
-                strategy_cfg = dict(cfg.get("strategy", default={}))
-                strategy_cfg["mode"] = cfg.get_profile_strategy_mode(eng.profile_name)
+                strategy_cfg = cfg.get_profile_strategy_config(eng.profile_name)
                 # Under the engine's own lock so this can't interleave with
                 # its background run_forever() loop or a reload_profile().
                 with eng._state_lock:

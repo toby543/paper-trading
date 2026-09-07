@@ -172,29 +172,34 @@ def evaluate_candidate(
     if avg_daily_turnover < cfg.get("min_avg_daily_turnover_inr", 500000):
         return None
     
+    # consolidation_days/volume_multiple live under strategy.consolidation_breakout
+    # in config.yaml, same as the Phase 2 fields below -- read them from the
+    # same nested sub-dict rather than the top level, where they'd silently
+    # always fall back to the hardcoded default no matter what's configured.
+    cb_cfg = cfg.get("consolidation_breakout") or {}
+
     # Detect consolidation
-    consolidation_days = cfg.get("consolidation_days", 10)
+    consolidation_days = cb_cfg.get("consolidation_days", 10)
     consolidation = _detect_consolidation(history, consolidation_days)
-    
+
     if consolidation is None:
         return None
-    
+
     consolidation_high, consolidation_low, is_tight = consolidation
     if not is_tight:
         return None
-    
+
     # Detect breakout
-    volume_multiple = cfg.get("volume_multiple", 2.0)
+    volume_multiple = cb_cfg.get("volume_multiple", 2.0)
     if not _detect_breakout(history, consolidation_high, volume_multiple):
         return None
-    
+
     # Momentum check
     momentum = _momentum_return_pct(history, cfg.get("momentum_lookback_days", 21))
     if momentum is None or momentum < cfg.get("min_momentum_return_pct", 5.0):
         return None
-    
+
     # Phase 2: Market cap filter
-    cb_cfg = cfg.get("consolidation_breakout") or {}
     market_cap_min = cb_cfg.get("market_cap_min_cr")
     if market_cap_min and market_cap_cr and market_cap_cr < market_cap_min:
         return None

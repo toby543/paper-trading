@@ -1194,8 +1194,16 @@ function renderEditGroups() {
   const groups = {};
   editFields.forEach(f => { (groups[f.group] ||= []).push(f); });
 
-  document.getElementById("editGroups").innerHTML = Object.entries(groups).map(([group, fields]) => `
-    <div class="edit-group-label">${group}</div>
+  document.getElementById("editGroups").innerHTML = Object.entries(groups).map(([group, fields]) => {
+    // Any field in this group scoped to the currently-viewed profile
+    // (a "strategy.*" setting) -- labeled with that profile's name so
+    // it's clear these values apply to it alone, not every profile.
+    const isProfileScoped = fields.some(f => f.profile_scoped);
+    const groupLabel = isProfileScoped && editActiveProfileDisplay
+      ? `${group} <span style="color: var(--accent); text-transform: none; letter-spacing: 0;">— ${editActiveProfileDisplay}</span>`
+      : group;
+    return `
+    <div class="edit-group-label">${groupLabel}</div>
     ${fields.map(f => `
       <div class="edit-row">
         <div class="edit-row-text">
@@ -1208,7 +1216,8 @@ function renderEditGroups() {
         </div>
       </div>
     `).join("")}
-  `).join("");
+  `;
+  }).join("");
 
   editFields.forEach(f => {
     const key = pathKey(f.path);
@@ -1235,10 +1244,13 @@ function showEditBanner(kind, html) {
   banner.style.display = "block";
 }
 
+let editActiveProfileDisplay = null;
+
 async function loadSettings() {
   try {
     const data = await authFetch("/api/settings").then(r => r.json());
     editFields = data.fields;
+    editActiveProfileDisplay = data.active_profile_display || null;
     renderEditGroups();
     updateSaveButtonState();
   } catch (e) {
