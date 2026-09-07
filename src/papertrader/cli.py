@@ -26,6 +26,24 @@ def _setup_logging(cfg: Config) -> None:
     )
 
 
+def _resolve_profiles(cfg: Config, explicit_profile: str | None) -> list[str]:
+    """Which profile(s) a read-only/one-shot CLI command should cover:
+    the one named by --profile if given, every configured profile if
+    multi_profile_mode is on (since they're all trading independently
+    and none is more "the" account than another), or just the single
+    active_profile otherwise -- matching how `serve`/`run` decide which
+    engine(s) to actually run."""
+    all_profiles = cfg.list_profiles()
+    if explicit_profile:
+        if explicit_profile not in all_profiles:
+            print(f"Unknown profile '{explicit_profile}'. Configured profiles: {list(all_profiles)}", file=sys.stderr)
+            sys.exit(1)
+        return [explicit_profile]
+    if cfg.is_multi_profile_mode() and all_profiles:
+        return list(all_profiles)
+    return [cfg.get("active_profile", default="52w_high")]
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     _setup_logging(cfg)
@@ -46,44 +64,54 @@ def cmd_run(args: argparse.Namespace) -> None:
 def cmd_once(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     _setup_logging(cfg)
-    engine = TradingEngine(cfg)
-    engine.run_once()
+    profiles = _resolve_profiles(cfg, getattr(args, "profile", None))
+    for profile_name in profiles:
+        if len(profiles) > 1:
+            log.info("=== Running once for profile: %s ===", profile_name)
+        TradingEngine(cfg, profile_name=profile_name).run_once()
 
 
 def cmd_portfolio(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
-    engine = TradingEngine(cfg)
-    positions = engine.broker.positions()
-    cash = engine.broker.cash()
+    display_names = cfg.list_profiles()
+    profiles = _resolve_profiles(cfg, getattr(args, "profile", None))
 
-    rows = []
-    total_mv = 0.0
-    total_pnl = 0.0
-    for symbol, pos in positions.items():
-        try:
-            quote = engine.data.get_quote(symbol)
-            ltp = quote.ltp
-            week52_high = quote.week52_high
-        except Exception:
-            ltp = pos.avg_price
-            week52_high = None
-        if week52_high and week52_high > 0:
-            from_high = f"-{max(0.0, (week52_high - ltp) / week52_high * 100.0):.1f}%"
-        else:
-            from_high = "—"
-        mv = pos.market_value(ltp)
-        pnl = pos.unrealized_pnl(ltp)
-        pnl_pct = pos.unrealized_pnl_pct(ltp)
-        total_mv += mv
-        total_pnl += pnl
-        rows.append([symbol, pos.quantity, f"{pos.avg_price:.2f}", f"{ltp:.2f}", from_high, f"{mv:.2f}", f"{pnl:+.2f}", f"{pnl_pct:+.2f}%"])
+    for profile_name in profiles:
+        engine = TradingEngine(cfg, profile_name=profile_name)
+        if len(profiles) > 1:
+            print(f"\n=== {display_names.get(profile_name, profile_name)} ({profile_name}) ===")
 
-    print(tabulate(rows, headers=["Symbol", "Qty", "Avg Price", "LTP", "From 52W High", "Mkt Value", "Unrl. P&L", "P&L %"], tablefmt="simple"))
-    print()
-    print(f"Cash:              ₹{cash:,.2f}")
-    print(f"Positions value:   ₹{total_mv:,.2f}")
-    print(f"Unrealized P&L:    ₹{total_pnl:+,.2f}")
-    print(f"Total equity:      ₹{cash + total_mv:,.2f}")
+        positions = engine.broker.positions()
+        cash = engine.broker.cash()
+
+        rows = []
+        total_mv = 0.0
+        total_pnl = 0.0
+        for symbol, pos in positions.items():
+            try:
+                quote = engine.data.get_quote(symbol)
+                ltp = quote.ltp
+                week52_high = quote.week52_high
+            except Exception:
+                ltp = pos.avg_price
+                week52_high = None
+            if week52_high and week52_high > 0:
+                from_high = f"-{max(0.0, (week52_high - ltp) / week52_high * 100.0):.1f}%"
+            else:
+                from_high = "—"
+            mv = pos.market_value(ltp)
+            pnl = pos.unrealized_pnl(ltp)
+            pnl_pct = pos.unrealized_pnl_pct(ltp)
+            total_mv += mv
+            total_pnl += pnl
+            rows.append([symbol, pos.quantity, f"{pos.avg_price:.2f}", f"{ltp:.2f}", from_high, f"{mv:.2f}", f"{pnl:+.2f}", f"{pnl_pct:+.2f}%"])
+
+        print(tabulate(rows, headers=["Symbol", "Qty", "Avg Price", "LTP", "From 52W High", "Mkt Value", "Unrl. P&L", "P&L %"], tablefmt="simple"))
+        print()
+        print(f"Cash:              ₹{cash:,.2f}")
+        print(f"Positions value:   ₹{total_mv:,.2f}")
+        print(f"Unrealized P&L:    ₹{total_pnl:+,.2f}")
+        print(f"Total equity:      ₹{cash + total_mv:,.2f}")
 
 
 def cmd_web(args: argparse.Namespace) -> None:
@@ -226,10 +254,16 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
 
 def cmd_history(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
-    engine = TradingEngine(cfg)
-    trades = engine.storage.get_trades(limit=args.limit)
-    rows = [[t.timestamp, t.side, t.symbol, t.quantity, f"{t.price:.2f}", f"{t.charges:.2f}", t.reason] for t in trades]
-    print(tabulate(rows, headers=["Timestamp", "Side", "Symbol", "Qty", "Price", "Charges", "Reason"], tablefmt="simple"))
+    display_names = cfg.list_profiles()
+    profiles = _resolve_profiles(cfg, getattr(args, "profile", None))
+
+    for profile_name in profiles:
+        if len(profiles) > 1:
+            print(f"\n=== {display_names.get(profile_name, profile_name)} ({profile_name}) ===")
+        engine = TradingEngine(cfg, profile_name=profile_name)
+        trades = engine.storage.get_trades(limit=args.limit)
+        rows = [[t.timestamp, t.side, t.symbol, t.quantity, f"{t.price:.2f}", f"{t.charges:.2f}", t.reason] for t in trades]
+        print(tabulate(rows, headers=["Timestamp", "Side", "Symbol", "Qty", "Price", "Charges", "Reason"], tablefmt="simple"))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -237,9 +271,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None, help="Path to config.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    profile_help = ("Restrict to one profile (e.g. cross_sectional). Default: every configured "
+                     "profile when multi_profile_mode is on, otherwise just the active_profile.")
+
+    once = sub.add_parser("once", help="Run a single scan/trade cycle and exit")
+    once.add_argument("--profile", default=None, help=profile_help)
+    once.set_defaults(func=cmd_once)
+
     sub.add_parser("run", help="Run the autonomous trading loop (blocks until killed)").set_defaults(func=cmd_run)
-    sub.add_parser("once", help="Run a single scan/trade cycle and exit").set_defaults(func=cmd_once)
-    sub.add_parser("portfolio", help="Show current positions and P&L").set_defaults(func=cmd_portfolio)
+
+    portfolio = sub.add_parser("portfolio", help="Show current positions and P&L")
+    portfolio.add_argument("--profile", default=None, help=profile_help)
+    portfolio.set_defaults(func=cmd_portfolio)
 
     web = sub.add_parser("web", help="Launch the local read-only web dashboard")
     web.add_argument("--host", default="127.0.0.1")
@@ -253,6 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     hist = sub.add_parser("history", help="Show trade history")
     hist.add_argument("--limit", type=int, default=50)
+    hist.add_argument("--profile", default=None, help=profile_help)
     hist.set_defaults(func=cmd_history)
 
     bt = sub.add_parser("backtest", help="Replay the strategy against historical data instead of trading live")
