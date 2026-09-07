@@ -79,7 +79,7 @@ class Config:
         Returns profile config from profiles section, or account section as fallback.
         """
         active_profile_name = self.get("active_profile")
-        profiles = self.get("profiles", {})
+        profiles = self.get("profiles", default={})
 
         if active_profile_name and active_profile_name in profiles:
             return profiles[active_profile_name]
@@ -89,13 +89,13 @@ class Config:
 
     def set_active_profile(self, profile_name: str) -> None:
         """Set the active profile."""
-        profiles = self.get("profiles", {})
+        profiles = self.get("profiles", default={})
         if profile_name in profiles:
             self.raw["active_profile"] = profile_name
 
     def list_profiles(self) -> dict[str, str]:
         """Return dict of profile_name -> display_name for all configured profiles."""
-        profiles = self.get("profiles", {})
+        profiles = self.get("profiles", default={})
         result = {}
         for name, cfg in profiles.items():
             result[name] = cfg.get("display_name", name)
@@ -106,7 +106,7 @@ class Config:
         if profile_name is None:
             profile_name = self.get("active_profile")
 
-        profiles = self.get("profiles", {})
+        profiles = self.get("profiles", default={})
         if profile_name and profile_name in profiles:
             profile_cfg = profiles[profile_name]
             return profile_cfg.get("strategy_mode", "52w_high")
@@ -116,14 +116,14 @@ class Config:
 
     def is_multi_profile_mode(self) -> bool:
         """Check if multi-profile mode is enabled (run all profiles simultaneously)."""
-        return self.get("multi_profile_mode", False)
+        return self.get("multi_profile_mode", default=False)
 
     def get_profile_starting_capital(self, profile_name: str | None = None) -> float:
         """Get starting capital for a specific profile (or active profile if not specified)."""
         if profile_name is None:
             profile_name = self.get("active_profile")
 
-        profiles = self.get("profiles", {})
+        profiles = self.get("profiles", default={})
         if profile_name and profile_name in profiles:
             profile_cfg = profiles[profile_name]
             return float(profile_cfg.get("starting_capital", 100000.0))
