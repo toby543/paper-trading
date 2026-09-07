@@ -1261,6 +1261,8 @@ if (profileSelector) {
         banner.style.display = "block";
         // If running python main.py serve, the engine auto-reloads with new profile
         // If running python main.py web (separate process), manual restart is needed
+        // Reload page after 1.5 seconds to show updated profile info and data
+        setTimeout(() => location.reload(), 1500);
       } else {
         banner.className = "edit-banner error";
         banner.textContent = data.error || "Failed to switch profile.";
