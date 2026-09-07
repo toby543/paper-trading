@@ -384,16 +384,16 @@
   <!-- Profile Info Banner -->
   {% if profiles %}
   <div style="background:var(--surface-2); border-bottom:1px solid var(--border); padding:8px 16px; display:flex; gap:16px; align-items:center; font-size:12px;">
-    <span style="color:var(--ink-dim);">Active Profile:</span>
+    <span style="color:var(--ink-dim);">{{ "Viewing:" if multi_profile_mode else "Active Profile:" }}</span>
     <span class="mono" style="font-weight:500; color:var(--accent);">{{ profiles.get(active_profile, active_profile) }}</span>
     <span style="color:var(--ink-faint);">•</span>
     <span style="color:var(--ink-dim);">Strategy:</span>
     <span class="mono" style="font-weight:500;">{{ strategy.get('mode', '52w_high') }}</span>
     <span style="color:var(--ink-faint);">•</span>
     <span style="color:var(--ink-dim);">Ledger:</span>
-    <span class="mono" style="font-weight:500; color:var(--good);">data/state_{{ active_profile }}.db</span>
+    <span class="mono" style="font-weight:500; color:var(--good);">{{ active_state_file }}</span>
     {% if multi_profile_mode %}
-    <span style="margin-left:auto; background:var(--accent-wash); color:var(--accent); padding:2px 6px; border-radius:2px;">Multi-profile mode</span>
+    <span style="margin-left:auto; background:var(--accent-wash); color:var(--accent); padding:2px 6px; border-radius:2px;" title="All profiles below are trading concurrently in their own background threads; the dropdown only changes what you're viewing.">All 3 profiles trading in parallel</span>
     {% endif %}
   </div>
   {% endif %}

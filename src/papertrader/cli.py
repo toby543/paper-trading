@@ -12,6 +12,8 @@ from tabulate import tabulate
 from .config import Config
 from .engine.scheduler import TradingEngine
 
+log = logging.getLogger(__name__)
+
 
 def _setup_logging(cfg: Config) -> None:
     log_file = cfg.log_file
@@ -27,8 +29,18 @@ def _setup_logging(cfg: Config) -> None:
 def cmd_run(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     _setup_logging(cfg)
-    engine = TradingEngine(cfg)
-    engine.run_forever()
+
+    if cfg.is_multi_profile_mode():
+        profiles = list(cfg.list_profiles().keys())
+        engines = [TradingEngine(cfg, profile_name=p) for p in profiles]
+        log.info("Multi-profile mode: starting %d engines in parallel: %s", len(engines), profiles)
+        for eng in engines[1:]:
+            threading.Thread(target=eng.run_forever, name=f"trading-engine-{eng.profile_name}", daemon=True).start()
+        # Run the first engine's loop in the main thread so Ctrl+C stops the process.
+        engines[0].run_forever()
+    else:
+        engine = TradingEngine(cfg)
+        engine.run_forever()
 
 
 def cmd_once(args: argparse.Namespace) -> None:
@@ -84,22 +96,37 @@ def cmd_web(args: argparse.Namespace) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """Run the autonomous trading loop and the web dashboard together in
-    one process: the engine loop runs in a background thread, the
+    one process: the engine loop(s) run in background threads, the
     dashboard's Flask server runs (blocking) in the main thread and
-    shares the same TradingEngine instance, so there's nothing else to
-    start separately -- Ctrl+C stops both."""
+    shares the same TradingEngine instance(s), so there's nothing else to
+    start separately -- Ctrl+C stops everything.
+
+    In multi_profile_mode, one TradingEngine per configured profile is
+    created and each runs its own background thread concurrently, so all
+    profiles trade in parallel with fully isolated ledgers. The dashboard's
+    profile dropdown then just selects which engine's data to *view* --
+    it does not start/stop/restart any engine."""
     cfg = Config.load(args.config)
     _setup_logging(cfg)
-    engine = TradingEngine(cfg)
 
-    engine_thread = threading.Thread(target=engine.run_forever, name="trading-engine", daemon=True)
-    engine_thread.start()
+    engines: dict[str, TradingEngine] = {}
+    if cfg.is_multi_profile_mode():
+        for profile_name in cfg.list_profiles():
+            eng = TradingEngine(cfg, profile_name=profile_name)
+            engines[profile_name] = eng
+        log.info("Multi-profile mode: starting %d engines in parallel: %s", len(engines), list(engines))
+    else:
+        eng = TradingEngine(cfg)
+        engines[eng.profile_name] = eng
+
+    for name, eng in engines.items():
+        threading.Thread(target=eng.run_forever, name=f"trading-engine-{name}", daemon=True).start()
 
     from .web.app import create_app
 
-    app = create_app(engine)
+    app = create_app(engines, cfg)
     # use_reloader must stay off: Flask's reloader forks a second process,
-    # which would start a second copy of the engine thread too. threaded:
+    # which would start a second copy of the engine thread(s) too. threaded:
     # /api/candidates can take a while (network calls across the whole
     # universe) -- without it the dev server would serve one request at a
     # time and the rest of the dashboard would appear frozen during a scan.

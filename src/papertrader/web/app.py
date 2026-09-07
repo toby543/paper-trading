@@ -4,10 +4,20 @@ Normally runs as its own process, reading the same SQLite ledger the
 trading engine (`python main.py run`) writes to -- it does not place
 trades itself; it only displays live-marked positions, P&L, the equity
 curve and the trade history, refreshing itself every few seconds in
-the browser. `create_app()` takes an existing TradingEngine so it can
-also be embedded in the same process as the engine (see
-`python main.py serve`, cli.py) sharing one engine instance instead of
-constructing a second one.
+the browser. `create_app()` takes a dict of already-constructed
+TradingEngine instances (one per configured profile) so it can also be
+embedded in the same process as the engine(s) (see `python main.py
+serve`, cli.py) sharing those instances instead of constructing new
+ones.
+
+In multi_profile_mode all engines in the dict are already running
+their own trading loop concurrently in separate threads -- the
+dashboard's profile dropdown only changes which engine's data is
+*displayed* (get_current_engine()), it never starts, stops, or
+reinitializes an engine. Outside multi_profile_mode the dict holds a
+single engine, and switching profiles instead calls
+TradingEngine.reload_profile() to actually swap out that one engine's
+ledger/strategy.
 """
 from __future__ import annotations
 
@@ -42,15 +52,23 @@ def _safe_next_path(value: str | None) -> str | None:
     return value
 
 
-def create_app(engine: TradingEngine) -> Flask:
+def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> Flask:
     app = Flask(
         __name__,
         template_folder=os.path.join(_HERE, "templates"),
         static_folder=os.path.join(_HERE, "static"),
     )
     app.jinja_env.filters["inr"] = indian_currency
-    app.config["ENGINE"] = engine
-    cfg = engine.cfg
+    app.config["ENGINES"] = engines
+    cfg = cfg or next(iter(engines.values())).cfg
+
+    def get_current_engine() -> TradingEngine:
+        """The engine whose data the dashboard is currently displaying.
+        In multi_profile_mode every engine in `engines` is already
+        running its own trading loop; this only picks which one's data
+        to show, matching the active_profile dropdown selection."""
+        active = cfg.get("active_profile", default="52w_high")
+        return engines.get(active) or next(iter(engines.values()))
 
     def get_store():
         # Re-read on every call rather than caching at startup: an admin
@@ -271,9 +289,7 @@ def create_app(engine: TradingEngine) -> Flask:
         store = get_store()
         active_profile = cfg.get("active_profile", default="52w_high")
         active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
-        profiles_list = cfg.list_profiles()
-        log.info("Rendering dashboard: active_profile=%s, profiles=%s, strategy=%s",
-                 active_profile, profiles_list, active_strategy_mode)
+        active_state_file = cfg.get("profiles", active_profile, "state_file", default=cfg.state_file)
 
         # Build strategy config with profile-specific mode
         strategy = cfg.get("strategy", default={})
@@ -295,36 +311,37 @@ def create_app(engine: TradingEngine) -> Flask:
             logging_cfg=cfg.get("logging", default={}),
             profiles=cfg.list_profiles(),
             active_profile=active_profile,
+            active_state_file=active_state_file,
             multi_profile_mode=cfg.is_multi_profile_mode(),
         )
 
     @app.get("/api/summary")
     @api_login_required
     def api_summary():
-        return jsonify(build_summary(engine))
+        return jsonify(build_summary(get_current_engine()))
 
     @app.get("/api/trades")
     @api_login_required
     def api_trades():
         limit = request.args.get("limit", default=100, type=int)
-        return jsonify(build_trades(engine, limit=limit))
+        return jsonify(build_trades(get_current_engine(), limit=limit))
 
     @app.get("/api/equity_curve")
     @api_login_required
     def api_equity_curve():
         limit = request.args.get("limit", default=500, type=int)
-        return jsonify(build_equity_curve(engine, limit=limit))
+        return jsonify(build_equity_curve(get_current_engine(), limit=limit))
 
     @app.get("/api/indices")
     @api_login_required
     def api_indices():
         period = request.args.get("period", default="6mo")
-        return jsonify(build_index_charts(engine, period=period))
+        return jsonify(build_index_charts(get_current_engine(), period=period))
 
     @app.get("/api/performance")
     @api_login_required
     def api_performance():
-        return jsonify(build_performance_comparison(engine))
+        return jsonify(build_performance_comparison(get_current_engine()))
 
     @app.get("/api/candidates")
     @api_login_required
@@ -335,7 +352,7 @@ def create_app(engine: TradingEngine) -> Flask:
         # below keeps this from blocking the rest of the dashboard while
         # it runs.
         limit = request.args.get("limit", default=20, type=int)
-        return jsonify(build_candidates(engine, limit=limit))
+        return jsonify(build_candidates(get_current_engine(), limit=limit))
 
     @app.post("/api/backtest/run")
     @api_login_required
@@ -417,40 +434,48 @@ def create_app(engine: TradingEngine) -> Flask:
     @api_login_required
     def api_reload_config():
         """Hot-reload configuration from disk without restarting the service.
-        Updates running engine components with new config values."""
+        Updates every running engine's components with the new config
+        values (there can be more than one in multi_profile_mode)."""
         if not cfg.reload():
             return jsonify({"ok": False, "error": "No changes to config file"}), 400
 
-        engine = app.config["ENGINE"]
-
         # Reload components that can be updated live (don't affect in-flight trades)
         try:
-            engine.strategy_cfg = cfg.get("strategy", default={})
-            engine.risk_cfg = cfg.get("risk", default={})
-            engine.regime_cfg = cfg.get("regime", default={})
+            for eng in engines.values():
+                strategy_cfg = cfg.get("strategy", default={})
+                strategy_cfg["mode"] = cfg.get_profile_strategy_mode(eng.profile_name)
+                eng.strategy_cfg = strategy_cfg
+                eng.risk_cfg = cfg.get("risk", default={})
+                eng.regime_cfg = cfg.get("regime", default={})
 
-            # Update RiskManager with new risk settings
-            engine.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
-            engine.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-            engine.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                # Update RiskManager with new risk settings
+                eng.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
+                eng.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+                eng.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
 
-            # Update data source timeout settings
-            engine.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
+                # Update data source timeout settings
+                eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
 
-            log.info("Configuration hot-reloaded successfully. Changes applied to running engine.")
+            log.info("Configuration hot-reloaded successfully. Changes applied to %d running engine(s).", len(engines))
             return jsonify({
                 "ok": True,
                 "message": "Configuration reloaded successfully. Risk management and strategy settings are now active.",
-                "note": "Strategy mode changes (52w_high ↔ cross_sectional) require a restart to take effect."
+                "note": "Changing which strategy a profile uses (strategy_mode in config.yaml) requires a restart to take effect."
             }), 200
         except Exception as e:
-            log.error("Failed to apply reloaded config to engine: %s", e)
+            log.error("Failed to apply reloaded config to engine(s): %s", e)
             return jsonify({"ok": False, "error": f"Failed to apply config: {e}"}), 500
 
     @app.post("/api/set-profile")
     @api_login_required
     def api_set_profile():
-        """Switch to a different profile and automatically reload the engine."""
+        """Switch the active profile.
+
+        In multi_profile_mode every profile's engine is already running
+        and trading independently in its own background thread -- this
+        only changes which one's data the dashboard *displays*. Outside
+        multi_profile_mode there is a single engine, and this actually
+        reloads it (new ledger, new strategy) to match the new profile."""
         payload = request.get_json(silent=True) or {}
         profile_name = payload.get("profile")
 
@@ -470,18 +495,34 @@ def create_app(engine: TradingEngine) -> Flask:
             profile_strategy = profile_cfg.get("strategy_mode", "52w_high")
             display_name = profile_cfg.get("display_name", profile_name)
 
-            # Update config file
+            # Persist which profile is active (view selection + fallback default)
             update_config_file(cfg.path, [(["active_profile"], profile_name)])
             cfg.set_active_profile(profile_name)
 
-            # Reload engine with new profile if it's available (running in same process)
-            engine = app.config.get("ENGINE")
+            if cfg.is_multi_profile_mode():
+                # All profiles are already trading in parallel -- this is
+                # purely a view switch, no engine touched.
+                log.info("Switched dashboard view to profile: %s (all profiles trading in parallel)", profile_name)
+                return jsonify({
+                    "ok": True,
+                    "message": f"Now viewing {display_name} (strategy: {profile_strategy}).",
+                    "restart_required": False,
+                    "note": "All 3 profiles are trading simultaneously -- this only changed which one you're viewing."
+                }), 200
+
+            # Single-profile mode: actually reload the one running engine
+            # to the new profile's ledger/strategy.
+            engine = next(iter(engines.values()), None)
             restart_required = True
             reload_msg = "Restart the engine to load the new profile's ledger, positions, and strategy."
 
             if engine:
                 try:
+                    old_key = engine.profile_name
                     engine.reload_profile()
+                    # Engines is keyed by profile_name; re-key it to match.
+                    if engine.profile_name != old_key:
+                        engines[engine.profile_name] = engines.pop(old_key)
                     restart_required = False
                     reload_msg = "Engine reloaded automatically with new profile, ledger, and strategy."
                     log.info("Engine reloaded for profile: %s (strategy: %s)", profile_name, profile_strategy)
@@ -504,8 +545,16 @@ def create_app(engine: TradingEngine) -> Flask:
 
 
 def run_dashboard(cfg: Config, host: str = "127.0.0.1", port: int = 8000, debug: bool = False) -> None:
-    engine = TradingEngine(cfg)
-    app = create_app(engine)
+    """Read-only dashboard, no trading loop of its own: expects a
+    separate `python main.py run` process to be writing to the same
+    ledger file(s). Builds one (non-running) TradingEngine per profile
+    in multi_profile_mode so it can read each profile's own ledger."""
+    if cfg.is_multi_profile_mode():
+        engines = {name: TradingEngine(cfg, profile_name=name) for name in cfg.list_profiles()}
+    else:
+        eng = TradingEngine(cfg)
+        engines = {eng.profile_name: eng}
+    app = create_app(engines, cfg)
     # threaded=True: /api/candidates can take a while (network calls across
     # the whole universe) -- without this, Werkzeug's dev server serves one
     # request at a time and the rest of the dashboard would appear frozen

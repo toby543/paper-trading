@@ -17,7 +17,7 @@ active_profile: 52w_high
 
 # Enable multi-profile mode: run all profiles simultaneously in parallel engines
 # When disabled, only the active_profile runs; when enabled, all profiles trade concurrently
-multi_profile_mode: false
+multi_profile_mode: true
 
 # Profile definitions: each profile can have its own strategy mode, starting capital, and state file
 # Each profile is completely independent and can be run standalone or in parallel with others
