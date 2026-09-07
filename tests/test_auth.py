@@ -1,4 +1,3 @@
-import pyotp
 import pytest
 
 from papertrader.web import auth
@@ -18,7 +17,7 @@ def test_not_configured_before_bootstrap():
     assert auth.load_auth_store() is None
 
 
-def test_bootstrap_admin_creates_store_with_one_admin_unenrolled():
+def test_bootstrap_admin_creates_store_with_one_admin():
     auth.bootstrap_admin("nash", "correct horse battery staple")
     assert auth.is_configured() is True
 
@@ -26,8 +25,6 @@ def test_bootstrap_admin_creates_store_with_one_admin_unenrolled():
     assert "nash" in store["users"]
     user = store["users"]["nash"]
     assert user["is_admin"] is True
-    assert user["totp_enrolled"] is False
-    assert user["totp_secret"] is None
     assert len(store["flask_secret_key"]) >= 32
 
 
@@ -45,42 +42,6 @@ def test_verify_password_rejects_wrong_password_and_unknown_user():
     assert auth.verify_password(store, "nash", "correct horse battery staple") is True
 
 
-def test_first_login_totp_enrollment_flow():
-    auth.bootstrap_admin("nash", "correct horse battery staple")
-    store = auth.load_auth_store()
-
-    uri = auth.start_totp_enrollment(store, "nash")
-    assert "nash" in uri
-    pending_secret = store["users"]["nash"]["totp_secret_pending"]
-    assert pending_secret
-
-    # Not yet enrolled -- verify_totp must not accept the pending secret's code.
-    correct_code = pyotp.TOTP(pending_secret).now()
-    assert auth.verify_totp(store, "nash", correct_code) is False
-
-    # Wrong code during confirmation leaves it pending, not enrolled.
-    assert auth.confirm_totp_enrollment(store, "nash", "000000") is False
-    assert store["users"]["nash"]["totp_enrolled"] is False
-
-    # Right code confirms it.
-    assert auth.confirm_totp_enrollment(store, "nash", correct_code) is True
-    assert store["users"]["nash"]["totp_enrolled"] is True
-    assert store["users"]["nash"]["totp_secret"] == pending_secret
-    assert store["users"]["nash"]["totp_secret_pending"] is None
-
-    # Now verify_totp works against the now-active secret.
-    assert auth.verify_totp(store, "nash", pyotp.TOTP(pending_secret).now()) is True
-
-
-def test_start_totp_enrollment_reuses_pending_secret_across_calls():
-    auth.bootstrap_admin("nash", "correct horse battery staple")
-    store = auth.load_auth_store()
-    auth.start_totp_enrollment(store, "nash")
-    first_secret = store["users"]["nash"]["totp_secret_pending"]
-    auth.start_totp_enrollment(store, "nash")
-    assert store["users"]["nash"]["totp_secret_pending"] == first_secret
-
-
 def test_create_user_requires_existing_store():
     with pytest.raises(auth.AuthError):
         auth.create_user("newuser", "another password entirely", is_admin=False)
@@ -92,7 +53,6 @@ def test_create_user_and_duplicate_rejected():
     store = auth.load_auth_store()
     assert "teammate" in store["users"]
     assert store["users"]["teammate"]["is_admin"] is False
-    assert store["users"]["teammate"]["totp_enrolled"] is False
 
     with pytest.raises(auth.AuthError):
         auth.create_user("teammate", "yet another password", is_admin=False)
@@ -125,21 +85,6 @@ def test_delete_nonexistent_user_raises():
     auth.bootstrap_admin("nash", "correct horse battery staple")
     with pytest.raises(auth.AuthError):
         auth.delete_user("ghost")
-
-
-def test_reset_totp_clears_enrollment():
-    auth.bootstrap_admin("nash", "correct horse battery staple")
-    store = auth.load_auth_store()
-    uri = auth.start_totp_enrollment(store, "nash")
-    secret = store["users"]["nash"]["totp_secret_pending"]
-    auth.confirm_totp_enrollment(store, "nash", pyotp.TOTP(secret).now())
-    assert store["users"]["nash"]["totp_enrolled"] is True
-
-    auth.reset_totp("nash")
-    store = auth.load_auth_store()
-    assert store["users"]["nash"]["totp_enrolled"] is False
-    assert store["users"]["nash"]["totp_secret"] is None
-    assert store["users"]["nash"]["totp_secret_pending"] is None
 
 
 def test_is_admin():

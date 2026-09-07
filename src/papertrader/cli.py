@@ -217,13 +217,11 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
             print("Re-run with --force to wipe ALL existing users and start over "
                   "(irreversible -- only do this if you're locked out).")
             return
-        print("--force: deleting the existing auth store and every user/2FA enrollment in it.")
+        print("--force: deleting the existing auth store and every user in it.")
         os.remove(auth.AUTH_FILE)
 
     print("Bootstrapping the first (admin) dashboard account. This does NOT affect")
-    print("trading -- it only gates access to the web dashboard (python main.py web/serve).")
-    print("Two-factor authentication is set up separately, the first time this account")
-    print("logs in from the browser -- not here.\n")
+    print("trading -- it only gates access to the web dashboard (python main.py web/serve).\n")
 
     while True:
         username = input("Choose a username: ").strip()
@@ -246,10 +244,8 @@ def cmd_setup_auth(args: argparse.Namespace) -> None:
 
     print(f"\nSaved to {auth.AUTH_FILE} (never commit this file -- it's already in .gitignore).")
     print(f"\nStart the dashboard (`python main.py web` or `serve`) and log in as '{username}' with")
-    print("that password -- you'll be walked through 2FA setup (scan/enter a code into an")
-    print("authenticator app) right there on first login.")
-    print("\nOnce logged in, use the Admin > Users page to create additional accounts -- each")
-    print("new user goes through the same one-time 2FA setup on their own first login.")
+    print("that password.")
+    print("\nOnce logged in, use the Admin > Users page to create additional accounts.")
 
 
 def cmd_history(args: argparse.Namespace) -> None:
@@ -306,8 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
     bt.set_defaults(func=cmd_backtest)
 
-    setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password only; 2FA is set up on first web login)")
-    setup_auth.add_argument("--force", action="store_true", help="Wipe ALL existing users/2FA and start over")
+    setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password)")
+    setup_auth.add_argument("--force", action="store_true", help="Wipe ALL existing users and start over")
     setup_auth.set_defaults(func=cmd_setup_auth)
 
     return parser

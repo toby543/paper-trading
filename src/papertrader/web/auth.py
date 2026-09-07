@@ -1,4 +1,4 @@
-"""Multi-user login + self-service TOTP two-factor auth for the dashboard.
+"""Multi-user username/password login for the dashboard.
 
 The dashboard has no built-in access control otherwise -- fine for
 localhost-only use, but the Edit Settings panel can change the live
@@ -12,13 +12,8 @@ that gets committed to git, since this repo is public. That file is
 it in.
 
 `python main.py setup-auth` bootstraps the first (admin) account with a
-username + password only -- no TOTP secret yet. Two-factor is enrolled
-the first time that account logs in from the browser (see app.py's
-/login/enroll route): the server generates a secret, shows it once, and
-only marks the account as TOTP-enrolled after the user proves they
-actually saved it by entering one correct code. The same self-enrollment
-flow applies to every user an admin creates afterwards -- an admin never
-needs to see or transmit anyone else's TOTP secret.
+username + password. Additional accounts are created afterwards from the
+Admin > Users page.
 
 If AUTH_FILE doesn't exist at all, the dashboard runs exactly as it
 always has (unauthenticated) for backward compatibility with pure-
@@ -32,7 +27,6 @@ import os
 import secrets
 import time
 
-import pyotp
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..config import REPO_ROOT
@@ -74,7 +68,7 @@ def _save_auth_store(store: dict) -> None:
     with open(tmp_path, "w", encoding="utf-8") as fh:
         json.dump(store, fh, indent=2)
     os.replace(tmp_path, AUTH_FILE)
-    # 0600: this file holds password hashes and TOTP secrets.
+    # 0600: this file holds password hashes.
     try:
         os.chmod(AUTH_FILE, 0o600)
     except OSError:
@@ -82,10 +76,9 @@ def _save_auth_store(store: dict) -> None:
 
 
 def bootstrap_admin(username: str, password: str) -> dict:
-    """Create AUTH_FILE from scratch with a single admin account (no
-    TOTP secret yet -- enrolled on first web login). Refuses if the file
-    already has any users; the caller (cmd_setup_auth --force) is
-    responsible for deciding whether to wipe it first."""
+    """Create AUTH_FILE from scratch with a single admin account. Refuses
+    if the file already has any users; the caller (cmd_setup_auth
+    --force) is responsible for deciding whether to wipe it first."""
     if is_configured():
         raise AuthError("Authentication is already configured.")
     store = {
@@ -103,9 +96,6 @@ def _add_user(store: dict, username: str, password: str, is_admin: bool) -> None
     store["users"][username] = {
         "password_hash": generate_password_hash(password),
         "is_admin": is_admin,
-        "totp_secret": None,          # set once enrollment is confirmed
-        "totp_secret_pending": None,  # set while enrollment is in progress
-        "totp_enrolled": False,
     }
 
 
@@ -130,21 +120,7 @@ def delete_user(username: str) -> None:
     _save_auth_store(store)
 
 
-def reset_totp(username: str) -> None:
-    """Admin-triggered recovery: clear a user's 2FA enrollment so they go
-    through the enrollment flow again on their next login (e.g. they
-    lost the phone their authenticator app was on)."""
-    store = load_auth_store()
-    if store is None or username not in store["users"]:
-        raise AuthError(f"User '{username}' does not exist.")
-    user = store["users"][username]
-    user["totp_secret"] = None
-    user["totp_secret_pending"] = None
-    user["totp_enrolled"] = False
-    _save_auth_store(store)
-
-
-# ---- login: password check -> TOTP verify or first-time enrollment --
+# ---- login: password check ------------------------------------------
 def verify_password(store: dict, username: str, password: str) -> bool:
     user = store["users"].get(username)
     if user is None:
@@ -155,46 +131,6 @@ def verify_password(store: dict, username: str, password: str) -> bool:
         check_password_hash(generate_password_hash("decoy"), password)
         return False
     return check_password_hash(user["password_hash"], password)
-
-
-def verify_totp(store: dict, username: str, code: str) -> bool:
-    user = store["users"].get(username)
-    if user is None or not user["totp_enrolled"] or not user["totp_secret"]:
-        return False
-    # valid_window=1 tolerates ~30s of clock drift between the server and
-    # the phone running the authenticator app, without widening the
-    # acceptance window enough to meaningfully weaken the code.
-    return pyotp.TOTP(user["totp_secret"]).verify(code, valid_window=1)
-
-
-def start_totp_enrollment(store: dict, username: str) -> str:
-    """First-login 2FA setup: generate a pending secret (reusing one
-    already in progress rather than rotating it on every page load, so a
-    user who takes a minute to scan/enter it doesn't get a moving
-    target) and return the otpauth:// URI to show them."""
-    user = store["users"][username]
-    if not user["totp_secret_pending"]:
-        user["totp_secret_pending"] = pyotp.random_base32()
-        _save_auth_store(store)
-    return pyotp.TOTP(user["totp_secret_pending"]).provisioning_uri(
-        name=username, issuer_name="Momentum Desk"
-    )
-
-
-def confirm_totp_enrollment(store: dict, username: str, code: str) -> bool:
-    """Verify the user actually saved the pending secret correctly
-    before turning 2FA on for their account. Returns False (secret left
-    pending, so they can just retry the same QR/setup key) on a wrong
-    code."""
-    user = store["users"][username]
-    pending = user.get("totp_secret_pending")
-    if not pending or not pyotp.TOTP(pending).verify(code, valid_window=1):
-        return False
-    user["totp_secret"] = pending
-    user["totp_secret_pending"] = None
-    user["totp_enrolled"] = True
-    _save_auth_store(store)
-    return True
 
 
 def is_admin(store: dict, username: str) -> bool:

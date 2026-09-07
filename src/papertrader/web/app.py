@@ -28,7 +28,7 @@ from functools import wraps
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
-from . import auth, qr
+from . import auth
 from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
@@ -135,9 +135,6 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         store = get_store()
         if store is None or session.get("authenticated"):
             return redirect(url_for("index"))
-        pending = session.get("pending_user")
-        if pending and pending in store["users"]:
-            return _render_pending_login_step(store, pending, error=None)
         return render_template("login.html", error=None)
 
     @app.post("/login")
@@ -157,71 +154,11 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             auth.record_failed_attempt(request.remote_addr)
             return render_template("login.html", error="Incorrect username or password."), 401
 
-        session["pending_user"] = username
-        session["pending_next"] = _safe_next_path(request.args.get("next"))
-        return _render_pending_login_step(store, username, error=None)
-
-    @app.post("/login/verify")
-    def login_verify():
-        """Step 2 for an already-enrolled account: check the 6-digit code."""
-        pending = session.get("pending_user")
-        store = get_store()
-        if not pending or store is None or pending not in store["users"]:
-            return redirect(url_for("login"))
-        if auth.is_locked_out(request.remote_addr):
-            return render_template("verify_2fa.html", error="Too many failed attempts. Wait 15 minutes before trying again."), 429
-
-        code = request.form.get("code", "")
-        if not auth.verify_totp(store, pending, code):
-            auth.record_failed_attempt(request.remote_addr)
-            return render_template("verify_2fa.html", error="Incorrect code."), 401
-
         auth.clear_failed_attempts(request.remote_addr)
-        _complete_login(pending)
-        return redirect(session.pop("pending_next", None) or url_for("index"))
-
-    @app.post("/login/enroll")
-    def login_enroll():
-        """Step 2 the FIRST time this account ever logs in: confirm the
-        user actually saved the just-shown TOTP secret before turning
-        2FA on for their account."""
-        pending = session.get("pending_user")
-        store = get_store()
-        if not pending or store is None or pending not in store["users"]:
-            return redirect(url_for("login"))
-        if auth.is_locked_out(request.remote_addr):
-            return render_template("login.html", error="Too many failed attempts. Wait 15 minutes before trying again."), 429
-
-        code = request.form.get("code", "")
-        if not auth.confirm_totp_enrollment(store, pending, code):
-            auth.record_failed_attempt(request.remote_addr)
-            # Wrong code: keep the SAME pending secret (don't regenerate)
-            # so the user can just retry against the QR/setup key they
-            # already have open, instead of it becoming a moving target.
-            uri = auth.start_totp_enrollment(store, pending)
-            return render_template(
-                "enroll_2fa.html", error="Incorrect code -- try again.",
-                totp_uri=uri, totp_secret=store["users"][pending]["totp_secret_pending"], username=pending,
-                qr_data_uri=qr.totp_qr_data_uri(uri),
-            ), 401
-
-        auth.clear_failed_attempts(request.remote_addr)
-        _complete_login(pending)
-        return redirect(session.pop("pending_next", None) or url_for("index"))
-
-    def _render_pending_login_step(store: dict, username: str, error: str | None):
-        user = store["users"][username]
-        if user["totp_enrolled"]:
-            return render_template("verify_2fa.html", error=error)
-        uri = auth.start_totp_enrollment(store, username)
-        return render_template(
-            "enroll_2fa.html", error=error,
-            totp_uri=uri, totp_secret=store["users"][username]["totp_secret_pending"], username=username,
-            qr_data_uri=qr.totp_qr_data_uri(uri),
-        )
+        _complete_login(username)
+        return redirect(_safe_next_path(request.args.get("next")) or url_for("index"))
 
     def _complete_login(username: str) -> None:
-        session.pop("pending_user", None)
         session.permanent = True
         session["authenticated"] = True
         session["username"] = username
@@ -233,7 +170,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
 
     def _users_view(store: dict) -> list[dict]:
         return [
-            {"username": u, "is_admin": rec["is_admin"], "totp_enrolled": rec["totp_enrolled"]}
+            {"username": u, "is_admin": rec["is_admin"]}
             for u, rec in sorted(store["users"].items())
         ]
 
@@ -261,7 +198,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             auth.create_user(username, password, is_admin=is_admin_flag)
         except auth.AuthError as exc:
             return redirect(url_for("admin_users", error=str(exc)))
-        return redirect(url_for("admin_users", message=f"Created '{username}'. They'll set up 2FA on their own first login."))
+        return redirect(url_for("admin_users", message=f"Created '{username}'."))
 
     @app.post("/admin/users/<username>/delete")
     @admin_required
@@ -273,15 +210,6 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         except auth.AuthError as exc:
             return redirect(url_for("admin_users", error=str(exc)))
         return redirect(url_for("admin_users", message=f"Deleted '{username}'."))
-
-    @app.post("/admin/users/<username>/reset-2fa")
-    @admin_required
-    def admin_users_reset_2fa(username: str):
-        try:
-            auth.reset_totp(username)
-        except auth.AuthError as exc:
-            return redirect(url_for("admin_users", error=str(exc)))
-        return redirect(url_for("admin_users", message=f"Reset 2FA for '{username}' -- they'll set it up again on their next login."))
 
     @app.get("/")
     @login_required

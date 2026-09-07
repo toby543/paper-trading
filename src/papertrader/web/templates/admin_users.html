@@ -64,8 +64,6 @@
   tbody tr:last-child td { border-bottom: none; }
   .badge { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 3px; }
   .badge.admin { background: var(--accent-wash); color: var(--accent); }
-  .badge.enrolled { background: var(--good-wash); color: var(--good); }
-  .badge.pending { background: var(--bad-wash); color: var(--bad); }
   .row-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
   .btn {
@@ -116,21 +114,15 @@
     <div class="panel-head"><h2>Accounts</h2></div>
     <table>
       <thead>
-        <tr><th>Username</th><th>Role</th><th>2FA</th><th></th></tr>
+        <tr><th>Username</th><th>Role</th><th></th></tr>
       </thead>
       <tbody>
         {% for u in users %}
         <tr>
           <td class="mono">{{ u.username }}{% if u.username == current_username %} <span style="color: var(--ink-faint);">(you)</span>{% endif %}</td>
           <td>{% if u.is_admin %}<span class="badge admin">Admin</span>{% else %}<span style="color: var(--ink-faint);">Member</span>{% endif %}</td>
-          <td>{% if u.totp_enrolled %}<span class="badge enrolled">Enrolled</span>{% else %}<span class="badge pending">Not set up yet</span>{% endif %}</td>
           <td>
             <div class="row-actions">
-              {% if u.totp_enrolled %}
-              <form method="post" action="{{ url_for('admin_users_reset_2fa', username=u.username) }}" onsubmit="return confirm('Reset 2FA for {{ u.username }}? They will need to set it up again on their next login.');">
-                <button type="submit" class="btn">Reset 2FA</button>
-              </form>
-              {% endif %}
               {% if u.username != current_username %}
               <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
                 <button type="submit" class="btn danger">Delete</button>
@@ -164,8 +156,7 @@
       </div>
     </form>
     <div style="padding: 0 18px 16px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.4;">
-      Share the username/password with them directly (not over this page) --
-      they'll set up their own 2FA the first time they log in with it.
+      Share the username/password with them directly (not over this page).
     </div>
   </div>
 </div>
