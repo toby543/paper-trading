@@ -6,92 +6,99 @@
 <title>Users — Momentum Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #eef1f5; --surface: #ffffff; --surface-2: #f5f7f9; --border: #d7dce3;
-    --ink: #12161c; --ink-dim: #5b6472; --ink-faint: #8891a0;
-    --accent: #a06a1e; --accent-ink: #ffffff; --accent-wash: rgba(160, 106, 30, 0.10);
-    --good: #1f8f5f; --good-wash: rgba(31, 143, 95, 0.10);
-    --bad: #c5372f; --bad-wash: rgba(197, 55, 47, 0.09);
-    --shadow: 0 1px 2px rgba(20, 24, 30, 0.04), 0 8px 24px rgba(20, 24, 30, 0.04);
-    --radius: 3px;
+    --bg: #f3f4fb; --surface: #ffffff; --surface-2: #f4f5fa; --border: #e4e5f2;
+    --ink: #14162b; --ink-dim: #5c5f7a; --ink-faint: #9396b3;
+    --accent: #6d5ef8; --accent-ink: #ffffff; --accent-wash: rgba(109, 94, 248, 0.10);
+    --accent-grad: linear-gradient(135deg, #6d5ef8 0%, #a855f7 55%, #ec4899 100%);
+    --good: #0ea86f; --good-wash: rgba(14, 168, 111, 0.10);
+    --bad: #e2394b; --bad-wash: rgba(226, 57, 75, 0.09);
+    --shadow: 0 1px 2px rgba(30, 20, 90, 0.03), 0 10px 30px rgba(30, 20, 90, 0.06);
+    --radius: 18px;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #0a0e14; --surface: #10161f; --surface-2: #161d29; --border: #232c3a;
-      --ink: #e8ecf2; --ink-dim: #8791a3; --ink-faint: #59626f;
-      --accent: #d4a244; --accent-ink: #16110a; --accent-wash: rgba(212, 162, 68, 0.10);
-      --good: #3ecf8e; --good-wash: rgba(62, 207, 142, 0.10);
-      --bad: #ef5350; --bad-wash: rgba(239, 83, 80, 0.10);
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+      --bg: #0a0a14; --surface: #14152a; --surface-2: #191b34; --border: #2a2c4c;
+      --ink: #eef0fb; --ink-dim: #a3a6c9; --ink-faint: #6c6f94;
+      --accent: #8b7bff; --accent-ink: #100a2e; --accent-wash: rgba(139, 123, 255, 0.14);
+      --accent-grad: linear-gradient(135deg, #8b7bff 0%, #c084fc 55%, #f472b6 100%);
+      --good: #34e0a1; --good-wash: rgba(52, 224, 161, 0.12);
+      --bad: #ff6b6b; --bad-wash: rgba(255, 107, 107, 0.12);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.4);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #0a0e14; --surface: #10161f; --surface-2: #161d29; --border: #232c3a;
-    --ink: #e8ecf2; --ink-dim: #8791a3; --ink-faint: #59626f;
-    --accent: #d4a244; --accent-ink: #16110a; --accent-wash: rgba(212, 162, 68, 0.10);
-    --good: #3ecf8e; --good-wash: rgba(62, 207, 142, 0.10);
-    --bad: #ef5350; --bad-wash: rgba(239, 83, 80, 0.10);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+    --bg: #0a0a14; --surface: #14152a; --surface-2: #191b34; --border: #2a2c4c;
+    --ink: #eef0fb; --ink-dim: #a3a6c9; --ink-faint: #6c6f94;
+    --accent: #8b7bff; --accent-ink: #100a2e; --accent-wash: rgba(139, 123, 255, 0.14);
+    --accent-grad: linear-gradient(135deg, #8b7bff 0%, #c084fc 55%, #f472b6 100%);
+    --good: #34e0a1; --good-wash: rgba(52, 224, 161, 0.12);
+    --bad: #ff6b6b; --bad-wash: rgba(255, 107, 107, 0.12);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.4);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    background: var(--bg); color: var(--ink);
-    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    background:
+      radial-gradient(900px 500px at 8% -10%, var(--accent-wash), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
     font-size: 13.5px; line-height: 1.5; -webkit-font-smoothing: antialiased;
   }
   .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
   .shell { max-width: 760px; margin: 0 auto; padding: 28px 20px 64px; }
 
-  .topbar { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
-  .mark { font-family: "Fraunces", ui-serif, Georgia, serif; font-weight: 600; font-size: 21px; letter-spacing: -0.01em; }
-  .mark em { color: var(--accent); font-style: normal; }
-  .back-link { font-size: 12.5px; color: var(--ink-dim); text-decoration: none; }
-  .back-link:hover { color: var(--ink); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .mark { font-family: "Inter", sans-serif; font-weight: 800; font-size: 19px; letter-spacing: -0.02em; }
+  .mark em { font-style: normal; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .back-link { font-size: 12.5px; color: var(--ink-dim); text-decoration: none; font-weight: 500; }
+  .back-link:hover { color: var(--accent); }
 
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 20px; }
-  .panel-head { padding: 15px 18px; border-bottom: 1px solid var(--border); }
-  .panel-head h2 { font-family: "Fraunces", ui-serif, Georgia, serif; font-weight: 500; font-size: 15px; margin: 0; }
+  .panel-head { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .panel-head h2 { font-family: "Inter", sans-serif; font-weight: 700; font-size: 14.5px; margin: 0; letter-spacing: -0.01em; }
 
   table { width: 100%; border-collapse: collapse; }
   thead th {
     text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint);
-    font-weight: 500; padding: 9px 18px; border-bottom: 1px solid var(--border);
+    font-weight: 600; padding: 9px 20px; border-bottom: 1px solid var(--border);
   }
-  tbody td { padding: 10px 18px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  tbody td { padding: 10px 20px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
   tbody tr:last-child td { border-bottom: none; }
-  .badge { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 3px; }
+  .badge { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; }
   .badge.admin { background: var(--accent-wash); color: var(--accent); }
   .row-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
   .btn {
-    font-family: "IBM Plex Sans", sans-serif; font-size: 11.5px; font-weight: 600;
-    border-radius: 4px; padding: 6px 11px; cursor: pointer; border: 1px solid var(--border);
-    background: none; color: var(--ink-dim);
+    font-family: "Inter", sans-serif; font-size: 11.5px; font-weight: 600;
+    border-radius: 999px; padding: 6px 13px; cursor: pointer; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--ink-dim); transition: color 0.15s ease, border-color 0.15s ease;
   }
   .btn:hover { color: var(--ink); border-color: var(--ink-faint); }
   .btn.danger:hover { color: var(--bad); border-color: var(--bad); }
   .btn-primary {
-    font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 600;
-    background: var(--accent); color: var(--accent-ink); border: none; border-radius: 4px;
-    padding: 9px 16px; cursor: pointer;
+    font-family: "Inter", sans-serif; font-size: 13px; font-weight: 700;
+    background: var(--accent-grad); color: var(--accent-ink); border: none; border-radius: 999px;
+    padding: 9px 18px; cursor: pointer; transition: filter 0.15s ease, transform 0.15s ease;
   }
-  .btn-primary:hover { opacity: 0.92; }
+  .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
 
-  .form-grid { display: flex; gap: 12px; align-items: flex-end; padding: 16px 18px; flex-wrap: wrap; }
+  .form-grid { display: flex; gap: 12px; align-items: flex-end; padding: 16px 20px; flex-wrap: wrap; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; }
   .field input[type="text"], .field input[type="password"] {
     font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
-    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); border-radius: 3px;
-    padding: 8px 10px; width: 180px;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 11px; width: 180px;
   }
+  .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
   .field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
   .field.checkbox label { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 500; color: var(--ink-dim); }
 
-  .banner { margin: 0 0 16px; padding: 10px 14px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; }
+  .banner { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; }
   .banner.error { background: var(--bad-wash); color: var(--bad); }
   .banner.success { background: var(--good-wash); color: var(--good); }
 </style>
@@ -155,7 +162,7 @@
         <button type="submit" class="btn-primary">Create user</button>
       </div>
     </form>
-    <div style="padding: 0 18px 16px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.4;">
+    <div style="padding: 0 20px 16px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.4;">
       Share the username/password with them directly (not over this page).
     </div>
   </div>
