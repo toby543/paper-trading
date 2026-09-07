@@ -73,8 +73,42 @@ class Config:
             node = node[k]
         return node
 
+    def get_active_profile(self) -> dict[str, Any]:
+        """Get the configuration for the currently active profile.
+
+        Returns profile config from profiles section, or account section as fallback.
+        """
+        active_profile_name = self.get("active_profile")
+        profiles = self.get("profiles", {})
+
+        if active_profile_name and active_profile_name in profiles:
+            return profiles[active_profile_name]
+
+        # Fallback to account.state_file if profiles not defined or profile not found
+        return {}
+
+    def set_active_profile(self, profile_name: str) -> None:
+        """Set the active profile."""
+        profiles = self.get("profiles", {})
+        if profile_name in profiles:
+            self.raw["active_profile"] = profile_name
+
+    def list_profiles(self) -> dict[str, str]:
+        """Return dict of profile_name -> display_name for all configured profiles."""
+        profiles = self.get("profiles", {})
+        result = {}
+        for name, cfg in profiles.items():
+            result[name] = cfg.get("display_name", name)
+        return result
+
     @property
     def state_file(self) -> str:
+        # Use profile-specific state file if profiles are configured
+        profile_cfg = self.get_active_profile()
+        if profile_cfg and "state_file" in profile_cfg:
+            return _resolve(profile_cfg["state_file"])
+
+        # Fallback to account.state_file for backward compatibility
         return _resolve(self.get("account", "state_file", default="data/state.db"))
 
     @property

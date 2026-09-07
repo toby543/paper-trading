@@ -360,6 +360,13 @@
     <span class="pill" id="regimePill" style="display:none;"><span class="dot"></span><span id="regimePillText">—</span></span>
     <span class="pill closed" id="marketPill"><span class="dot"></span><span id="marketPillText">Market —</span></span>
     <span class="clock mono" id="clock">—</span>
+    {% if profiles %}
+    <select id="profileSelector" class="meta mono" style="padding:6px 8px; border-radius:3px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12px; cursor:pointer;">
+      {% for profile_name, display_name in profiles.items() %}
+      <option value="{{ profile_name }}" {% if profile_name == active_profile %}selected{% endif %}>{{ display_name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
     {% if is_admin %}
     <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none; display:inline-block;">Users</a>
     {% endif %}
@@ -1212,6 +1219,42 @@ document.getElementById("reloadConfigBtn").addEventListener("click", async funct
     btn.textContent = "Reload Config";
   }
 });
+
+// ---- Profile selector: switch between strategy profiles ----
+const profileSelector = document.getElementById("profileSelector");
+if (profileSelector) {
+  profileSelector.addEventListener("change", async function() {
+    const selectedProfile = this.value;
+    const banner = document.getElementById("editBanner");
+
+    try {
+      const res = await authFetch("/api/set-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: selectedProfile })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        banner.className = "edit-banner success";
+        banner.textContent = data.message + " " + (data.note ? data.note : "");
+        banner.style.display = "block";
+        // Note: restart is required, so we don't automatically refresh data
+      } else {
+        banner.className = "edit-banner error";
+        banner.textContent = data.error || "Failed to switch profile.";
+        banner.style.display = "block";
+        // Revert selector to previous value on error
+        location.reload();
+      }
+    } catch (err) {
+      banner.className = "edit-banner error";
+      banner.textContent = "Error: " + err.message;
+      banner.style.display = "block";
+      location.reload();
+    }
+  });
+}
 
 loadSettings();
 

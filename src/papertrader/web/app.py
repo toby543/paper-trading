@@ -283,6 +283,8 @@ def create_app(engine: TradingEngine) -> Flask:
             engine_cfg=cfg.get("engine", default={}),
             data_source=cfg.get("data_source", default={}),
             logging_cfg=cfg.get("logging", default={}),
+            profiles=cfg.list_profiles(),
+            active_profile=cfg.get("active_profile", "52w_high"),
         )
 
     @app.get("/api/summary")
@@ -433,6 +435,39 @@ def create_app(engine: TradingEngine) -> Flask:
         except Exception as e:
             log.error("Failed to apply reloaded config to engine: %s", e)
             return jsonify({"ok": False, "error": f"Failed to apply config: {e}"}), 500
+
+    @app.post("/api/set-profile")
+    @api_login_required
+    def api_set_profile():
+        """Switch to a different profile (requires restart to take effect)."""
+        payload = request.get_json(silent=True) or {}
+        profile_name = payload.get("profile")
+
+        if not profile_name:
+            return jsonify({"ok": False, "error": "Profile name is required"}), 400
+
+        profiles = cfg.get("profiles", {})
+        if profile_name not in profiles:
+            return jsonify({"ok": False, "error": f"Unknown profile: {profile_name}"}), 400
+
+        if not cfg.path:
+            return jsonify({"ok": False, "error": "No config file path is known"}), 500
+
+        try:
+            from ..config_editor import update_config_file
+            update_config_file(cfg.path, [["active_profile", profile_name]])
+            cfg.set_active_profile(profile_name)
+
+            log.info("Switched to profile: %s", profile_name)
+            return jsonify({
+                "ok": True,
+                "message": f"Switched to {profiles[profile_name].get('display_name', profile_name)} profile.",
+                "restart_required": True,
+                "note": "Restart the engine to load the new profile's ledger and positions."
+            }), 200
+        except Exception as e:
+            log.error("Failed to switch profile: %s", e)
+            return jsonify({"ok": False, "error": f"Failed to switch profile: {e}"}), 500
 
     return app
 
