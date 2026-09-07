@@ -1243,17 +1243,25 @@ document.getElementById("reloadConfigBtn").addEventListener("click", async funct
 // ---- Profile selector: switch between strategy profiles ----
 const profileSelector = document.getElementById("profileSelector");
 if (profileSelector) {
+  // Log initial state for debugging
+  console.log("Profile selector initialized. Current value:", profileSelector.value);
+  console.log("Available profiles:", Array.from(profileSelector.options).map(o => `${o.value}:${o.text}`));
+
   profileSelector.addEventListener("change", async function() {
     const selectedProfile = this.value;
     const banner = document.getElementById("editBanner");
 
+    console.log("Profile change detected. New value:", selectedProfile);
+
     try {
+      console.log("Sending profile switch request for:", selectedProfile);
       const res = await authFetch("/api/set-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: selectedProfile })
       });
       const data = await res.json();
+      console.log("Profile switch response:", res.status, data);
 
       if (res.ok) {
         banner.className = "edit-banner success";
@@ -1267,6 +1275,7 @@ if (profileSelector) {
         banner.className = "edit-banner error";
         banner.textContent = data.error || "Failed to switch profile.";
         banner.style.display = "block";
+        console.error("Profile switch failed:", data);
         // Revert selector to previous value on error
         location.reload();
       }
@@ -1274,6 +1283,7 @@ if (profileSelector) {
       banner.className = "edit-banner error";
       banner.textContent = "Error: " + err.message;
       banner.style.display = "block";
+      console.error("Profile switch error:", err);
       location.reload();
     }
   });
