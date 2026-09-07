@@ -1284,16 +1284,25 @@ if (profileSelector) {
   console.log("Profile selector initialized. Current value:", profileSelector.value);
   console.log("Available profiles:", Array.from(profileSelector.options).map(o => `${o.value}:${o.text}`));
 
-  // Handle both change event and direct click/select
+  let lastValue = profileSelector.value;
+
+  // Handle change event
   profileSelector.addEventListener("change", function() {
     console.log("Change event fired. New value:", this.value);
+    lastValue = this.value;
     switchProfile(this.value);
   });
 
-  // Also allow direct clicking on options
-  profileSelector.addEventListener("click", function() {
-    console.log("Click event fired. Current value:", this.value);
-  });
+  // Polling fallback: check if value changed every 100ms
+  // This handles cases where the native change event doesn't fire
+  setInterval(() => {
+    const currentValue = profileSelector.value;
+    if (currentValue !== lastValue) {
+      console.log("Value changed (via polling). New value:", currentValue);
+      lastValue = currentValue;
+      switchProfile(currentValue);
+    }
+  }, 100);
 }
 
 loadSettings();
