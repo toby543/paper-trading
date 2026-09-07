@@ -67,37 +67,51 @@ class TradingEngine:
     def reload_profile(self) -> str:
         """Reload engine configuration from disk after profile has changed.
         Called when user switches profiles via API. Returns new profile name."""
-        # Reload config from disk
-        self.cfg.reload()
+        try:
+            # Reload config from disk
+            log.info("Reloading configuration from disk...")
+            reloaded = self.cfg.reload()
+            log.info("Config reload result: %s", reloaded)
 
-        # Get updated active profile
-        new_profile = self.cfg.get("active_profile", "52w_high")
-        if new_profile == self.profile_name:
-            return self.profile_name  # No change needed
+            # Get updated active profile
+            new_profile = self.cfg.get("active_profile", "52w_high")
+            log.info("Active profile from config: %s (current profile_name: %s)", new_profile, self.profile_name)
 
-        # Profile changed - reinitialize with new profile
-        self.profile_name = new_profile
-        log.info("Reloading engine for profile: %s", new_profile)
+            if new_profile == self.profile_name:
+                log.info("No profile change needed (already on %s)", new_profile)
+                return self.profile_name
 
-        # Reinitialize storage with new profile's ledger and capital
-        starting_capital = self.cfg.get_profile_starting_capital(new_profile)
-        self.storage = Storage(self.cfg.state_file, starting_capital)
-        self.broker = PaperBroker(
-            self.storage,
-            slippage_bps=self.cfg.get("execution", "slippage_bps", default=5.0),
-            flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
-        )
+            # Profile changed - reinitialize with new profile
+            self.profile_name = new_profile
+            log.info("Profile changed to: %s, reinitializing engine...", new_profile)
 
-        # Reinitialize strategy with new profile's strategy mode
-        strategy_cfg = self.cfg.get("strategy", default={})
-        strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
-        self.strategy_cfg = strategy_cfg
-        self.risk_cfg = self.cfg.get("risk", default={})
-        self.regime_cfg = self.cfg.get("regime", default={})
+            # Get new profile's starting capital and state file
+            starting_capital = self.cfg.get_profile_starting_capital(new_profile)
+            state_file = self.cfg.state_file
+            log.info("Loading profile %s: state_file=%s, starting_capital=%.0f",
+                     new_profile, state_file, starting_capital)
 
-        log.info("Engine reloaded for profile: %s (strategy: %s, ledger: %s)",
-                 new_profile, self.strategy_cfg.get("mode"), self.cfg.state_file)
-        return new_profile
+            # Reinitialize storage with new profile's ledger and capital
+            self.storage = Storage(state_file, starting_capital)
+            self.broker = PaperBroker(
+                self.storage,
+                slippage_bps=self.cfg.get("execution", "slippage_bps", default=5.0),
+                flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
+            )
+
+            # Reinitialize strategy with new profile's strategy mode
+            strategy_cfg = self.cfg.get("strategy", default={})
+            strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
+            self.strategy_cfg = strategy_cfg
+            self.risk_cfg = self.cfg.get("risk", default={})
+            self.regime_cfg = self.cfg.get("regime", default={})
+
+            log.info("✓ Engine reloaded successfully for profile: %s (strategy: %s, ledger: %s)",
+                     new_profile, self.strategy_cfg.get("mode"), state_file)
+            return new_profile
+        except Exception as e:
+            log.error("✗ Failed to reload profile: %s", e)
+            raise
 
     # ------------------------------------------------------------------
     def market_regime_ok(self) -> bool:

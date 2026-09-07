@@ -25,23 +25,40 @@ def update_config_file(path: str, updates: list[tuple[list[str], object]]) -> No
     if not updates:
         return
 
+    import logging
+    log = logging.getLogger(__name__)
+
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.width = 4096  # don't let ruamel line-wrap long comments
 
     with _lock:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.load(fh)
+        try:
+            # Read current config
+            with open(path, "r", encoding="utf-8") as fh:
+                data = yaml.load(fh)
+            log.info("Loaded config from %s", path)
 
-        for key_path, value in updates:
-            node = data
-            for key in key_path[:-1]:
-                node = node[key]
-            node[key_path[-1]] = value
+            # Apply updates
+            for key_path, value in updates:
+                node = data
+                for key in key_path[:-1]:
+                    node = node[key]
+                old_value = node.get(key_path[-1])
+                node[key_path[-1]] = value
+                log.info("Updated %s: %s -> %s", ".".join(key_path), old_value, value)
 
-        shutil.copyfile(path, path + ".bak")
+            # Backup and write
+            shutil.copyfile(path, path + ".bak")
+            log.info("Created backup: %s.bak", path)
 
-        tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            yaml.dump(data, fh)
-        os.replace(tmp_path, path)
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                yaml.dump(data, fh)
+            log.info("Wrote temp file: %s", tmp_path)
+
+            os.replace(tmp_path, path)
+            log.info("Replaced config file: %s", path)
+        except Exception as e:
+            log.error("Failed to update config file: %s", e)
+            raise
