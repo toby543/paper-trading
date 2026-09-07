@@ -719,8 +719,11 @@
       <div id="editBanner" class="edit-banner" style="display:none;"></div>
       <div id="editGroups" class="edit-groups"></div>
       <div class="edit-actions">
-        <span id="editHint" class="edit-hint">Changes are saved to config.yaml but only take effect after you restart the engine/dashboard.</span>
-        <button id="editSaveBtn" class="edit-save-btn" disabled>Save Changes</button>
+        <span id="editHint" class="edit-hint">After saving changes, click <strong>Reload Config</strong> to apply most settings instantly without restarting. (Strategy mode, universe file require full restart.)</span>
+        <div style="display: flex; gap: 10px;">
+          <button id="reloadConfigBtn" class="edit-save-btn" style="background: var(--ink-dim); color: var(--surface);">Reload Config</button>
+          <button id="editSaveBtn" class="edit-save-btn" disabled>Save Changes</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1153,6 +1156,38 @@ async function saveSettings() {
 }
 
 document.getElementById("editSaveBtn").addEventListener("click", saveSettings);
+
+// ---- Reload Config: apply settings without restarting ----
+document.getElementById("reloadConfigBtn").addEventListener("click", async function() {
+  const btn = this;
+  const banner = document.getElementById("editBanner");
+
+  btn.disabled = true;
+  btn.textContent = "Reloading...";
+
+  try {
+    const res = await authFetch("/api/reload-config", { method: "POST" });
+    const data = await res.json();
+
+    if (res.ok) {
+      banner.className = "edit-banner success";
+      banner.textContent = data.message || "Config reloaded! Strategy/risk settings applied instantly. (Strategy mode, universe file require restart.)";
+      banner.style.display = "block";
+    } else {
+      banner.className = "edit-banner error";
+      banner.textContent = data.message || "Failed to reload config.";
+      banner.style.display = "block";
+    }
+  } catch (err) {
+    banner.className = "edit-banner error";
+    banner.textContent = "Error: " + err.message;
+    banner.style.display = "block";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Reload Config";
+  }
+});
+
 loadSettings();
 
 // ---- Collapse/expand any settings panel, remembered per-browser --------
