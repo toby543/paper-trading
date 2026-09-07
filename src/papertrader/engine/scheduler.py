@@ -11,6 +11,7 @@ Outside market hours it sleeps until the next open.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -32,6 +33,11 @@ class TradingEngine:
     def __init__(self, cfg: Config, profile_name: str | None = None):
         self.cfg = cfg
         self.profile_name = profile_name or cfg.get("active_profile", default="52w_high")
+        # Guards storage/broker/strategy_cfg against a profile switch
+        # (reload_profile(), called from a Flask request thread) racing
+        # with this engine's own run_forever() loop reading/writing them
+        # from a background thread at the same time.
+        self._state_lock = threading.Lock()
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
             market_open=cfg.get("engine", "market_open", default="09:15"),
@@ -57,8 +63,12 @@ class TradingEngine:
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
         )
         self.universe = load_universe(cfg.universe_file)
-        # Use profile-specific strategy mode
-        strategy_cfg = cfg.get("strategy", default={})
+        # Use profile-specific strategy mode. Copy the dict -- cfg.get()
+        # returns the actual nested dict inside cfg.raw, and in
+        # multi_profile_mode several TradingEngine instances share the
+        # same Config object, so mutating it in place here would leak
+        # this engine's "mode" into every other engine's strategy_cfg.
+        strategy_cfg = dict(cfg.get("strategy", default={}))
         strategy_cfg["mode"] = cfg.get_profile_strategy_mode(self.profile_name)
         self.strategy_cfg = strategy_cfg
         self.risk_cfg = cfg.get("risk", default={})
@@ -81,30 +91,37 @@ class TradingEngine:
                 log.info("No profile change needed (already on %s)", new_profile)
                 return self.profile_name
 
-            # Profile changed - reinitialize with new profile
-            self.profile_name = new_profile
+            # Profile changed - reinitialize with new profile. Build
+            # everything first, then swap it all in under the lock so
+            # run_forever() never sees a half-updated engine.
             log.info("Profile changed to: %s, reinitializing engine...", new_profile)
 
-            # Get new profile's starting capital and state file
             starting_capital = self.cfg.get_profile_starting_capital(new_profile)
             state_file = self.cfg.state_file
             log.info("Loading profile %s: state_file=%s, starting_capital=%.0f",
                      new_profile, state_file, starting_capital)
 
-            # Reinitialize storage with new profile's ledger and capital
-            self.storage = Storage(state_file, starting_capital)
-            self.broker = PaperBroker(
-                self.storage,
+            new_storage = Storage(state_file, starting_capital)
+            new_broker = PaperBroker(
+                new_storage,
                 slippage_bps=self.cfg.get("execution", "slippage_bps", default=5.0),
                 flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
             )
 
-            # Reinitialize strategy with new profile's strategy mode
-            strategy_cfg = self.cfg.get("strategy", default={})
-            strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
-            self.strategy_cfg = strategy_cfg
-            self.risk_cfg = self.cfg.get("risk", default={})
-            self.regime_cfg = self.cfg.get("regime", default={})
+            # Copy -- see the __init__ comment on why this can't mutate
+            # cfg's own dict in place.
+            new_strategy_cfg = dict(self.cfg.get("strategy", default={}))
+            new_strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
+            new_risk_cfg = self.cfg.get("risk", default={})
+            new_regime_cfg = self.cfg.get("regime", default={})
+
+            with self._state_lock:
+                self.profile_name = new_profile
+                self.storage = new_storage
+                self.broker = new_broker
+                self.strategy_cfg = new_strategy_cfg
+                self.risk_cfg = new_risk_cfg
+                self.regime_cfg = new_regime_cfg
 
             log.info("✓ Engine reloaded successfully for profile: %s (strategy: %s, ledger: %s)",
                      new_profile, self.strategy_cfg.get("mode"), state_file)
@@ -358,17 +375,21 @@ class TradingEngine:
         last_full_scan = 0.0
         log.info("Autonomous trading engine started. Universe size=%d", len(self.universe))
         while True:
-            # Hot-reload config if it has changed (e.g., via dashboard)
+            # Hot-reload config if it has changed (e.g., via dashboard).
+            # Copy strategy dict -- see __init__ comment on shared Config.
+            # Held under the lock alongside reload_profile()'s own swap so
+            # the two can't interleave and leave stale values in place.
             if self.cfg.reload():
-                strategy_cfg = self.cfg.get("strategy", default={})
+                strategy_cfg = dict(self.cfg.get("strategy", default={}))
                 strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(self.profile_name)
-                self.strategy_cfg = strategy_cfg
-                self.risk_cfg = self.cfg.get("risk", default={})
-                self.regime_cfg = self.cfg.get("regime", default={})
-                self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
-                self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-                self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
-                self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
+                with self._state_lock:
+                    self.strategy_cfg = strategy_cfg
+                    self.risk_cfg = self.cfg.get("risk", default={})
+                    self.regime_cfg = self.cfg.get("regime", default={})
+                    self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
+                    self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+                    self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                    self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
                 log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
 
             now_dt = self.calendar.now()
@@ -377,11 +398,16 @@ class TradingEngine:
                 time.sleep(300)
                 continue
 
-            self.check_exits()
-            self.mark_to_market()
+            # Held for the whole iteration so a concurrent reload_profile()
+            # (from a Flask request thread, single-profile mode only)
+            # can't swap self.storage/self.broker/self.strategy_cfg out
+            # from under a scan that's already in progress.
+            with self._state_lock:
+                self.check_exits()
+                self.mark_to_market()
 
-            if time.time() - last_full_scan >= scan_interval:
-                self.scan_for_entries()
-                last_full_scan = time.time()
+                if time.time() - last_full_scan >= scan_interval:
+                    self.scan_for_entries()
+                    last_full_scan = time.time()
 
             time.sleep(exit_interval)

@@ -65,7 +65,7 @@ def _market_regime(engine) -> dict:
 def build_summary(engine) -> dict:
     positions = engine.broker.positions()
     cash = engine.broker.cash()
-    starting_capital = float(engine.cfg.get("account", "starting_capital", default=0.0))
+    starting_capital = engine.cfg.get_profile_starting_capital(engine.profile_name)
 
     position_rows = []
     positions_value = 0.0

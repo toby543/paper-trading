@@ -442,19 +442,26 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         # Reload components that can be updated live (don't affect in-flight trades)
         try:
             for eng in engines.values():
-                strategy_cfg = cfg.get("strategy", default={})
+                # Copy -- cfg.get() returns the live dict inside cfg.raw,
+                # and every engine shares this same Config object, so
+                # mutating it in place would leak one engine's "mode"
+                # into all the others.
+                strategy_cfg = dict(cfg.get("strategy", default={}))
                 strategy_cfg["mode"] = cfg.get_profile_strategy_mode(eng.profile_name)
-                eng.strategy_cfg = strategy_cfg
-                eng.risk_cfg = cfg.get("risk", default={})
-                eng.regime_cfg = cfg.get("regime", default={})
+                # Under the engine's own lock so this can't interleave with
+                # its background run_forever() loop or a reload_profile().
+                with eng._state_lock:
+                    eng.strategy_cfg = strategy_cfg
+                    eng.risk_cfg = cfg.get("risk", default={})
+                    eng.regime_cfg = cfg.get("regime", default={})
 
-                # Update RiskManager with new risk settings
-                eng.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
-                eng.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-                eng.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                    # Update RiskManager with new risk settings
+                    eng.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
+                    eng.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+                    eng.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
 
-                # Update data source timeout settings
-                eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
+                    # Update data source timeout settings
+                    eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
 
             log.info("Configuration hot-reloaded successfully. Changes applied to %d running engine(s).", len(engines))
             return jsonify({
@@ -521,8 +528,12 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                     old_key = engine.profile_name
                     engine.reload_profile()
                     # Engines is keyed by profile_name; re-key it to match.
+                    # Insert the new key before removing the old one so a
+                    # concurrent request's get_current_engine() never sees
+                    # the dict transiently empty.
                     if engine.profile_name != old_key:
-                        engines[engine.profile_name] = engines.pop(old_key)
+                        engines[engine.profile_name] = engine
+                        del engines[old_key]
                     restart_required = False
                     reload_msg = "Engine reloaded automatically with new profile, ledger, and strategy."
                     log.info("Engine reloaded for profile: %s (strategy: %s)", profile_name, profile_strategy)
