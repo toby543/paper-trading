@@ -1290,6 +1290,7 @@ if (profileSelector) {
   profileSelector.addEventListener("change", function() {
     console.log("Change event fired. New value:", this.value);
     lastValue = this.value;
+    updateSelectedOption(this.value);
     switchProfile(this.value);
   });
 
@@ -1300,9 +1301,18 @@ if (profileSelector) {
     if (currentValue !== lastValue) {
       console.log("Value changed (via polling). New value:", currentValue);
       lastValue = currentValue;
+      updateSelectedOption(currentValue);
       switchProfile(currentValue);
     }
   }, 100);
+
+  // Manually update which option is marked as selected
+  function updateSelectedOption(value) {
+    for (let opt of profileSelector.options) {
+      opt.selected = (opt.value === value);
+    }
+    console.log("Updated selected option to:", value);
+  }
 }
 
 loadSettings();
