@@ -1259,8 +1259,8 @@ if (profileSelector) {
         banner.className = "edit-banner success";
         banner.innerHTML = "<strong>Profile switched!</strong> " + data.message + "<br/>" + (data.note || "");
         banner.style.display = "block";
-        // Note: restart is required, so we don't automatically refresh data
-        // The engine will reload with the new profile on next restart
+        // If running python main.py serve, the engine auto-reloads with new profile
+        // If running python main.py web (separate process), manual restart is needed
       } else {
         banner.className = "edit-banner error";
         banner.textContent = data.error || "Failed to switch profile.";

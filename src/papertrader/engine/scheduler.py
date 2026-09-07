@@ -64,6 +64,41 @@ class TradingEngine:
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
 
+    def reload_profile(self) -> str:
+        """Reload engine configuration from disk after profile has changed.
+        Called when user switches profiles via API. Returns new profile name."""
+        # Reload config from disk
+        self.cfg.reload()
+
+        # Get updated active profile
+        new_profile = self.cfg.get("active_profile", "52w_high")
+        if new_profile == self.profile_name:
+            return self.profile_name  # No change needed
+
+        # Profile changed - reinitialize with new profile
+        self.profile_name = new_profile
+        log.info("Reloading engine for profile: %s", new_profile)
+
+        # Reinitialize storage with new profile's ledger and capital
+        starting_capital = self.cfg.get_profile_starting_capital(new_profile)
+        self.storage = Storage(self.cfg.state_file, starting_capital)
+        self.broker = PaperBroker(
+            self.storage,
+            slippage_bps=self.cfg.get("execution", "slippage_bps", default=5.0),
+            flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
+        )
+
+        # Reinitialize strategy with new profile's strategy mode
+        strategy_cfg = self.cfg.get("strategy", default={})
+        strategy_cfg["mode"] = self.cfg.get_profile_strategy_mode(new_profile)
+        self.strategy_cfg = strategy_cfg
+        self.risk_cfg = self.cfg.get("risk", default={})
+        self.regime_cfg = self.cfg.get("regime", default={})
+
+        log.info("Engine reloaded for profile: %s (strategy: %s, ledger: %s)",
+                 new_profile, self.strategy_cfg.get("mode"), self.cfg.state_file)
+        return new_profile
+
     # ------------------------------------------------------------------
     def market_regime_ok(self) -> bool:
         """True if new entries are allowed under the market regime filter

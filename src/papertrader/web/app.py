@@ -447,7 +447,7 @@ def create_app(engine: TradingEngine) -> Flask:
     @app.post("/api/set-profile")
     @api_login_required
     def api_set_profile():
-        """Switch to a different profile (requires restart to take effect)."""
+        """Switch to a different profile and automatically reload the engine."""
         payload = request.get_json(silent=True) or {}
         profile_name = payload.get("profile")
 
@@ -467,15 +467,30 @@ def create_app(engine: TradingEngine) -> Flask:
             profile_strategy = profile_cfg.get("strategy_mode", "52w_high")
             display_name = profile_cfg.get("display_name", profile_name)
 
+            # Update config file
             update_config_file(cfg.path, [["active_profile", profile_name]])
             cfg.set_active_profile(profile_name)
+
+            # Reload engine with new profile if it's available (running in same process)
+            engine = app.config.get("ENGINE")
+            restart_required = True
+            reload_msg = "Restart the engine to load the new profile's ledger, positions, and strategy."
+
+            if engine:
+                try:
+                    engine.reload_profile()
+                    restart_required = False
+                    reload_msg = "Engine reloaded automatically with new profile, ledger, and strategy."
+                    log.info("Engine reloaded for profile: %s (strategy: %s)", profile_name, profile_strategy)
+                except Exception as e:
+                    log.warning("Could not auto-reload engine: %s (will need manual restart)", e)
 
             log.info("Switched to profile: %s (strategy: %s)", profile_name, profile_strategy)
             return jsonify({
                 "ok": True,
                 "message": f"Switched to {display_name} profile (strategy: {profile_strategy}).",
-                "restart_required": True,
-                "note": "Restart the engine to load the new profile's ledger, positions, and strategy."
+                "restart_required": restart_required,
+                "note": reload_msg
             }), 200
         except Exception as e:
             log.error("Failed to switch profile: %s", e)
