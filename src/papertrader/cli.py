@@ -166,9 +166,9 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     _setup_logging(cfg)
     from .backtest.engine import Backtester
 
-    bt = Backtester(cfg, start=args.start, end=args.end)
-    print(f"Backtesting {args.start} -> {args.end} against {len(bt.universe)} symbols "
-          f"(this fetches full history per symbol and can take a while)...")
+    bt = Backtester(cfg, start=args.start, end=args.end, refresh_cache=args.refresh_cache)
+    cache_note = "ignoring the local price cache, re-fetching everything" if args.refresh_cache else "reusing the local price cache where it already covers this range"
+    print(f"Backtesting {args.start} -> {args.end} against {len(bt.universe)} symbols ({cache_note})...")
     result = bt.run()
 
     print()
@@ -300,6 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--end", required=True, help="End date, YYYY-MM-DD")
     bt.add_argument("--trades", action="store_true", help="Also print the full trade log")
     bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
+    bt.add_argument("--refresh-cache", action="store_true",
+                     help="Ignore data/price_cache/ and re-fetch every symbol's history fresh from Yahoo Finance")
     bt.set_defaults(func=cmd_backtest)
 
     setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password)")

@@ -5,6 +5,10 @@ __pycache__/
 venv/
 *.egg-info/
 data/state.db
+data/state_*.db
+data/price_cache/
 data/papertrader.log
 data/auth_secrets.json
+config.yaml.bak
+config.yaml.tmp
 .env

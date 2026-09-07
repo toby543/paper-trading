@@ -24,6 +24,7 @@ from typing import Callable, Optional
 import pandas as pd
 
 from ..config import Config
+from ..data import price_cache
 from ..data.nse_client import Quote
 from ..data.universe import load_universe
 from ..portfolio.broker import InsufficientFundsError, PaperBroker
@@ -86,6 +87,7 @@ class Backtester:
         end: str,
         lookback_buffer_days: int = 420,
         on_progress: Optional[Callable[[str, int, int], None]] = None,
+        refresh_cache: bool = False,
     ):
         self.cfg = cfg
         self.start = pd.Timestamp(start)
@@ -93,6 +95,11 @@ class Backtester:
         if self.end <= self.start:
             raise ValueError(f"end ({end}) must be after start ({start})")
         self.lookback_buffer_days = lookback_buffer_days
+        # Ignore any on-disk cache and re-fetch everything from Yahoo
+        # Finance fresh -- for when you suspect the cached bars are
+        # stale or wrong, rather than the normal "reuse what we have"
+        # path every other backtest run takes.
+        self.refresh_cache = refresh_cache
         # Optional (stage, current, total) callback -- lets a caller (e.g.
         # the web dashboard, running this in a background thread) surface
         # progress without coupling this module to Flask/threading at all.
@@ -161,32 +168,46 @@ class Backtester:
                   len(self.universe), fetch_start.date(), self.end.date())
 
         last_call = 0.0
+        cache_hits = 0
         for i, symbol in enumerate(self.universe):
-            elapsed = _time.time() - last_call
-            if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
-                _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
-            last_call = _time.time()
-            try:
-                df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end)
-                if not df.empty:
-                    df.index = df.index.tz_localize(None)
-                    self._history[symbol] = df
-            except Exception as exc:  # noqa: BLE001 - one bad symbol must not abort the whole backtest
-                log.debug("Skipping %s: %s", symbol, exc)
+            cached = None if self.refresh_cache else price_cache.load(symbol)
+            if price_cache.covers(cached, fetch_start, fetch_end):
+                self._history[symbol] = price_cache.slice_range(cached, fetch_start, fetch_end)
+                cache_hits += 1
+            else:
+                elapsed = _time.time() - last_call
+                if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
+                    _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
+                last_call = _time.time()
+                try:
+                    df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end)
+                    if not df.empty:
+                        df.index = df.index.tz_localize(None)
+                        merged = price_cache.save(symbol, df, existing=cached)
+                        self._history[symbol] = price_cache.slice_range(merged, fetch_start, fetch_end)
+                except Exception as exc:  # noqa: BLE001 - one bad symbol must not abort the whole backtest
+                    log.debug("Skipping %s: %s", symbol, exc)
             self._on_progress("fetch", i + 1, len(self.universe))
             if (i + 1) % 50 == 0:
-                log.info("Fetch progress: %d/%d symbols (%d resolved so far)", i + 1, len(self.universe), len(self._history))
+                log.info("Fetch progress: %d/%d symbols (%d resolved so far, %d from cache)",
+                          i + 1, len(self.universe), len(self._history), cache_hits)
 
         index_symbol = self.regime_cfg.get("index_symbol", "^NSEI")
-        try:
-            idx = yf.Ticker(index_symbol).history(start=fetch_start, end=fetch_end)
-            if not idx.empty:
-                idx.index = idx.index.tz_localize(None)
-                self._index_history = idx
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Could not fetch benchmark index %s (%s); regime/relative-strength checks will fail open", index_symbol, exc)
+        cached_idx = None if self.refresh_cache else price_cache.load(index_symbol)
+        if price_cache.covers(cached_idx, fetch_start, fetch_end):
+            self._index_history = price_cache.slice_range(cached_idx, fetch_start, fetch_end)
+        else:
+            try:
+                idx = yf.Ticker(index_symbol).history(start=fetch_start, end=fetch_end)
+                if not idx.empty:
+                    idx.index = idx.index.tz_localize(None)
+                    merged_idx = price_cache.save(index_symbol, idx, existing=cached_idx)
+                    self._index_history = price_cache.slice_range(merged_idx, fetch_start, fetch_end)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Could not fetch benchmark index %s (%s); regime/relative-strength checks will fail open", index_symbol, exc)
 
-        log.info("Fetched history for %d/%d symbols.", len(self._history), len(self.universe))
+        log.info("Fetched history for %d/%d symbols (%d served from local cache, %d from network).",
+                  len(self._history), len(self.universe), cache_hits, len(self._history) - cache_hits)
 
     # ------------------------------------------------------------------
     def _quote_for(self, symbol: str, history_upto: pd.DataFrame) -> Quote | None:
