@@ -361,11 +361,14 @@
     <span class="pill closed" id="marketPill"><span class="dot"></span><span id="marketPillText">Market —</span></span>
     <span class="clock mono" id="clock">—</span>
     {% if profiles %}
-    <select id="profileSelector" class="meta mono" style="padding:6px 8px; border-radius:3px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12px; cursor:pointer;">
+    <select id="profileSelector" class="meta mono" style="padding:6px 8px; border-radius:3px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-size:12px; cursor:pointer;" title="Switch between strategy profiles">
       {% for profile_name, display_name in profiles.items() %}
       <option value="{{ profile_name }}" {% if profile_name == active_profile %}selected{% endif %}>{{ display_name }}</option>
       {% endfor %}
     </select>
+    {% if multi_profile_mode %}
+    <span class="pill" style="background:var(--accent-wash); color:var(--accent);" title="All profiles trading simultaneously">Multi-profile</span>
+    {% endif %}
     {% endif %}
     {% if is_admin %}
     <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none; display:inline-block;">Users</a>
@@ -1237,9 +1240,10 @@ if (profileSelector) {
 
       if (res.ok) {
         banner.className = "edit-banner success";
-        banner.textContent = data.message + " " + (data.note ? data.note : "");
+        banner.innerHTML = "<strong>Profile switched!</strong> " + data.message + "<br/>" + (data.note || "");
         banner.style.display = "block";
         // Note: restart is required, so we don't automatically refresh data
+        // The engine will reload with the new profile on next restart
       } else {
         banner.className = "edit-banner error";
         banner.textContent = data.error || "Failed to switch profile.";

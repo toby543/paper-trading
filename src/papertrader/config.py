@@ -101,6 +101,36 @@ class Config:
             result[name] = cfg.get("display_name", name)
         return result
 
+    def get_profile_strategy_mode(self, profile_name: str | None = None) -> str:
+        """Get the strategy mode for a specific profile (or active profile if not specified)."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        profiles = self.get("profiles", {})
+        if profile_name and profile_name in profiles:
+            profile_cfg = profiles[profile_name]
+            return profile_cfg.get("strategy_mode", "52w_high")
+
+        # Fallback to global strategy mode
+        return self.get("strategy", "mode", default="52w_high")
+
+    def is_multi_profile_mode(self) -> bool:
+        """Check if multi-profile mode is enabled (run all profiles simultaneously)."""
+        return self.get("multi_profile_mode", False)
+
+    def get_profile_starting_capital(self, profile_name: str | None = None) -> float:
+        """Get starting capital for a specific profile (or active profile if not specified)."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        profiles = self.get("profiles", {})
+        if profile_name and profile_name in profiles:
+            profile_cfg = profiles[profile_name]
+            return float(profile_cfg.get("starting_capital", 100000.0))
+
+        # Fallback to global starting capital
+        return float(self.get("account", "starting_capital", default=1_000_000.0))
+
     @property
     def state_file(self) -> str:
         # Use profile-specific state file if profiles are configured

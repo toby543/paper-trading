@@ -2,23 +2,36 @@
 
 # Profile selector: which profile to use (52w_high, cross_sectional, consolidation_breakout, or custom name)
 # Each profile maintains separate positions, cash, and trade history
+# Note: when running all profiles simultaneously (multi-profile mode), this is ignored
 active_profile: 52w_high
 
-# Profile definitions: each profile can have its own starting capital and state file
-# The active_profile above determines which one is currently used
+# Enable multi-profile mode: run all profiles simultaneously in parallel engines
+# When disabled, only the active_profile runs; when enabled, all profiles trade concurrently
+multi_profile_mode: false
+
+# Profile definitions: each profile can have its own strategy mode, starting capital, and state file
+# Each profile is completely independent and can be run standalone or in parallel with others
 profiles:
   52w_high:
     display_name: "52-Week High Momentum"
     state_file: data/state_52w_high.db
     starting_capital: 100000.0
+    # Strategy mode for this profile
+    strategy_mode: 52w_high
+    # Strategy-specific settings for this profile can be overridden here
+    # (if not specified, uses the global settings below)
+
   cross_sectional:
     display_name: "Cross-Sectional Momentum"
     state_file: data/state_cross_sectional.db
     starting_capital: 100000.0
+    strategy_mode: cross_sectional_momentum
+
   consolidation_breakout:
     display_name: "Consolidation Breakout"
     state_file: data/state_consolidation.db
     starting_capital: 100000.0
+    strategy_mode: consolidation_breakout
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 account:

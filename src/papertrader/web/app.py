@@ -269,12 +269,19 @@ def create_app(engine: TradingEngine) -> Flask:
     @login_required
     def index():
         store = get_store()
+        active_profile = cfg.get("active_profile", "52w_high")
+        active_strategy_mode = cfg.get_profile_strategy_mode(active_profile)
+
+        # Build strategy config with profile-specific mode
+        strategy = cfg.get("strategy", default={})
+        strategy = {**strategy, "mode": active_strategy_mode}
+
         return render_template(
             "index.html",
             is_admin=bool(store and auth.is_admin(store, session.get("username", ""))),
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
-            strategy=cfg.get("strategy", default={}),
+            strategy=strategy,
             risk=cfg.get("risk", default={}),
             regime=cfg.get("regime", default={}),
             account=cfg.get("account", default={}),
@@ -284,7 +291,8 @@ def create_app(engine: TradingEngine) -> Flask:
             data_source=cfg.get("data_source", default={}),
             logging_cfg=cfg.get("logging", default={}),
             profiles=cfg.list_profiles(),
-            active_profile=cfg.get("active_profile", "52w_high"),
+            active_profile=active_profile,
+            multi_profile_mode=cfg.is_multi_profile_mode(),
         )
 
     @app.get("/api/summary")
@@ -455,15 +463,19 @@ def create_app(engine: TradingEngine) -> Flask:
 
         try:
             from ..config_editor import update_config_file
+            profile_cfg = profiles[profile_name]
+            profile_strategy = profile_cfg.get("strategy_mode", "52w_high")
+            display_name = profile_cfg.get("display_name", profile_name)
+
             update_config_file(cfg.path, [["active_profile", profile_name]])
             cfg.set_active_profile(profile_name)
 
-            log.info("Switched to profile: %s", profile_name)
+            log.info("Switched to profile: %s (strategy: %s)", profile_name, profile_strategy)
             return jsonify({
                 "ok": True,
-                "message": f"Switched to {profiles[profile_name].get('display_name', profile_name)} profile.",
+                "message": f"Switched to {display_name} profile (strategy: {profile_strategy}).",
                 "restart_required": True,
-                "note": "Restart the engine to load the new profile's ledger and positions."
+                "note": "Restart the engine to load the new profile's ledger, positions, and strategy."
             }), 200
         except Exception as e:
             log.error("Failed to switch profile: %s", e)

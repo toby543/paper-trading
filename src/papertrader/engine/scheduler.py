@@ -29,15 +29,18 @@ log = logging.getLogger(__name__)
 
 
 class TradingEngine:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, profile_name: str | None = None):
         self.cfg = cfg
+        self.profile_name = profile_name or cfg.get("active_profile", "52w_high")
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
             market_open=cfg.get("engine", "market_open", default="09:15"),
             market_close=cfg.get("engine", "market_close", default="15:30"),
             holidays_file=cfg.holidays_file,
         )
-        self.storage = Storage(cfg.state_file, cfg.get("account", "starting_capital", default=1_000_000.0))
+        # Use profile-specific starting capital when initializing storage
+        starting_capital = cfg.get_profile_starting_capital(self.profile_name)
+        self.storage = Storage(cfg.state_file, starting_capital)
         self.broker = PaperBroker(
             self.storage,
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
@@ -54,7 +57,10 @@ class TradingEngine:
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
         )
         self.universe = load_universe(cfg.universe_file)
-        self.strategy_cfg = cfg.get("strategy", default={})
+        # Use profile-specific strategy mode
+        strategy_cfg = cfg.get("strategy", default={})
+        strategy_cfg["mode"] = cfg.get_profile_strategy_mode(self.profile_name)
+        self.strategy_cfg = strategy_cfg
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
 
