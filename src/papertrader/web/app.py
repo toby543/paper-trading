@@ -309,14 +309,29 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             return jsonify({"ok": False, "error": "Unknown or expired job id."}), 404
         return jsonify({"ok": True, "job": job})
 
+    def _resolve_setting_write_path(logical_path: tuple, active_profile: str) -> list[str]:
+        """Where a logical setting path (as used in EDITABLE_SETTINGS and
+        coerce_and_validate) actually lives in config.yaml for the
+        currently active profile. Most settings are global and map
+        straight through; a profile-scoped one -- every "strategy.*"
+        field (see Config.get_profile_strategy_config), plus
+        starting_capital (Config.get_profile_starting_capital) -- is
+        redirected under profiles.<active_profile>.* instead of the
+        shared/legacy global field, since that's what each profile's
+        own engine actually reads."""
+        if logical_path and logical_path[0] == "strategy":
+            return ["profiles", active_profile, "strategy", *logical_path[1:]]
+        if logical_path == ("account", "starting_capital"):
+            return ["profiles", active_profile, "starting_capital"]
+        return list(logical_path)
+
     def _is_profile_scoped_setting(path: tuple) -> bool:
-        """True for settings that live under each profile rather than as
-        one value shared by all of them: every "strategy.*" field (see
-        Config.get_profile_strategy_config), plus starting_capital --
-        which has its own profiles.<name>.starting_capital field
-        (Config.get_profile_starting_capital) entirely separate from the
-        legacy global account.starting_capital fallback."""
-        return bool(path) and (path[0] == "strategy" or path == ("account", "starting_capital"))
+        """True if resolving `path` for any profile would redirect it
+        away from its own logical location -- i.e. it's a per-profile
+        setting rather than one value shared by every profile. Derived
+        from _resolve_setting_write_path so the two can never drift
+        apart on which paths count as profile-scoped."""
+        return _resolve_setting_write_path(path, "_probe_") != list(path)
 
     @app.get("/api/settings")
     @api_login_required
@@ -377,12 +392,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             except ValueError as exc:
                 errors.append(f"{'.'.join(logical_path)}: {exc}")
                 continue
-            if logical_path and logical_path[0] == "strategy":
-                write_path = ["profiles", active_profile, "strategy", *logical_path[1:]]
-            elif logical_path == ("account", "starting_capital"):
-                write_path = ["profiles", active_profile, "starting_capital"]
-            else:
-                write_path = list(logical_path)
+            write_path = _resolve_setting_write_path(logical_path, active_profile)
             coerced.append((write_path, value))
 
         if errors:
