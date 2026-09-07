@@ -1,5 +1,15 @@
 # Configuration for the autonomous NSE momentum paper-trading system.
 
+# Configuration for the autonomous NSE momentum paper-trading system.
+#
+# PROFILE SYSTEM:
+# Each profile maintains completely separate positions, cash, and trade history.
+# When you switch profiles, you switch to a different ledger and strategy.
+#
+# - 52w_high: Your primary account (existing trades preserved here)
+# - cross_sectional: Independent copy of capital for cross-sectional momentum
+# - consolidation_breakout: Independent copy of capital for consolidation breakout
+
 # Profile selector: which profile to use (52w_high, cross_sectional, consolidation_breakout, or custom name)
 # Each profile maintains separate positions, cash, and trade history
 # Note: when running all profiles simultaneously (multi-profile mode), this is ignored
@@ -14,30 +24,35 @@ multi_profile_mode: false
 profiles:
   52w_high:
     display_name: "52-Week High Momentum"
+    # Existing trades stay here - if you have data/state.db, it will be used as the base
     state_file: data/state_52w_high.db
     starting_capital: 100000.0
     # Strategy mode for this profile
     strategy_mode: 52w_high
-    # Strategy-specific settings for this profile can be overridden here
-    # (if not specified, uses the global settings below)
+    # This is your PRIMARY profile where existing trades and positions continue
 
   cross_sectional:
     display_name: "Cross-Sectional Momentum"
+    # Fresh ledger independent from 52w_high
     state_file: data/state_cross_sectional.db
     starting_capital: 100000.0
     strategy_mode: cross_sectional_momentum
+    # This profile starts fresh with new capital
 
   consolidation_breakout:
     display_name: "Consolidation Breakout"
+    # Fresh ledger independent from 52w_high
     state_file: data/state_consolidation.db
     starting_capital: 100000.0
     strategy_mode: consolidation_breakout
+    # This profile starts fresh with new capital
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
+# If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile
 account:
   starting_capital: 100000.0    # ₹1,00,000 virtual capital
   currency: INR
-  state_file: data/state.db     # SQLite file holding cash/positions/trades (deprecated: use profiles above)
+  state_file: data/state_52w_high.db  # Updated to use profile-specific path (was: data/state.db)
 
 universe:
   file: data/universe_nifty500.csv   # NSE symbols to scan (no .NS suffix). Loaded once at
