@@ -196,6 +196,18 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     else:
         print(f"Benchmark ({result.benchmark_symbol}) buy & hold: unavailable (could not fetch index history)")
 
+    print()
+    print("Why entries did or didn't happen:")
+    print(f"  Days blocked by market regime filter: {result.days_regime_blocked}/{result.trading_days}")
+    print(f"  Days portfolio was already full:      {result.days_portfolio_full}")
+    print(f"  Days with at least one candidate:     {result.days_with_candidates}")
+    if result.entry_rejections:
+        top = sorted(result.entry_rejections.items(), key=lambda kv: -kv[1])
+        print("  Filter rejections (symbol-days):      "
+              + ", ".join(f"{k}={v:,}" for k, v in top))
+    else:
+        print("  Filter rejections (symbol-days):      none recorded")
+
     if args.trades:
         print("\nTrade log:")
         rows = [[t["date"], t["side"], t["symbol"], t["qty"], f"{t['price']:.2f}",

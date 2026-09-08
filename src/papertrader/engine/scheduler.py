@@ -195,8 +195,16 @@ class TradingEngine:
                     log.debug("Skipping %s: %s", symbol, exc)
                     continue
                 universe_data.append((symbol, quote, history, turnover))
+            reasons: dict[str, int] = {}
             try:
-                return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
+                ranked = select_cross_sectional_candidates(universe_data, self.strategy_cfg,
+                                                           reasons=reasons)
+                log.info(
+                    "cross_sectional_momentum scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                    len(universe_data), len(ranked),
+                    ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+                )
+                return ranked
             except Exception as exc:  # noqa: BLE001 - see the consolidation_breakout branch below:
                 # a bug or malformed data here must not kill this engine's entire background
                 # thread -- fail this one scan and let the next one try again instead.
@@ -272,6 +280,8 @@ class TradingEngine:
                 log.warning("Could not fetch index history for relative-strength scoring (%s); skipping that filter this scan", exc)
 
         candidates = []
+        reasons_52w: dict[str, int] = {}
+        scanned = 0
         for symbol in self.universe:
             if symbol in exclude_symbols:
                 continue
@@ -281,17 +291,26 @@ class TradingEngine:
                 turnover = self.data.get_avg_daily_turnover(symbol, history=history)
             except DataUnavailableError as exc:
                 log.debug("Skipping %s: %s", symbol, exc)
+                reasons_52w["no_data"] = reasons_52w.get("no_data", 0) + 1
                 continue
 
+            scanned += 1
             try:
-                cand = eval_52w(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
+                cand = eval_52w(symbol, quote, history, turnover, self.strategy_cfg,
+                                index_history=index_history, reasons=reasons_52w)
             except Exception as exc:  # noqa: BLE001 - one symbol's malformed data must never
                 # take down the whole scan, let alone this engine's entire background thread.
                 log.warning("52w_high: skipping %s after evaluation error: %s", symbol, exc)
+                reasons_52w["evaluation_error"] = reasons_52w.get("evaluation_error", 0) + 1
                 continue
             if cand:
                 candidates.append(cand)
 
+        log.info(
+            "52w_high scan: %d symbols evaluated, %d candidates. Rejections: %s",
+            scanned, len(candidates),
+            ", ".join(f"{k}={v}" for k, v in sorted(reasons_52w.items(), key=lambda kv: -kv[1])) or "none",
+        )
         return rank_52w(candidates)
 
     def _recently_sold_symbols(self) -> set[str]:

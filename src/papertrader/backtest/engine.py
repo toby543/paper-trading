@@ -16,6 +16,7 @@ behavior silently diverging.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -46,6 +47,37 @@ log = logging.getLogger(__name__)
 # Trading-day approximation of "52 weeks", matching how a ~1y lookback
 # behaves elsewhere in this codebase (e.g. yfinance's period="1y").
 _WEEK52_TRADING_DAYS = 252
+
+# NSE trades roughly 250 days a year, so N trading days span appreciably
+# more than N calendar days. Conflating the two silently under-fetches.
+_CALENDAR_DAYS_PER_TRADING_DAY = 365.0 / 250.0
+
+
+def _calendar_days_for(trading_days: int) -> int:
+    """Calendar-day span that reliably contains `trading_days` sessions,
+    with a margin for holiday clusters (Diwali/Holi weeks, etc)."""
+    return int(math.ceil(trading_days * _CALENDAR_DAYS_PER_TRADING_DAY)) + 30
+
+
+def _required_trading_days(strategy_cfg: dict) -> int:
+    """Longest lookback any filter in this strategy config needs before it
+    can return a value at all."""
+    needed = max(
+        int(strategy_cfg.get("slow_ma_days", 200) or 0),
+        int(strategy_cfg.get("fast_ma_days", 50) or 0),
+        _WEEK52_TRADING_DAYS,  # _quote_for's 52-week high/low window
+    )
+    mode = strategy_cfg.get("mode", "52w_high")
+    if mode == "cross_sectional_momentum":
+        cs_cfg = strategy_cfg.get("cross_sectional") or {}
+        needed = max(needed, int(cs_cfg.get("lookback_days", 252))
+                     + int(cs_cfg.get("skip_recent_days", 21)) + 1)
+    else:
+        needed = max(needed, int(strategy_cfg.get("momentum_lookback_days", 252) or 0) + 1)
+    if mode == "consolidation_breakout":
+        cb_cfg = strategy_cfg.get("consolidation_breakout") or {}
+        needed = max(needed, int(cb_cfg.get("consolidation_days", 10)) + 1)
+    return needed
 
 
 @dataclass
@@ -132,14 +164,17 @@ class Backtester:
         self.regime_cfg = cfg.get("regime", default={})
         self.universe = load_universe(cfg.universe_file)
 
-        if self.strategy_cfg.get("mode") == "cross_sectional_momentum":
-            # This mode's lookback (default 252 trading days + 21 skipped)
-            # can exceed the generic 420-day buffer for a bigger
-            # lookback_days config -- make sure the fetch window is always
-            # wide enough for it, on top of whatever the caller passed.
-            cs_cfg = self.strategy_cfg.get("cross_sectional") or {}
-            needed = cs_cfg.get("lookback_days", 252) + cs_cfg.get("skip_recent_days", 21) + 30
-            self.lookback_buffer_days = max(self.lookback_buffer_days, needed)
+        # Make sure the fetch window is wide enough that every lookback this
+        # profile needs is already satisfied on the FIRST simulated day --
+        # otherwise the opening stretch of the backtest silently evaluates
+        # nothing (every _moving_average/_momentum_return_pct returns None)
+        # and the run quietly understates how often the strategy would have
+        # traded. Requirements are in TRADING days; the fetch window is in
+        # calendar days, so they have to be converted, not compared directly.
+        self.lookback_buffer_days = max(
+            self.lookback_buffer_days,
+            _calendar_days_for(_required_trading_days(self.strategy_cfg)),
+        )
 
         self.risk = RiskManager(
             max_open_positions=cfg.get("risk", "max_open_positions", default=10),
@@ -362,7 +397,8 @@ class Backtester:
                     continue
                 turnover = _avg_daily_turnover(history_upto)
                 universe_data.append((symbol, quote, history_upto, turnover))
-            ranked = select_cross_sectional_candidates(universe_data, self.strategy_cfg)
+            ranked = select_cross_sectional_candidates(universe_data, self.strategy_cfg,
+                                                       reasons=self._entry_rejections)
         elif mode == "consolidation_breakout":
             candidates = []
             for symbol in self.universe:

@@ -60,6 +60,7 @@ def _lookback_return_pct(history: pd.DataFrame, lookback_days: int, skip_recent_
 def select_cross_sectional_candidates(
     universe_data: list[tuple[str, Quote, pd.DataFrame, float]],
     cfg: dict,
+    reasons: dict[str, int] | None = None,
 ) -> list[Candidate]:
     """`universe_data` is (symbol, quote, history, avg_daily_turnover) for
     every not-currently-held symbol that had usable data this scan.
@@ -69,7 +70,17 @@ def select_cross_sectional_candidates(
     percentile rank 0-100) -- a drop-in replacement for
     `rank_candidates(...)` in the 52w-high strategy, ready for the same
     position-sizing/buy loop.
+
+    `reasons` is an optional counter, matching the other two strategy
+    modules: each screened-out symbol increments the filter that dropped
+    it, plus `outside_top_pct` for those that passed every filter but
+    didn't make the percentile cut. Without it a scan that selects nothing
+    gives no clue whether the filters or the ranking were responsible.
     """
+    def reject(reason: str, count: int = 1) -> None:
+        if reasons is not None and count > 0:
+            reasons[reason] = reasons.get(reason, 0) + count
+
     cs_cfg = cfg.get("cross_sectional") or {}
     lookback_days = cs_cfg.get("lookback_days", 252)
     skip_recent_days = cs_cfg.get("skip_recent_days", 21)
@@ -84,23 +95,32 @@ def select_cross_sectional_candidates(
     scored: list[tuple[str, Quote, float, float]] = []  # symbol, quote, turnover, momentum
     for symbol, quote, history, turnover in universe_data:
         if min_ltp and quote.ltp < min_ltp:
+            reject("ltp_below_min")
             continue
         if max_ltp and quote.ltp > max_ltp:
+            reject("ltp_above_max")
             continue
         if turnover < min_turnover:
+            reject("illiquid")
             continue
 
         fast_ma = _moving_average(history, fast_ma_days)
         slow_ma = _moving_average(history, slow_ma_days)
         if fast_ma is None or slow_ma is None:
+            reject("insufficient_history")
             continue
         if not (quote.ltp > fast_ma > 0 and quote.ltp > slow_ma and fast_ma >= slow_ma):
+            reject("not_in_uptrend")
             continue
 
         momentum = _lookback_return_pct(history, lookback_days, skip_recent_days)
-        if momentum is None or momentum <= 0:
+        if momentum is None:
+            reject("insufficient_history")
+            continue
+        if momentum <= 0:
             # Absolute-return sanity check: never buy something merely for
             # beating its peers while it's itself still losing money.
+            reject("negative_trailing_return")
             continue
 
         scored.append((symbol, quote, turnover, momentum))
@@ -112,6 +132,7 @@ def select_cross_sectional_candidates(
     n = len(scored)
     cutoff = max(1, round(n * top_pct / 100.0))
     top = scored[:cutoff]
+    reject("outside_top_pct", n - len(top))
 
     candidates = []
     for rank, (symbol, quote, turnover, momentum) in enumerate(top):
