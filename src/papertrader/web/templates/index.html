@@ -1593,7 +1593,7 @@ function renderBacktestResult(result, profileDisplay) {
 
   const tbody = document.getElementById("btTradesBody");
   if (!result.trade_log.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No trades over this date range — the strategy's filters didn't find a qualifying entry.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">${backtestNoEntryExplanation(result)}</td></tr>`;
   } else {
     tbody.innerHTML = result.trade_log.map(t => `
       <tr>
@@ -1608,8 +1608,47 @@ function renderBacktestResult(result, profileDisplay) {
     `).join("");
   }
 
+  const who = profileDisplay || result.profile || "";
   document.getElementById("backtestMeta").textContent =
-    `${result.start_date} → ${result.end_date} · ${result.symbols_with_data} symbols · ${result.num_round_trips} trades`;
+    `${who ? who + " · " : ""}${result.start_date} → ${result.end_date} · ` +
+    `${result.symbols_with_data} symbols · ${result.num_round_trips} trades`;
+}
+
+// Turn "0 trades" from a dead end into a diagnosis. A backtest that never
+// entered is a legitimate result, but the reader needs to know WHY before
+// they can decide whether to loosen a filter or go looking for a bug --
+// so name the gate that actually stopped it, in order of what dominated.
+function backtestNoEntryExplanation(result) {
+  const parts = [];
+  const days = result.trading_days || 0;
+  const blocked = result.days_regime_blocked || 0;
+  const full = result.days_portfolio_full || 0;
+  const withCands = result.days_with_candidates || 0;
+
+  if (blocked >= days && days > 0) {
+    parts.push(`The market regime filter blocked new entries on all ${days} days — the benchmark index stayed below its moving average for the whole range, so no buys were ever attempted.`);
+  } else if (blocked > 0) {
+    parts.push(`Regime filter blocked ${blocked} of ${days} days.`);
+  }
+  if (full > 0) parts.push(`Portfolio was already full on ${full} days.`);
+
+  const rej = result.entry_rejections || {};
+  const entries = Object.entries(rej).sort((a, b) => b[1] - a[1]);
+  if (entries.length) {
+    const top = entries.slice(0, 4).map(([k, v]) => `${escapeText(k)} (${fmtInt(v)})`).join(", ");
+    parts.push(`Across every symbol and day evaluated, the filters that rejected the most were: ${top}.`);
+  }
+  if (withCands > 0) {
+    parts.push(`${withCands} days did produce a candidate but no buy was placed — check position sizing and the per-scan cash budget.`);
+  }
+  if (!parts.length) {
+    parts.push("No trades over this date range — the strategy's filters didn't find a qualifying entry.");
+  }
+  return parts.join(" ");
+}
+
+function escapeText(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
 function pollBacktestJob(jobId) {

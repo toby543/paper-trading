@@ -97,6 +97,7 @@ def evaluate_candidate(
     avg_daily_turnover: float,
     cfg: dict,
     index_history: pd.DataFrame | None = None,
+    reasons: dict[str, int] | None = None,
 ) -> Candidate | None:
     """Return a Candidate if `symbol` currently qualifies as a BUY, else None.
 
@@ -104,8 +105,19 @@ def evaluate_candidate(
     enable the relative-strength filter/score component. Without it, that
     check is simply skipped (fails open), same as any other filter whose
     config key is absent.
+
+    `reasons` is an optional counter: each rejection increments the name of
+    the filter that rejected the symbol. A scan finding nothing is a normal
+    outcome, but without this it is indistinguishable from a scan that is
+    silently broken or misconfigured, which is what makes a run of zero
+    buys impossible to diagnose.
     """
+    def reject(reason: str) -> None:
+        if reasons is not None:
+            reasons[reason] = reasons.get(reason, 0) + 1
+
     if quote.week52_high <= 0:
+        reject("no_52w_high")
         return None
 
     # Optional LTP range filter (0/absent = no bound), e.g. to skip penny
@@ -113,27 +125,37 @@ def evaluate_candidate(
     # check, so it runs before anything that needs historical bars.
     min_ltp = cfg.get("min_ltp_inr")
     if min_ltp and quote.ltp < min_ltp:
+        reject("ltp_below_min")
         return None
     max_ltp = cfg.get("max_ltp_inr")
     if max_ltp and quote.ltp > max_ltp:
+        reject("ltp_above_max")
         return None
 
     pct_from_high = (quote.week52_high - quote.ltp) / quote.week52_high * 100.0
     if pct_from_high > cfg["proximity_to_52w_high_pct"]:
+        reject("far_from_52w_high")
         return None
 
     momentum = _momentum_return_pct(history, cfg["momentum_lookback_days"])
-    if momentum is None or momentum < cfg["min_momentum_return_pct"]:
+    if momentum is None:
+        reject("insufficient_history")
+        return None
+    if momentum < cfg["min_momentum_return_pct"]:
+        reject("weak_momentum")
         return None
 
     fast_ma = _moving_average(history, cfg["fast_ma_days"])
     slow_ma = _moving_average(history, cfg["slow_ma_days"])
     if fast_ma is None or slow_ma is None:
+        reject("insufficient_history")
         return None
     if not (quote.ltp > fast_ma > 0 and quote.ltp > slow_ma and fast_ma >= slow_ma):
+        reject("not_in_uptrend")
         return None
 
     if avg_daily_turnover < cfg["min_avg_daily_turnover_inr"]:
+        reject("illiquid")
         return None
 
     relative_strength = None
@@ -141,6 +163,7 @@ def evaluate_candidate(
     if index_history is not None:
         relative_strength = _relative_strength_pct(history, index_history, cfg["momentum_lookback_days"])
         if min_rs is not None and relative_strength is not None and relative_strength < min_rs:
+            reject("weak_vs_index")
             return None
 
     volume_multiple = None
@@ -153,6 +176,7 @@ def evaluate_candidate(
         )
         min_multiple = volume_cfg.get("min_volume_multiple", 1.0)
         if volume_multiple is not None and volume_multiple < min_multiple:
+            reject("weak_volume")
             return None
 
     # Higher momentum, closer proximity to the 52-week high, and stronger

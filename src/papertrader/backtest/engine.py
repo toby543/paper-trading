@@ -71,6 +71,16 @@ class BacktestResult:
     benchmark_cagr_pct: float | None = None
     equity_curve: list[tuple[str, float]] = field(default_factory=list)
     trade_log: list[dict] = field(default_factory=list)
+    # Why entries didn't happen. A backtest that trades nothing is a valid
+    # result, but without this it is indistinguishable from one that is
+    # broken or misconfigured -- and the reader has no way to tell which
+    # filter to loosen. `entry_rejections` tallies, across every simulated
+    # day and symbol, which filter rejected the symbol.
+    profile: str = ""
+    days_regime_blocked: int = 0
+    days_portfolio_full: int = 0
+    days_with_candidates: int = 0
+    entry_rejections: dict[str, int] = field(default_factory=dict)
 
 
 def _avg_daily_turnover(history: pd.DataFrame, days: int = 20) -> float:
@@ -154,6 +164,13 @@ class Backtester:
         # wall-clock time (see PaperBroker.sell), not the simulated day, so
         # it can't be used for this -- tracked separately here instead.
         self._sold_on: dict[str, pd.Timestamp] = {}
+
+        # Entry diagnostics, accumulated across the whole simulation and
+        # reported on BacktestResult (see the fields there).
+        self._days_regime_blocked = 0
+        self._days_portfolio_full = 0
+        self._days_with_candidates = 0
+        self._entry_rejections: dict[str, int] = {}
 
     def __del__(self):
         try:
@@ -316,10 +333,12 @@ class Backtester:
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))
         if room <= 0:
+            self._days_portfolio_full += 1
             return
 
         index_upto = self._index_history.loc[:day] if self._index_history is not None else None
         if not self._market_regime_ok(index_upto):
+            self._days_regime_blocked += 1
             return
 
         mode = self.strategy_cfg.get("mode", "52w_high")
@@ -358,7 +377,8 @@ class Backtester:
                     continue
                 turnover = _avg_daily_turnover(history_upto)
                 cand = consolidation_breakout.evaluate_candidate(
-                    symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
+                    index_history=index_upto, reasons=self._entry_rejections,
                 )
                 if cand:
                     candidates.append(cand)
@@ -376,10 +396,14 @@ class Backtester:
                 if quote is None:
                     continue
                 turnover = _avg_daily_turnover(history_upto)
-                cand = eval_52w(symbol, quote, history_upto, turnover, self.strategy_cfg, index_history=index_upto)
+                cand = eval_52w(symbol, quote, history_upto, turnover, self.strategy_cfg,
+                                index_history=index_upto, reasons=self._entry_rejections)
                 if cand:
                     candidates.append(cand)
             ranked = rank_52w(candidates)
+
+        if ranked:
+            self._days_with_candidates += 1
 
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
         ranked = ranked[:max_new]
@@ -475,6 +499,16 @@ class Backtester:
         elapsed_days = (self.end - self.start).days
         benchmark_return_pct, benchmark_cagr = self._benchmark_buy_and_hold()
 
+        log.info(
+            "Backtest entry diagnostics [%s]: %d/%d days blocked by market regime, "
+            "%d days with the portfolio already full, %d days with at least one candidate. "
+            "Rejections: %s",
+            self.profile_name, self._days_regime_blocked, len(trading_days),
+            self._days_portfolio_full, self._days_with_candidates,
+            ", ".join(f"{k}={v}" for k, v in sorted(self._entry_rejections.items(), key=lambda kv: -kv[1]))
+            or "none",
+        )
+
         return BacktestResult(
             start_date=str(self.start.date()),
             end_date=str(self.end.date()),
@@ -495,4 +529,9 @@ class Backtester:
             benchmark_cagr_pct=benchmark_cagr,
             equity_curve=equity_curve,
             trade_log=trade_log,
+            profile=self.profile_name,
+            days_regime_blocked=self._days_regime_blocked,
+            days_portfolio_full=self._days_portfolio_full,
+            days_with_candidates=self._days_with_candidates,
+            entry_rejections=dict(sorted(self._entry_rejections.items(), key=lambda kv: -kv[1])),
         )
