@@ -33,7 +33,15 @@ from ..config import Config
 from ..config_editor import update_config_file
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
-from .data_api import build_candidates, build_equity_curve, build_index_charts, build_performance_comparison, build_summary, build_trades
+from .data_api import (
+    build_candidates,
+    build_equity_curve,
+    build_index_charts,
+    build_performance_comparison,
+    build_strategy_comparison,
+    build_summary,
+    build_trades,
+)
 from .filters import indian_currency
 from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
 
@@ -273,6 +281,14 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     @api_login_required
     def api_performance():
         return jsonify(build_performance_comparison(get_current_engine()))
+
+    @app.get("/api/strategy-comparison")
+    @api_login_required
+    def api_strategy_comparison():
+        """Scoreboard across every profile at once -- the one view that
+        can't be had by switching the profile dropdown. Ledger reads
+        only, so it's cheap enough to sit on the normal refresh poll."""
+        return jsonify(build_strategy_comparison(engines, cfg))
 
     @app.get("/api/candidates")
     @api_login_required

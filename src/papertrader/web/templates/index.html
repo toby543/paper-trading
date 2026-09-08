@@ -206,6 +206,41 @@
   .profile-select:hover { border-color: var(--accent); color: var(--accent); }
   .profile-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
 
+  /* ---------- insights ---------- */
+  .insights-list { display: flex; flex-direction: column; }
+  .insight {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+  }
+  .insight:last-child { border-bottom: none; }
+  .insight .ico {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; margin-top: 1px;
+  }
+  .insight.warn .ico { background: var(--bad-wash); color: var(--bad); }
+  .insight.info .ico { background: var(--accent-wash); color: var(--accent); }
+  .insight.good .ico { background: var(--good-wash); color: var(--good); }
+  .insight .body { min-width: 0; }
+  .insight .title { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
+  .insight.warn .title { color: var(--bad); }
+  .insight.good .title { color: var(--good); }
+  .insight .detail { font-size: 11.5px; color: var(--ink-dim); line-height: 1.45; margin-top: 2px; }
+  .insights-empty { padding: 22px 20px; text-align: center; color: var(--ink-faint); font-size: 12.5px; }
+
+  /* ---------- strategy comparison ---------- */
+  #compareTable tbody td { font-size: 12.5px; }
+  .cmp-name { display: flex; align-items: center; gap: 8px; }
+  .cmp-rank {
+    flex-shrink: 0; width: 20px; height: 20px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface-2); color: var(--ink-faint); border: 1px solid var(--border);
+  }
+  .cmp-rank.top { background: var(--accent-grad); color: var(--accent-ink); border-color: transparent; }
+  tr.cmp-active td { background: var(--accent-wash); }
+  tr.cmp-active .cmp-name { font-weight: 700; }
+  .cmp-you { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
+
   /* ---------- profile info banner ---------- */
   .profile-banner {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -510,6 +545,46 @@
   {% endif %}
 
   <div class="stats" id="stats"></div>
+
+  <!-- Smart insights: derived observations about the current book -->
+  <div class="panel" id="insightsPanel" style="margin-bottom: 20px; display: none;">
+    <div class="panel-head collapsible-head" id="insightsPanelHead">
+      <h2>Insights</h2>
+      <span class="collapse-toggle">
+        <span class="meta mono" id="insightsMeta">—</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="insightsBody" title="Collapse">&#9650;</button>
+      </span>
+    </div>
+    <div class="panel-body-collapsible" id="insightsBody">
+      <div class="insights-list" id="insightsList"></div>
+    </div>
+  </div>
+
+  <!-- Strategy comparison: all profiles side by side -->
+  {% if profiles and profiles|length > 1 %}
+  <div class="panel" id="comparePanel" style="margin-bottom: 20px;">
+    <div class="panel-head collapsible-head" id="comparePanelHead">
+      <h2>Strategy Comparison</h2>
+      <span class="collapse-toggle">
+        <span class="meta mono" id="compareMeta">—</span>
+        <button class="collapse-btn" aria-expanded="true" aria-controls="compareBody" title="Collapse">&#9650;</button>
+      </span>
+    </div>
+    <div class="panel-body-collapsible" id="compareBody">
+      <div class="table-scroll">
+        <table id="compareTable">
+          <thead>
+            <tr>
+              <th>Profile</th><th>Strategy</th><th>Equity</th><th>Return</th>
+              <th>Realized P&amp;L</th><th>Win rate</th><th>Trades</th><th>Open</th>
+            </tr>
+          </thead>
+          <tbody id="compareBody2"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="grid">
     <div class="col-main">
@@ -917,6 +992,8 @@ async function authFetch(url, opts) {
 const fmt = (n) => Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInt = (n) => Number(n ?? 0).toLocaleString("en-IN");
 const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
+const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
+const ACTIVE_PROFILE = {{ active_profile | tojson }};
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour12: false });
 
@@ -1405,10 +1482,19 @@ if (profileSelector) {
 loadSettings();
 
 // ---- Collapse/expand any settings panel, remembered per-browser --------
-function makeCollapsible(panelId, headId, storageKey) {
+// defaultCollapsed: how the panel starts on a browser that has never made a
+// choice for it. Reference/settings panels default closed to keep the page
+// short; panels whose whole job is to surface something (insights, the
+// strategy scoreboard) default open, or nobody would ever see them.
+function makeCollapsible(panelId, headId, storageKey, defaultCollapsed = true) {
   const panel = document.getElementById(panelId);
   const head = document.getElementById(headId);
+  // Some panels are only rendered conditionally (e.g. the comparison panel
+  // needs more than one profile) -- skip rather than throwing and taking
+  // the rest of the dashboard's scripts down with it.
+  if (!panel || !head) return;
   const btn = head.querySelector(".collapse-btn");
+  if (!btn) return;
 
   function setCollapsed(collapsed) {
     panel.classList.toggle("collapsed", collapsed);
@@ -1429,12 +1515,15 @@ function makeCollapsible(panelId, headId, storageKey) {
   } catch (e) {
     // ignore -- default to collapsed below
   }
-  // Default to collapsed on a first-ever visit (or if localStorage is
-  // unavailable); only stay expanded if this browser explicitly
-  // remembered an earlier "expand" choice for this panel.
-  if (saved !== "0") setCollapsed(true);
+  // A remembered choice always wins; otherwise fall back to this panel's
+  // own default.
+  if (saved === "0") setCollapsed(false);
+  else if (saved === "1") setCollapsed(true);
+  else setCollapsed(defaultCollapsed);
 }
 
+makeCollapsible("insightsPanel", "insightsPanelHead", "papertrader.insightsPanelCollapsed", false);
+makeCollapsible("comparePanel", "comparePanelHead", "papertrader.comparePanelCollapsed", false);
 makeCollapsible("rulesPanel", "rulesPanelHead", "papertrader.rulesPanelCollapsed");
 makeCollapsible("settingsPanel", "settingsPanelHead", "papertrader.settingsPanelCollapsed");
 makeCollapsible("editPanel", "editPanelHead", "papertrader.editSettingsCollapsed");
@@ -1677,6 +1766,90 @@ async function refreshIndices() {
 }
 document.getElementById("indicesPeriod").addEventListener("change", refreshIndices);
 
+// ---- Insights: derived observations, served inside /api/summary -------
+const INSIGHT_ICON = { warn: "!", info: "i", good: "✓" };
+
+function renderInsights(summary) {
+  const panel = document.getElementById("insightsPanel");
+  const list = document.getElementById("insightsList");
+  const meta = document.getElementById("insightsMeta");
+  const items = summary.insights || [];
+
+  // Nothing worth flagging is itself a fine state -- keep the panel out of
+  // the way entirely rather than showing an empty box every refresh.
+  if (!items.length) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+
+  const warns = items.filter(i => i.level === "warn").length;
+  meta.textContent = warns ? `${warns} need${warns === 1 ? "s" : ""} attention` : `${items.length} note${items.length === 1 ? "" : "s"}`;
+
+  // warn first, then info, then good -- most actionable at the top.
+  const order = { warn: 0, info: 1, good: 2 };
+  const sorted = items.slice().sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9));
+
+  list.innerHTML = sorted.map(i => `
+    <div class="insight ${i.level}">
+      <span class="ico">${INSIGHT_ICON[i.level] || "i"}</span>
+      <div class="body">
+        <div class="title">${i.title}</div>
+        ${i.detail ? `<div class="detail">${i.detail}</div>` : ""}
+      </div>
+    </div>
+  `).join("");
+}
+
+// ---- Strategy comparison: every profile side by side -----------------
+function renderComparison(data) {
+  const tbody = document.getElementById("compareBody2");
+  if (!tbody) return;  // panel only rendered when more than one profile exists
+  const rows = (data && data.profiles) || [];
+  const meta = document.getElementById("compareMeta");
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">No profile data yet.</td></tr>`;
+    return;
+  }
+  if (meta) {
+    const best = rows[0];
+    meta.textContent = `${best.display_name} leading at ${signed(best.total_return_pct)}%`;
+  }
+
+  tbody.innerHTML = rows.map((r, idx) => {
+    const isActive = r.profile === ACTIVE_PROFILE;
+    return `
+      <tr class="${isActive ? "cmp-active" : ""}">
+        <td>
+          <div class="cmp-name">
+            <span class="cmp-rank ${idx === 0 ? "top" : ""}">${idx + 1}</span>
+            <span>${r.display_name}</span>
+            ${isActive ? `<span class="cmp-you">viewing</span>` : ""}
+          </div>
+        </td>
+        <td class="mono" style="color: var(--ink-dim);">${r.strategy_mode}</td>
+        <td class="mono">₹${fmt(r.total_equity)}</td>
+        <td class="mono ${pnlClass(r.total_return_pct)}">${signed(r.total_return_pct)}%</td>
+        <td class="mono ${pnlClass(r.realized_pnl)}">${signed(r.realized_pnl)}</td>
+        <td class="mono">${r.win_rate_pct === null ? "—" : r.win_rate_pct + "%"}</td>
+        <td class="mono">${r.closed_trades}/${r.total_trades}</td>
+        <td class="mono">${r.open_positions}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function refreshComparison() {
+  if (!document.getElementById("comparePanel")) return;
+  try {
+    const data = await authFetch("/api/strategy-comparison").then(r => r.json());
+    renderComparison(data);
+  } catch (e) {
+    console.error("Strategy comparison refresh failed", e);
+  }
+}
+
 async function refresh() {
   try {
     const [summary, trades, curve, perf] = await Promise.all([
@@ -1686,10 +1859,12 @@ async function refresh() {
       authFetch("/api/performance").then(r => r.json()),
     ]);
     renderStats(summary);
+    renderInsights(summary);
     renderPositions(summary);
     renderTrades(trades);
     renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf) });
     refreshIndices();
+    refreshComparison();
   } catch (e) {
     console.error("Dashboard refresh failed", e);
   }
