@@ -15,6 +15,28 @@ from .engine.scheduler import TradingEngine
 log = logging.getLogger(__name__)
 
 
+def _force_utf8_stdio() -> None:
+    """Make stdout/stderr able to carry non-ASCII, on every platform.
+
+    Every rupee figure this CLI prints uses the U+20B9 sign, and a Windows
+    console defaults to a legacy code page (cp1252) that has no mapping for
+    it. Printing one there raises UnicodeEncodeError and kills the command
+    mid-report -- a backtest could finish a multi-minute run, then crash
+    while printing its own first result line. `errors="replace"` is the
+    safety net for any console that still can't render a glyph after the
+    switch: a placeholder character is a cosmetic problem, a traceback that
+    discards a completed run is not.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a redirected/wrapped stream may not support it
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # already detached, or a stream that refuses
+            pass
+
+
 def _setup_logging(cfg: Config) -> None:
     log_file = cfg.log_file
     os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
@@ -22,7 +44,12 @@ def _setup_logging(cfg: Config) -> None:
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler(sys.stdout)],
+        # encoding is explicit for the same reason as _force_utf8_stdio: the
+        # log file would otherwise be opened in the platform's locale
+        # encoding, and a single rupee sign in a log line would raise on
+        # Windows.
+        handlers=[logging.FileHandler(log_file, encoding="utf-8"),
+                  logging.StreamHandler(sys.stdout)],
     )
 
 
@@ -334,6 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    _force_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)
