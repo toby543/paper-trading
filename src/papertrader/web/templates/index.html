@@ -1550,8 +1550,15 @@ function showBacktestBanner(kind, html) {
   banner.style.display = "block";
 }
 
-function renderBacktestResult(result) {
+function renderBacktestResult(result, profileDisplay) {
   document.getElementById("backtestResults").style.display = "block";
+  // Make it unambiguous which profile's strategy these numbers describe.
+  const btMeta = document.getElementById("backtestMeta");
+  if (btMeta) {
+    btMeta.textContent = profileDisplay
+      ? `${profileDisplay} · ${result.start_date} → ${result.end_date}`
+      : `${result.start_date} → ${result.end_date}`;
+  }
   document.getElementById("btTotalReturn").textContent = (result.total_return_pct >= 0 ? "+" : "") + result.total_return_pct.toFixed(2) + "%";
   document.getElementById("btTotalReturn").className = "value mono " + pnlClass(result.total_return_pct);
   document.getElementById("btEquity").textContent = "₹" + fmt(result.starting_capital) + " → ₹" + fmt(result.ending_equity);
@@ -1624,12 +1631,15 @@ function pollBacktestJob(jobId) {
         const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
         document.getElementById("backtestProgressFill").style.width = pct.toFixed(0) + "%";
         const stageLabel = job.stage === "fetch" ? "Fetching price history" : job.stage === "simulate" ? "Simulating trading days" : "Starting";
+        // Name the profile being replayed -- a backtest runs against whichever
+        // profile is currently being viewed, and each has its own strategy.
+        const who = job.profile_display ? `${job.profile_display} — ` : "";
         document.getElementById("backtestProgressText").textContent =
-          total > 0 ? `${stageLabel}: ${current}/${total}` : stageLabel + "…";
+          total > 0 ? `${who}${stageLabel}: ${current}/${total}` : `${who}${stageLabel}…`;
       } else if (job.status === "done") {
         clearInterval(backtestPollTimer);
         document.getElementById("backtestProgressWrap").style.display = "none";
-        renderBacktestResult(job.result);
+        renderBacktestResult(job.result, job.profile_display);
         resetBacktestButton();
       } else if (job.status === "error") {
         clearInterval(backtestPollTimer);

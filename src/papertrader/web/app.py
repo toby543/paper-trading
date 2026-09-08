@@ -314,7 +314,13 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         # inside the background thread (see backtest_jobs.py) -- any such
         # error surfaces via the job's "error" status on the next poll,
         # not as a synchronous 400 here.
-        job_id = start_backtest_job(cfg, start, end, universe_file=universe_file)
+        # Backtest whichever profile is currently being viewed, so the run
+        # matches that profile's own strategy/parameters rather than the
+        # shared fallback config.
+        job_id = start_backtest_job(
+            cfg, start, end, universe_file=universe_file,
+            profile_name=cfg.get("active_profile", default="52w_high"),
+        )
         return jsonify({"ok": True, "job_id": job_id})
 
     @app.get("/api/backtest/status/<job_id>")

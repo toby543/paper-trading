@@ -29,6 +29,8 @@ class BacktestJob:
     start: str
     end: str
     universe_file: str
+    profile: str = ""          # which profile's strategy this run replays
+    profile_display: str = ""  # its human-readable name, for the UI
     status: str = "running"  # running | done | error
     stage: str = "starting"  # starting | fetch | simulate
     progress_current: int = 0
@@ -38,7 +40,8 @@ class BacktestJob:
     created_at: float = field(default_factory=time.time)
 
 
-def start_backtest_job(cfg: Config, start: str, end: str, universe_file: str | None = None) -> str:
+def start_backtest_job(cfg: Config, start: str, end: str, universe_file: str | None = None,
+                       profile_name: str | None = None) -> str:
     job_id = uuid.uuid4().hex[:12]
     bt_cfg = cfg
     if universe_file:
@@ -47,11 +50,21 @@ def start_backtest_job(cfg: Config, start: str, end: str, universe_file: str | N
         bt_cfg = Config(raw=copy.deepcopy(cfg.raw), path=cfg.path)
         bt_cfg.raw.setdefault("universe", {})["file"] = universe_file
 
-    job = BacktestJob(id=job_id, start=start, end=end, universe_file=bt_cfg.universe_file)
+    # Replay whichever profile the caller asked for (the dashboard passes the
+    # one currently being viewed), so a backtest matches that profile's own
+    # strategy and parameters rather than the shared fallback block.
+    profile_name = profile_name or bt_cfg.get("active_profile", default="52w_high")
+
+    job = BacktestJob(
+        id=job_id, start=start, end=end, universe_file=bt_cfg.universe_file,
+        profile=profile_name,
+        profile_display=bt_cfg.list_profiles().get(profile_name, profile_name),
+    )
     with _lock:
         _jobs[job_id] = job
 
-    thread = threading.Thread(target=_run, args=(job_id, bt_cfg, start, end), name=f"backtest-{job_id}", daemon=True)
+    thread = threading.Thread(target=_run, args=(job_id, bt_cfg, start, end, profile_name),
+                              name=f"backtest-{job_id}", daemon=True)
     thread.start()
     return job_id
 
@@ -62,7 +75,7 @@ def get_job(job_id: str) -> Optional[dict[str, Any]]:
         return asdict(job) if job is not None else None
 
 
-def _run(job_id: str, cfg: Config, start: str, end: str) -> None:
+def _run(job_id: str, cfg: Config, start: str, end: str, profile_name: str | None = None) -> None:
     from ..backtest.engine import Backtester
 
     def on_progress(stage: str, current: int, total: int) -> None:
@@ -74,7 +87,7 @@ def _run(job_id: str, cfg: Config, start: str, end: str) -> None:
                 job.progress_total = total
 
     try:
-        bt = Backtester(cfg, start=start, end=end, on_progress=on_progress)
+        bt = Backtester(cfg, start=start, end=end, on_progress=on_progress, profile_name=profile_name)
         with _lock:
             _jobs[job_id].progress_total = len(bt.universe)
         result = bt.run()

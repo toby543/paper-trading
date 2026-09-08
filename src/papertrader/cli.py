@@ -166,9 +166,16 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     _setup_logging(cfg)
     from .backtest.engine import Backtester
 
-    bt = Backtester(cfg, start=args.start, end=args.end, refresh_cache=args.refresh_cache)
+    profile_name = getattr(args, "profile", None)
+    if profile_name and profile_name not in cfg.list_profiles():
+        print(f"Unknown profile '{profile_name}'. Configured profiles: {list(cfg.list_profiles())}", file=sys.stderr)
+        sys.exit(1)
+
+    bt = Backtester(cfg, start=args.start, end=args.end, refresh_cache=args.refresh_cache,
+                    profile_name=profile_name)
     cache_note = "ignoring the local price cache, re-fetching everything" if args.refresh_cache else "reusing the local price cache where it already covers this range"
-    print(f"Backtesting {args.start} -> {args.end} against {len(bt.universe)} symbols ({cache_note})...")
+    print(f"Backtesting profile '{bt.profile_name}' (strategy: {bt.strategy_cfg.get('mode')}) "
+          f"{args.start} -> {args.end} against {len(bt.universe)} symbols ({cache_note})...")
     result = bt.run()
 
     print()
@@ -302,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--export", default=None, help="Optional CSV path to save the daily equity curve")
     bt.add_argument("--refresh-cache", action="store_true",
                      help="Ignore data/price_cache/ and re-fetch every symbol's history fresh from Yahoo Finance")
+    bt.add_argument("--profile", default=None,
+                     help="Which profile's strategy to replay (default: the active_profile). "
+                          "Each profile has its own strategy mode and parameters.")
     bt.set_defaults(func=cmd_backtest)
 
     setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password)")

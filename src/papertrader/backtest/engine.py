@@ -88,6 +88,7 @@ class Backtester:
         lookback_buffer_days: int = 420,
         on_progress: Optional[Callable[[str, int, int], None]] = None,
         refresh_cache: bool = False,
+        profile_name: str | None = None,
     ):
         self.cfg = cfg
         self.start = pd.Timestamp(start)
@@ -95,6 +96,12 @@ class Backtester:
         if self.end <= self.start:
             raise ValueError(f"end ({end}) must be after start ({start})")
         self.lookback_buffer_days = lookback_buffer_days
+        # Which profile's strategy this backtest replays. Defaults to the
+        # active one so a backtest always mirrors what that profile is
+        # actually trading live -- including any parameters edited from the
+        # dashboard, which are stored per-profile rather than in the shared
+        # top-level strategy: block.
+        self.profile_name = profile_name or cfg.get("active_profile", default="52w_high")
         # Ignore any on-disk cache and re-fetch everything from Yahoo
         # Finance fresh -- for when you suspect the cached bars are
         # stale or wrong, rather than the normal "reuse what we have"
@@ -105,7 +112,12 @@ class Backtester:
         # progress without coupling this module to Flask/threading at all.
         self._on_progress = on_progress or (lambda stage, current, total: None)
 
-        self.strategy_cfg = cfg.get("strategy", default={})
+        # Profile-scoped, exactly like TradingEngine does it -- otherwise a
+        # backtest would replay the shared fallback block that no profile
+        # actually runs verbatim, silently testing the wrong strategy with
+        # the wrong parameters. risk/regime/universe stay global, matching
+        # live trading.
+        self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
         self.universe = load_universe(cfg.universe_file)
@@ -124,7 +136,7 @@ class Backtester:
             position_size_pct_of_equity=cfg.get("risk", "position_size_pct_of_equity", default=8.0),
             max_cash_deployed_per_scan_pct=cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0),
         )
-        self.starting_capital = float(cfg.get("account", "starting_capital", default=1_000_000.0))
+        self.starting_capital = cfg.get_profile_starting_capital(self.profile_name)
 
         fd, self._tmp_db = tempfile.mkstemp(suffix=".db", prefix="papertrader-backtest-")
         os.close(fd)
