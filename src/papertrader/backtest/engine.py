@@ -272,6 +272,19 @@ class Backtester:
 
         log.info("Fetched history for %d/%d symbols (%d served from local cache, %d from network).",
                   len(self._history), len(self.universe), cache_hits, len(self._history) - cache_hits)
+        missing = [s for s in self.universe if s not in self._history]
+        if missing:
+            # Loud, and named. Unresolvable tickers are otherwise invisible --
+            # yfinance logs each as a stray ERROR line and the universe just
+            # quietly shrinks, so a stale alias looks identical to a real
+            # delisting and nobody notices the strategy is screening fewer
+            # names than intended.
+            log.warning(
+                "%d/%d universe symbols had no usable price data and were skipped: %s. "
+                "Some may be stale tickers rather than delistings -- run "
+                "`python main.py validate-universe` to check and repair them.",
+                len(missing), len(self.universe), ", ".join(missing),
+            )
 
     # ------------------------------------------------------------------
     def _quote_for(self, symbol: str, history_upto: pd.DataFrame) -> Quote | None:

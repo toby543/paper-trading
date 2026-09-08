@@ -250,6 +250,56 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         print(f"\nEquity curve written to {args.export}")
 
 
+def cmd_validate_universe(args: argparse.Namespace) -> None:
+    cfg = Config.load(args.config)
+    _setup_logging(cfg)
+    from .data.universe import load_universe
+    from .data.universe_doctor import apply_report, diagnose
+
+    path = args.file or cfg.universe_file
+    symbols = load_universe(path)
+    print(f"Checking {len(symbols)} symbols in {path} against Yahoo Finance "
+          f"(paced, so this takes a couple of minutes)...")
+
+    def progress(current: int, total: int) -> None:
+        if current % 50 == 0 or current == total:
+            print(f"  {current}/{total} checked", flush=True)
+
+    report = diagnose(symbols, on_progress=progress)
+
+    print()
+    print(f"Resolved:    {len(report.ok)}/{len(symbols)}")
+    if report.duplicates:
+        print(f"\nStale aliases ({len(report.duplicates)}) -- the live ticker is ALREADY in "
+              f"the universe, so these are dead entries, not missing companies:")
+        for stale, existing in report.duplicates:
+            print(f"  {stale:<14} -> already present as {existing}")
+    if report.renamed:
+        print(f"\nRenamed ({len(report.renamed)}) -- replacement verified against Yahoo:")
+        for old_sym, new_sym in report.renamed:
+            print(f"  {old_sym:<14} -> {new_sym}")
+    if report.unresolved:
+        print(f"\nUnresolved ({len(report.unresolved)}) -- no working replacement known. "
+              f"Genuinely delisted/merged, or a ticker this tool doesn't have a mapping for:")
+        print("  " + ", ".join(report.unresolved))
+
+    if not report.needs_attention:
+        print("\nEvery symbol resolves. Nothing to fix.")
+        return
+
+    if not args.fix:
+        print("\nRe-run with --fix to apply the alias/rename changes above "
+              "(add --drop-unresolved to also remove the unresolved ones).")
+        return
+
+    changed = apply_report(path, report, drop_unresolved=args.drop_unresolved)
+    print(f"\nRewrote {path}: {changed} rows changed.")
+    if report.unresolved and not args.drop_unresolved:
+        print("Unresolved symbols were left in place -- removing a symbol on the strength "
+              "of one failed probe would quietly shrink the universe on a bad network day. "
+              "Use --drop-unresolved once you've confirmed they're really gone.")
+
+
 def cmd_setup_auth(args: argparse.Namespace) -> None:
     import getpass
 
@@ -352,6 +402,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Which profile's strategy to replay (default: the active_profile). "
                           "Each profile has its own strategy mode and parameters.")
     bt.set_defaults(func=cmd_backtest)
+
+    vu = sub.add_parser("validate-universe",
+                        help="Check every universe symbol against Yahoo Finance and repair stale tickers")
+    vu.add_argument("--file", default=None, help="Universe CSV to check (default: the configured one)")
+    vu.add_argument("--fix", action="store_true", help="Apply the verified alias/rename fixes")
+    vu.add_argument("--drop-unresolved", action="store_true",
+                    help="With --fix, also remove symbols that have no working replacement")
+    vu.set_defaults(func=cmd_validate_universe)
 
     setup_auth = sub.add_parser("setup-auth", help="Bootstrap the dashboard's first admin login (username + password)")
     setup_auth.add_argument("--force", action="store_true", help="Wipe ALL existing users and start over")
