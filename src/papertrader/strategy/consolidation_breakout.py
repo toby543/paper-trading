@@ -107,43 +107,65 @@ def _calculate_beta(history: pd.DataFrame, market_history: pd.DataFrame, window:
         return None
 
 
-def _detect_consolidation(history: pd.DataFrame, consolidation_days: int) -> tuple[float, float, bool] | None:
-    """Detect tight consolidation over recent days.
-    
-    Returns (high, low, is_consolidation) if consolidation found, else None.
-    A consolidation is tight if the range (high-low)/average_price is small."""
-    if len(history) < consolidation_days:
+def _detect_consolidation(
+    history: pd.DataFrame, consolidation_days: int, max_range_pct: float = 3.0
+) -> tuple[float, float, bool] | None:
+    """Detect a tight consolidation base in the days *before* the latest bar.
+
+    Returns (high, low, is_tight) for the base window, or None if there is
+    not enough history.
+
+    The base deliberately EXCLUDES the most recent bar, because that bar is
+    the one `_detect_breakout` tests against this high. Including it made
+    the breakout test unsatisfiable: `high` would be the max High over a
+    window containing today, and a bar's Close can never exceed its own
+    High, so `close > high` was false by construction on every symbol,
+    every day. That is why this strategy never produced a single buy.
+
+    Tightness is measured against the base's own average close rather than
+    the latest close, so a large breakout move on the final bar can't make
+    a wide base look narrow (or vice versa).
+    """
+    # consolidation_days base bars, plus the current bar that breaks out of them.
+    if len(history) < consolidation_days + 1:
         return None
-    
-    recent = history.tail(consolidation_days)
-    high = float(recent["High"].max())
-    low = float(recent["Low"].min())
-    close = float(history["Close"].iloc[-1])
-    
-    # Tight range check: range < 3% of current price
-    range_pct = (high - low) / close * 100.0 if close > 0 else 100.0
-    is_tight = range_pct < 3.0
-    
+
+    base = history.iloc[-(consolidation_days + 1):-1]
+    high = float(base["High"].max())
+    low = float(base["Low"].min())
+    reference = float(base["Close"].mean())
+
+    if not (reference > 0) or math.isnan(high) or math.isnan(low):
+        return None
+
+    range_pct = (high - low) / reference * 100.0
+    is_tight = range_pct < max_range_pct
+
     return (high, low, is_tight)
 
 
 def _detect_breakout(history: pd.DataFrame, consolidation_high: float, volume_multiple: float) -> bool:
-    """Detect if price broke above consolidation high on strong volume."""
+    """Detect if the latest bar closed above the base high on strong volume."""
     if len(history) < 2:
         return False
-    
+
     current_close = float(history["Close"].iloc[-1])
     current_volume = float(history["Volume"].iloc[-1])
-    
-    # Broke above consolidation high
-    if current_close <= consolidation_high:
+
+    # Broke above the consolidation high. `consolidation_high` comes from
+    # the bars before this one (see _detect_consolidation), so this is a
+    # real comparison rather than a bar against its own high.
+    if not (current_close > consolidation_high):
         return False
-    
-    # Volume check: current volume >= multiple of baseline average
-    avg_vol = _avg_volume(history, 20)
-    if avg_vol is None or avg_vol <= 0:
+
+    # Volume check: today's volume >= a multiple of the baseline average.
+    # The baseline excludes the breakout bar itself -- otherwise a big
+    # volume day inflates the very average it is being measured against,
+    # making the breakout look weaker the stronger it actually is.
+    avg_vol = _avg_volume(history.iloc[:-1], 20)
+    if avg_vol is None or avg_vol <= 0 or math.isnan(avg_vol):
         return False
-    
+
     return current_volume >= avg_vol * volume_multiple
 
 
@@ -156,22 +178,38 @@ def evaluate_candidate(
     index_history: pd.DataFrame | None = None,
     market_cap_cr: float | None = None,
     in_nifty_index: bool | None = None,
+    reasons: dict[str, int] | None = None,
 ) -> Candidate | None:
-    """Return a Candidate if symbol currently qualifies for consolidation breakout entry."""
-    
+    """Return a Candidate if symbol currently qualifies for consolidation breakout entry.
+
+    `reasons` is an optional counter the caller can pass in; each rejection
+    increments the filter that rejected the symbol. A breakout setup is rare
+    by design, so a scan finding nothing is normal -- but without this it is
+    indistinguishable from a scan that is silently broken, which is exactly
+    how the impossible breakout test in `_detect_consolidation` went
+    unnoticed. The scheduler logs the tally after every scan.
+    """
+
+    def reject(reason: str) -> None:
+        if reasons is not None:
+            reasons[reason] = reasons.get(reason, 0) + 1
+
     # Uptrend check: price > 50 DMA > 200 DMA
     fast_ma = _moving_average(history, cfg.get("fast_ma_days", 50))
     slow_ma = _moving_average(history, cfg.get("slow_ma_days", 200))
-    
+
     if fast_ma is None or slow_ma is None:
+        reject("insufficient_history")
         return None
     if not (quote.ltp > fast_ma > 0 and quote.ltp > slow_ma and fast_ma >= slow_ma):
+        reject("not_in_uptrend")
         return None
-    
+
     # Liquidity check
     if avg_daily_turnover < cfg.get("min_avg_daily_turnover_inr", 500000):
+        reject("illiquid")
         return None
-    
+
     # consolidation_days/volume_multiple live under strategy.consolidation_breakout
     # in config.yaml, same as the Phase 2 fields below -- read them from the
     # same nested sub-dict rather than the top level, where they'd silently
@@ -180,53 +218,62 @@ def evaluate_candidate(
 
     # Detect consolidation
     consolidation_days = cb_cfg.get("consolidation_days", 10)
-    consolidation = _detect_consolidation(history, consolidation_days)
+    max_range_pct = cb_cfg.get("max_consolidation_range_pct", 3.0)
+    consolidation = _detect_consolidation(history, consolidation_days, max_range_pct)
 
     if consolidation is None:
+        reject("insufficient_history")
         return None
 
     consolidation_high, consolidation_low, is_tight = consolidation
     if not is_tight:
+        reject("base_not_tight")
         return None
 
     # Detect breakout
     volume_multiple = cb_cfg.get("volume_multiple", 2.0)
     if not _detect_breakout(history, consolidation_high, volume_multiple):
+        reject("no_breakout")
         return None
 
     # Momentum check
     momentum = _momentum_return_pct(history, cfg.get("momentum_lookback_days", 21))
     if momentum is None or momentum < cfg.get("min_momentum_return_pct", 5.0):
+        reject("weak_momentum")
         return None
 
     # Phase 2: Market cap filter
     market_cap_min = cb_cfg.get("market_cap_min_cr")
     if market_cap_min and market_cap_cr and market_cap_cr < market_cap_min:
+        reject("market_cap_too_small")
         return None
-    
+
     # Phase 2: Beta filter
     beta = None
     beta_max = cb_cfg.get("beta_max")
     if index_history is not None and beta_max:
         beta = _calculate_beta(history, index_history)
         if beta is not None and beta > beta_max:
+            reject("beta_too_high")
             return None
-    
+
     # Phase 2: Index membership filter
     index_list = cb_cfg.get("index_list")
     if index_list and in_nifty_index is False:
+        reject("not_in_index")
         return None
-    
+
     # Score: higher momentum and closer to breakout level score higher
     distance_from_breakout = max(0, consolidation_high - quote.ltp)
     score = momentum - (distance_from_breakout / consolidation_high) * 10.0
-    
-    # Bonus for large-cap, low-beta stocks
-    if market_cap_cr and market_cap_cr > market_cap_min:
+
+    # Bonus for large-cap, low-beta stocks. Guard on market_cap_min: it is
+    # unset by default, and `float > None` is a TypeError, not False.
+    if market_cap_min and market_cap_cr and market_cap_cr > market_cap_min:
         score += min(2.0, (market_cap_cr - market_cap_min) / market_cap_min)
     if beta is not None and beta < 1.0:
         score += 1.0
-    
+
     return Candidate(
         symbol=symbol,
         ltp=quote.ltp,

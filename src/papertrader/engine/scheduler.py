@@ -214,6 +214,12 @@ class TradingEngine:
                     log.debug("Could not fetch index history for beta calculation: %s", exc)
 
             candidates = []
+            # Which filter rejected how many symbols this scan. A breakout
+            # setup is genuinely rare, so zero candidates is often correct --
+            # but "correctly found nothing" and "silently broken" look
+            # identical without this, so log the tally either way.
+            reasons: dict[str, int] = {}
+            scanned = 0
             for symbol in self.universe:
                 if symbol in exclude_symbols:
                     continue
@@ -223,8 +229,10 @@ class TradingEngine:
                     turnover = self.data.get_avg_daily_turnover(symbol, history=history)
                 except DataUnavailableError as exc:
                     log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
                     continue
 
+                scanned += 1
                 # Phase 2: Market cap and index membership would be fetched here
                 # For now, pass None and they default to no filter
                 try:
@@ -233,16 +241,23 @@ class TradingEngine:
                         index_history=index_history,
                         market_cap_cr=None,  # TODO: fetch from NSE metadata
                         in_nifty_index=None,  # TODO: check against Nifty 50/Next 50 lists
+                        reasons=reasons,
                     )
                 except Exception as exc:  # noqa: BLE001 - one symbol's malformed data (e.g. an
                     # unexpected column shape from the data source) must never take down the
                     # whole scan -- let alone the engine's entire background thread, which has
                     # no other safety net if this call is left unguarded.
                     log.warning("consolidation_breakout: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
                     continue
                 if cand:
                     candidates.append(cand)
 
+            log.info(
+                "consolidation_breakout scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
             return consolidation_breakout.rank_candidates(candidates)
 
         # Default: 52w_high strategy
