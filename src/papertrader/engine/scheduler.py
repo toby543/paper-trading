@@ -195,7 +195,13 @@ class TradingEngine:
                     log.debug("Skipping %s: %s", symbol, exc)
                     continue
                 universe_data.append((symbol, quote, history, turnover))
-            return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
+            try:
+                return select_cross_sectional_candidates(universe_data, self.strategy_cfg)
+            except Exception as exc:  # noqa: BLE001 - see the consolidation_breakout branch below:
+                # a bug or malformed data here must not kill this engine's entire background
+                # thread -- fail this one scan and let the next one try again instead.
+                log.error("cross_sectional_momentum: scan failed, skipping this cycle: %s", exc)
+                return []
 
         if mode == "consolidation_breakout":
             # Fetch index history for beta calculation if Phase 2 screening is enabled
@@ -221,12 +227,19 @@ class TradingEngine:
 
                 # Phase 2: Market cap and index membership would be fetched here
                 # For now, pass None and they default to no filter
-                cand = consolidation_breakout.evaluate_candidate(
-                    symbol, quote, history, turnover, self.strategy_cfg,
-                    index_history=index_history,
-                    market_cap_cr=None,  # TODO: fetch from NSE metadata
-                    in_nifty_index=None,  # TODO: check against Nifty 50/Next 50 lists
-                )
+                try:
+                    cand = consolidation_breakout.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg,
+                        index_history=index_history,
+                        market_cap_cr=None,  # TODO: fetch from NSE metadata
+                        in_nifty_index=None,  # TODO: check against Nifty 50/Next 50 lists
+                    )
+                except Exception as exc:  # noqa: BLE001 - one symbol's malformed data (e.g. an
+                    # unexpected column shape from the data source) must never take down the
+                    # whole scan -- let alone the engine's entire background thread, which has
+                    # no other safety net if this call is left unguarded.
+                    log.warning("consolidation_breakout: skipping %s after evaluation error: %s", symbol, exc)
+                    continue
                 if cand:
                     candidates.append(cand)
 
@@ -255,7 +268,12 @@ class TradingEngine:
                 log.debug("Skipping %s: %s", symbol, exc)
                 continue
 
-            cand = eval_52w(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
+            try:
+                cand = eval_52w(symbol, quote, history, turnover, self.strategy_cfg, index_history=index_history)
+            except Exception as exc:  # noqa: BLE001 - one symbol's malformed data must never
+                # take down the whole scan, let alone this engine's entire background thread.
+                log.warning("52w_high: skipping %s after evaluation error: %s", symbol, exc)
+                continue
             if cand:
                 candidates.append(cand)
 
@@ -373,37 +391,49 @@ class TradingEngine:
         last_full_scan = 0.0
         log.info("Autonomous trading engine started. Universe size=%d", len(self.universe))
         while True:
-            # Hot-reload config if it has changed (e.g., via dashboard).
-            # Held under the lock alongside reload_profile()'s own swap so
-            # the two can't interleave and leave stale values in place.
-            if self.cfg.reload():
-                strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
+            try:
+                # Hot-reload config if it has changed (e.g., via dashboard).
+                # Held under the lock alongside reload_profile()'s own swap so
+                # the two can't interleave and leave stale values in place.
+                if self.cfg.reload():
+                    strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
+                    with self._state_lock:
+                        self.strategy_cfg = strategy_cfg
+                        self.risk_cfg = self.cfg.get("risk", default={})
+                        self.regime_cfg = self.cfg.get("regime", default={})
+                        self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
+                        self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
+                        self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                        self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
+                    log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
+
+                now_dt = self.calendar.now()
+                if not self.calendar.is_market_open(now_dt):
+                    log.info("Market closed (%s). Sleeping 5 minutes...", now_dt.strftime("%Y-%m-%d %H:%M %Z"))
+                    time.sleep(300)
+                    continue
+
+                # Held for the whole iteration so a concurrent reload_profile()
+                # (from a Flask request thread, single-profile mode only)
+                # can't swap self.storage/self.broker/self.strategy_cfg out
+                # from under a scan that's already in progress.
                 with self._state_lock:
-                    self.strategy_cfg = strategy_cfg
-                    self.risk_cfg = self.cfg.get("risk", default={})
-                    self.regime_cfg = self.cfg.get("regime", default={})
-                    self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
-                    self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-                    self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
-                    self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
-                log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
+                    self.check_exits()
+                    self.mark_to_market()
 
-            now_dt = self.calendar.now()
-            if not self.calendar.is_market_open(now_dt):
-                log.info("Market closed (%s). Sleeping 5 minutes...", now_dt.strftime("%Y-%m-%d %H:%M %Z"))
-                time.sleep(300)
-                continue
+                    if time.time() - last_full_scan >= scan_interval:
+                        self.scan_for_entries()
+                        last_full_scan = time.time()
 
-            # Held for the whole iteration so a concurrent reload_profile()
-            # (from a Flask request thread, single-profile mode only)
-            # can't swap self.storage/self.broker/self.strategy_cfg out
-            # from under a scan that's already in progress.
-            with self._state_lock:
-                self.check_exits()
-                self.mark_to_market()
-
-                if time.time() - last_full_scan >= scan_interval:
-                    self.scan_for_entries()
-                    last_full_scan = time.time()
-
-            time.sleep(exit_interval)
+                time.sleep(exit_interval)
+            except Exception:
+                # This loop runs in its own background thread (one per
+                # profile in multi_profile_mode) with nothing else
+                # supervising it -- an uncaught exception here would
+                # silently kill that profile's engine forever (the thread
+                # just ends; nothing restarts it, nothing scans for that
+                # profile again until the whole process is restarted),
+                # while every other profile keeps trading normally. Log
+                # the full traceback and keep the loop alive instead.
+                log.exception("Unexpected error in trading loop for profile %s; will retry after a short pause", self.profile_name)
+                time.sleep(60)
