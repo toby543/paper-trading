@@ -78,6 +78,16 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
 
+    {"path": ("strategy", "pivot_supertrend", "atr_period"), "type": "int", "min": 2, "max": 50,
+     "group": "Pivot point + SuperTrend", "label": "ATR period", "unit": "days",
+     "desc": "Wilder-smoothed ATR window the SuperTrend bands are built on. Only applies when strategy mode is pivot_supertrend."},
+    {"path": ("strategy", "pivot_supertrend", "supertrend_multiplier"), "type": "float", "min": 0.5, "max": 10.0,
+     "group": "Pivot point + SuperTrend", "label": "SuperTrend multiplier", "unit": "× ATR",
+     "desc": "Band width either side of the midpoint. Wider means fewer, more decisive flips (less whipsaw, later entries)."},
+    {"path": ("strategy", "pivot_supertrend", "min_pct_above_pivot"), "type": "float", "min": 0, "max": 50,
+     "group": "Pivot point + SuperTrend", "label": "Min % above pivot", "unit": "%",
+     "desc": "How far above the prior day's pivot point a SuperTrend flip must occur to qualify."},
+
     {"path": ("regime", "enabled"), "type": "bool",
      "group": "Market regime", "label": "Regime filter", "unit": "",
      "desc": "Block new entries while the benchmark index is below its own moving average."},

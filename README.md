@@ -13,11 +13,13 @@ local SQLite database.
 
 ## How it works
 
-There are two selectable entry strategies (`strategy.mode` in
+There are four selectable entry strategies (`strategy.mode` in
 `config.yaml`, or the "Strategy mode" field in the dashboard's Edit
-Settings panel). Both share the same liquidity/price-range/trend
-filters, the market regime filter, and all exit rules below — they only
-differ in how a stock qualifies as a BUY.
+Settings panel; `multi_profile_mode: true` runs all four simultaneously,
+each against its own isolated ledger). All share the same
+liquidity/price-range filters, the market regime filter, and (except
+where noted) the exit rules below — they only differ in how a stock
+qualifies as a BUY.
 
 **Strategy — 52-Week-High Momentum** (`strategy.mode: 52w_high`, the default):
 A stock is bought when it is (1) trading within a configurable band of
@@ -59,19 +61,55 @@ bought purely for being the least-bad decliner in a falling universe.
 This mode tends to be more robust across different market regimes than
 proximity-to-52w-high (which favors strongly trending bull markets)
 since it ranks stocks relative to their peers rather than against a
-fixed level. Recommended if you want to compare the two head-to-head:
+fixed level. Recommended if you want to compare strategies head-to-head:
 switch the mode, then run the dashboard's Backtest panel (or `python
-main.py backtest`) against the same date range for both.
+main.py backtest`) against the same date range for each.
+
+**Strategy — Consolidation Breakout** (`strategy.mode: consolidation_breakout`):
+looks for a stock in a clear uptrend (price above its 50- and 200-day
+moving averages) that has spent `strategy.consolidation_breakout.consolidation_days`
+(default 10) trading in a tight range — no more than `max_consolidation_range_pct`
+(default 3%) of its own average price, high to low — and then breaks
+above that range's high on volume at least `volume_multiple` (default
+2×) its own 20-day baseline. The consolidation window is always the
+days *before* the breakout bar, never including it — a base measured
+over a window containing today's own high would make "breaks above the
+base" impossible by construction. Ranked by momentum plus proximity to
+the breakout level; the same liquidity and price-range filters apply.
+Exits reuse the same hard-stop/trailing-stop/take-profit rules as every
+other strategy, plus its own momentum-breakdown check (close below the
+50-day moving average).
+
+**Strategy — Pivot Point + SuperTrend** (`strategy.mode: pivot_supertrend`):
+a classical retail swing-trading combo, adapted to this app's daily-bar
+cadence (not true intraday day-trading, which would need a different
+data source and a much shorter scan interval across the whole engine).
+The prior day's floor-trader pivot point — `(High + Low + Close) / 3` —
+sets the day's bullish/bearish bias; a stock only qualifies while
+trading above it. The actual entry trigger is a **SuperTrend flip**: an
+ATR-based trailing band (Wilder-smoothed, `strategy.pivot_supertrend.atr_period`
+days, `supertrend_multiplier` ATRs wide — the standard SuperTrend
+definition) that hugs price from below in an uptrend and above it in a
+downtrend, switching sides whenever price closes through it. A *fresh*
+flip from downtrend to uptrend is the buy signal, not merely "currently
+above the line" (which would re-qualify every day of an
+already-established uptrend). Ranked by how decisively price cleared the
+line, in ATR units, plus how far above the pivot it's trading. Exits
+reuse the same hard-stop/trailing-stop/take-profit rules as every other
+strategy, plus its own trigger — the SuperTrend line flipping back to a
+downtrend — in place of the moving-average momentum-breakdown check the
+other strategies use.
 
 Positions are exited on a **hard stop-loss** from entry, a **trailing
-stop** from the highest close since entry, a **momentum breakdown**
-(close falls below the 50-day moving average), or an optional **take
-profit** target — whichever comes first. Take profit is off by default
-(`risk.take_profit_pct: 0`): momentum strategies are usually better
-served by the trailing stop's "let winners run" behavior than by
-capping upside at a fixed target, but it's there if you want a hard
-sell target anyway. Exits always apply regardless of market regime
-(see below) — only new entries are gated.
+stop** from the highest close since entry, a strategy-specific
+**trend-reversal exit** (a moving-average momentum breakdown for
+52w_high/cross_sectional/consolidation_breakout, a SuperTrend flip for
+pivot_supertrend), or an optional **take profit** target — whichever
+comes first. Take profit is off by default (`risk.take_profit_pct: 0`):
+momentum strategies are usually better served by the trailing stop's
+"let winners run" behavior than by capping upside at a fixed target, but
+it's there if you want a hard sell target anyway. Exits always apply
+regardless of market regime (see below) — only new entries are gated.
 
 **Re-entry cooldown:** without a safeguard here, a stock stopped out on
 a small dip that still passes the entry filters would get immediately
@@ -117,7 +155,10 @@ src/papertrader/
   config.py                  YAML config loader
   data/nse_client.py         NSE + Yahoo Finance data access, with fallback
   data/universe.py           Universe CSV loader
-  strategy/momentum_52w_high.py   Entry/exit signal logic
+  strategy/momentum_52w_high.py   52w_high entry/exit signal logic
+  strategy/cross_sectional_momentum.py   cross_sectional_momentum entry logic
+  strategy/consolidation_breakout.py     consolidation_breakout entry/exit logic
+  strategy/pivot_supertrend.py    pivot_supertrend entry/exit logic
   portfolio/{models,storage,broker}.py   Paper execution engine + persistence
   risk/risk_manager.py       Position sizing & exposure limits
   engine/{market_hours,scheduler}.py     Autonomous scan loop
@@ -348,8 +389,10 @@ Two supported ways to keep it running unattended:
 
 All thresholds live in `config.yaml`:
 
-- `strategy.mode` — `52w_high` (default) or `cross_sectional_momentum` (see above). A restart is required to switch, like any other engine-construction-time setting.
+- `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, or `pivot_supertrend` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
 - `strategy.cross_sectional.lookback_days` / `skip_recent_days` / `top_pct` — only used in `cross_sectional_momentum` mode: the trailing-return ranking window and the top percentile bought.
+- `strategy.consolidation_breakout.consolidation_days` / `max_consolidation_range_pct` / `volume_multiple` — only used in `consolidation_breakout` mode: the base period, how tight it must be, and the breakout volume threshold.
+- `strategy.pivot_supertrend.atr_period` / `supertrend_multiplier` / `min_pct_above_pivot` — only used in `pivot_supertrend` mode: the ATR window, SuperTrend band width, and how far above the prior day's pivot a flip must occur.
 - `strategy.proximity_to_52w_high_pct` — how close to the 52-week high a stock must be to qualify (52w_high mode only).
 - `strategy.min_momentum_return_pct` / `momentum_lookback_days` — trailing momentum filter.
 - `strategy.fast_ma_days` / `slow_ma_days` — trend-confirmation moving averages.
@@ -421,10 +464,12 @@ to a CSV for charting elsewhere.
 pytest
 ```
 
-Tests cover the strategy's entry/exit rules (using synthetic price
-series, no network needed), the paper broker's order/cash/position
-bookkeeping, the NSE market-hours calendar, and the backtest's summary
-statistics (drawdown, CAGR, win rate).
+Tests cover all four strategies' entry/exit rules (using synthetic price
+series, no network needed), the paper broker's order/cash/position/trade
+bookkeeping, the NSE market-hours calendar, the backtest's summary
+statistics (drawdown, CAGR, win rate), universe-symbol repair
+(`validate-universe`), and the autonomous engine's threading/locking
+behavior.
 
 ## Notes & limitations
 

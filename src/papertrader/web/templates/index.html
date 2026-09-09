@@ -539,7 +539,7 @@
       <span class="pb-value mono" style="color:var(--good);" title="{{ active_state_file }}">{{ active_state_file_short }}</span>
     </div>
     {% if multi_profile_mode %}
-    <span class="pb-multi" title="All profiles are trading concurrently in their own background threads; the dropdown only changes what you're viewing."><span class="dot"></span>All 3 profiles trading in parallel</span>
+    <span class="pb-multi" title="All profiles are trading concurrently in their own background threads; the dropdown only changes what you're viewing."><span class="dot"></span>All {{ profiles|length }} profiles trading in parallel</span>
     {% endif %}
   </div>
   {% endif %}

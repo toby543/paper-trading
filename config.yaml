@@ -9,6 +9,7 @@
 # - 52w_high: Your primary account (existing trades preserved here)
 # - cross_sectional: Independent copy of capital for cross-sectional momentum
 # - consolidation_breakout: Independent copy of capital for consolidation breakout
+# - pivot_supertrend: Independent copy of capital for the pivot point + SuperTrend combo
 #
 # Each profile also has its own `strategy:` block below, letting it tune its
 # own moving averages, momentum thresholds, etc. independently of the other
@@ -102,6 +103,32 @@ profiles:
         # Breakout bar's volume must be at least this multiple of the
         # 20-day average volume of the bars before it.
         volume_multiple: 2.0
+
+  pivot_supertrend:
+    display_name: "Pivot Point + SuperTrend"
+    # Fresh ledger independent from the other three profiles
+    state_file: data/state_pivot_supertrend.db
+    starting_capital: 100000.0
+    strategy_mode: pivot_supertrend
+    # This profile starts fresh with new capital
+    strategy:
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
+      pivot_supertrend:
+        # Wilder-smoothed ATR window the SuperTrend bands are built on.
+        atr_period: 10
+        # Band width, in ATRs, either side of the (High+Low)/2 midpoint --
+        # the standard SuperTrend default. Wider = fewer, more decisive
+        # flips (less whipsaw, later entries); narrower = more, earlier,
+        # noisier flips.
+        supertrend_multiplier: 3.0
+        # A SuperTrend flip alone qualifies at min_pct_above_pivot: 0 (any
+        # amount above the prior day's pivot). Raise this to require the
+        # flip to happen with more room above the pivot, i.e. a more
+        # decisively bullish-biased day, not just barely above it.
+        min_pct_above_pivot: 0.0
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile

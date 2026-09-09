@@ -39,7 +39,7 @@ from ..strategy.momentum_52w_high import (
     is_market_in_uptrend,
     rank_candidates as rank_52w,
 )
-from ..strategy import consolidation_breakout
+from ..strategy import consolidation_breakout, pivot_supertrend
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
@@ -364,6 +364,8 @@ class Backtester:
             cfg = {**self.risk_cfg, **self.strategy_cfg}
             if mode == "consolidation_breakout":
                 should_exit, reason = consolidation_breakout.check_exit(pos, quote, history_upto, cfg)
+            elif mode == "pivot_supertrend":
+                should_exit, reason = pivot_supertrend.check_exit(pos, quote, history_upto, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
@@ -437,6 +439,26 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = consolidation_breakout.rank_candidates(candidates)
+        elif mode == "pivot_supertrend":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = pivot_supertrend.evaluate_candidate(
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
+                    reasons=self._entry_rejections,
+                )
+                if cand:
+                    candidates.append(cand)
+            ranked = pivot_supertrend.rank_candidates(candidates)
         else:
             candidates: list[Candidate52w] = []
             for symbol in self.universe:
