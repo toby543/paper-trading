@@ -162,6 +162,11 @@ class Backtester:
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = cfg.get("risk", default={})
         self.regime_cfg = cfg.get("regime", default={})
+        # Bounds every yfinance .history() call below -- without it, a
+        # stalled connection on any one symbol hangs the whole fetch loop
+        # indefinitely with no exception raised (the surrounding try/except
+        # only helps once something actually raises).
+        self._fetch_timeout = cfg.get("data_source", "request_timeout_seconds", default=15)
         self.universe = load_universe(cfg.universe_file)
 
         # Make sure the fetch window is wide enough that every lookback this
@@ -244,7 +249,7 @@ class Backtester:
                     _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
                 last_call = _time.time()
                 try:
-                    df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end)
+                    df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
                     if not df.empty:
                         df.index = df.index.tz_localize(None)
                         merged = price_cache.save(symbol, df, existing=cached)
@@ -262,7 +267,7 @@ class Backtester:
             self._index_history = price_cache.slice_range(cached_idx, fetch_start, fetch_end)
         else:
             try:
-                idx = yf.Ticker(index_symbol).history(start=fetch_start, end=fetch_end)
+                idx = yf.Ticker(index_symbol).history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
                 if not idx.empty:
                     idx.index = idx.index.tz_localize(None)
                     merged_idx = price_cache.save(index_symbol, idx, existing=cached_idx)

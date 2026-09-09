@@ -151,7 +151,18 @@ class MarketDataClient:
 
         self._throttle_yfinance()
         ticker = yf.Ticker(symbol + ".NS")
-        hist = ticker.history(period="1y", interval="1d")
+        # `timeout` bounds the underlying HTTP call the same way self.timeout
+        # already bounds every NSE request -- without it, a stalled
+        # connection here hangs this call forever. Since this runs inside
+        # the autonomous engine's single background thread with no
+        # supervisor, an unbounded hang doesn't raise (so the resilience
+        # try/except in run_forever() never fires) and doesn't scan again
+        # (so nothing updates last_scan_at) -- it just freezes that
+        # profile's trading silently, indefinitely, with zero log output,
+        # until the process is restarted by hand. Exactly the failure
+        # mode behind an "Engine may have stopped scanning" warning that
+        # doesn't resolve on its own.
+        hist = ticker.history(period="1y", interval="1d", timeout=self.timeout)
         if hist.empty:
             raise DataUnavailableError(f"yfinance returned no history for {symbol}")
         last = hist.iloc[-1]
@@ -177,7 +188,18 @@ class MarketDataClient:
         import yfinance as yf
 
         self._throttle_yfinance()
-        df = yf.Ticker(symbol + ".NS").history(period=period, interval="1d")
+        try:
+            # timeout=self.timeout: see the comment in _quote_from_yfinance --
+            # without it, a stalled connection hangs this call forever with
+            # no exception and no log line, which freezes the whole
+            # autonomous loop (this call sits in check_exits()'s per-symbol
+            # loop, ahead of scan_for_entries() in the same cycle).
+            df = yf.Ticker(symbol + ".NS").history(period=period, interval="1d", timeout=self.timeout)
+        except Exception as exc:  # noqa: BLE001 - a timeout/network error on ONE symbol
+            # must be a normal "skip this symbol" outcome (matching every other
+            # DataUnavailableError call site), never an uncaught exception that
+            # aborts every other position's/symbol's check for this cycle.
+            raise DataUnavailableError(f"No history for {symbol}: {exc}") from exc
         if df.empty:
             raise DataUnavailableError(f"No history for {symbol}")
         df.attrs["_fetched_at"] = now
@@ -195,7 +217,10 @@ class MarketDataClient:
         import yfinance as yf
 
         self._throttle_yfinance()
-        df = yf.Ticker(index_symbol).history(period=period, interval="1d")
+        try:
+            df = yf.Ticker(index_symbol).history(period=period, interval="1d", timeout=self.timeout)
+        except Exception as exc:  # noqa: BLE001 - see get_history's comment above
+            raise DataUnavailableError(f"No history for index {index_symbol}: {exc}") from exc
         if df.empty:
             raise DataUnavailableError(f"No history for index {index_symbol}")
         df.attrs["_fetched_at"] = now
