@@ -144,17 +144,53 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
                           "A small move down would trigger an exit on the next check.",
             })
 
-    # --- Idle capital ---
+    # --- Idle capital / why the last scan didn't buy anything ---
+    # Before scan diagnostics existed, this could only ever shrug ("could
+    # be either reason"). TradingEngine now records what actually
+    # happened on its last scan (see get_scan_diagnostics's docstring), so
+    # give the specific answer when we have one and only fall back to the
+    # generic guess before this profile's first scan has completed.
+    diag = engine.get_scan_diagnostics()
     free_slots = max_positions - len(position_rows)
     cash_pct = (cash / total_equity * 100.0) if total_equity > 0 else 0.0
-    if market_open and free_slots > 0 and cash_pct >= 60.0:
+
+    if diag and diag["status"] == "regime_blocked":
+        index_symbol = engine.regime_cfg.get("index_symbol", "^NSEI")
+        ma_days = engine.regime_cfg.get("ma_days", 200)
+        insights.append({
+            "level": "info",
+            "title": "Market regime filter blocked the last scan",
+            "detail": f"{index_symbol} is trading below its {ma_days}-day average, so no new entries "
+                      "were attempted. Existing positions still exit normally regardless of regime.",
+        })
+    elif diag and diag["status"] == "scan_failed":
+        insights.append({
+            "level": "warn",
+            "title": f"Last {diag['mode']} scan failed",
+            "detail": "The scan hit an error partway through and found nothing this cycle. Check "
+                      "data/papertrader.log for the cause -- the next scheduled scan will try again.",
+        })
+    elif diag and diag["status"] == "scanned" and diag["candidates"] == 0 and diag["scanned"] > 0:
+        top = list(diag["rejections"].items())[:3]
+        top_str = ", ".join(f"{k} ({v:,})" for k, v in top) if top else "none recorded"
+        insights.append({
+            "level": "info",
+            "title": f"Last scan found 0 candidates ({diag['scanned']} symbols evaluated)",
+            "detail": f"The filters that rejected the most: {top_str}. Zero candidates is often correct "
+                      "-- a qualifying setup is rare by design -- rather than a sign anything is broken.",
+        })
+    elif market_open and free_slots > 0 and cash_pct >= 60.0:
+        # No scan diagnostics recorded yet (e.g. right after a restart,
+        # before this profile's first cycle) -- fall back to the old,
+        # less specific heuristic rather than saying nothing at all.
         insights.append({
             "level": "info",
             "title": f"{cash_pct:.0f}% in cash with {free_slots} position slot(s) free",
             "detail": "Either nothing is currently passing this strategy's entry filters, or the market "
                       "regime filter is blocking new buys. Both are normal in a weak tape.",
         })
-    elif free_slots == 0:
+
+    if free_slots == 0:
         insights.append({
             "level": "info",
             "title": "Fully invested",

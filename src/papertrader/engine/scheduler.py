@@ -38,6 +38,16 @@ class TradingEngine:
         # with this engine's own run_forever() loop reading/writing them
         # from a background thread at the same time.
         self._state_lock = threading.Lock()
+        # Snapshot of the most recent scan_for_entries()/find_candidates()
+        # call, read by the dashboard's Insights panel so "why isn't this
+        # profile buying anything" is answerable at a glance instead of
+        # only by grepping data/papertrader.log. In-memory only -- it
+        # describes "as of the last scan this process ran", which is
+        # meaningless to carry across a restart; the next scan after one
+        # repopulates it within a cycle. Guarded by _state_lock since it's
+        # written from this engine's background thread and read from a
+        # Flask request thread.
+        self._last_scan_diagnostics: dict | None = None
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
             market_open=cfg.get("engine", "market_open", default="09:15"),
@@ -166,6 +176,34 @@ class TradingEngine:
                 except ValueError as exc:
                     log.error("Failed to sell %s: %s", symbol, exc)
 
+    def _record_scan_diagnostics(
+        self, mode: str, status: str, scanned: int = 0,
+        candidates: int = 0, reasons: dict[str, int] | None = None,
+    ) -> None:
+        """Record a snapshot of the scan that just ran/short-circuited.
+        `status` is one of "portfolio_full", "regime_blocked", "scanned",
+        or "scan_failed" -- see get_scan_diagnostics()'s docstring for how
+        the dashboard uses each."""
+        with self._state_lock:
+            self._last_scan_diagnostics = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "mode": mode,
+                "status": status,
+                "scanned": scanned,
+                "candidates": candidates,
+                "rejections": dict(sorted((reasons or {}).items(), key=lambda kv: -kv[1])),
+            }
+
+    def get_scan_diagnostics(self) -> dict | None:
+        """The most recent scan snapshot recorded by _record_scan_diagnostics,
+        or None before this engine has completed its first scan. Read by
+        data_api.py's _build_insights() to surface "why isn't this profile
+        buying anything" -- a barren scan (status="scanned", candidates=0)
+        and a regime-blocked one look identical from the outside otherwise,
+        and both used to be visible only in the log file."""
+        with self._state_lock:
+            return dict(self._last_scan_diagnostics) if self._last_scan_diagnostics else None
+
     def find_candidates(self, exclude_symbols: set[str] | None = None) -> list:
         """Evaluate the whole universe against the strategy right now and
         return every currently-qualifying candidate, ranked. Read-only --
@@ -204,11 +242,14 @@ class TradingEngine:
                     len(universe_data), len(ranked),
                     ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
                 )
+                self._record_scan_diagnostics(mode, "scanned", scanned=len(universe_data),
+                                              candidates=len(ranked), reasons=reasons)
                 return ranked
             except Exception as exc:  # noqa: BLE001 - see the consolidation_breakout branch below:
                 # a bug or malformed data here must not kill this engine's entire background
                 # thread -- fail this one scan and let the next one try again instead.
                 log.error("cross_sectional_momentum: scan failed, skipping this cycle: %s", exc)
+                self._record_scan_diagnostics(mode, "scan_failed", scanned=len(universe_data))
                 return []
 
         if mode == "consolidation_breakout":
@@ -266,6 +307,8 @@ class TradingEngine:
                 scanned, len(candidates),
                 ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
             )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
             return consolidation_breakout.rank_candidates(candidates)
 
         # Default: 52w_high strategy
@@ -311,6 +354,8 @@ class TradingEngine:
             scanned, len(candidates),
             ", ".join(f"{k}={v}" for k, v in sorted(reasons_52w.items(), key=lambda kv: -kv[1])) or "none",
         )
+        self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                      candidates=len(candidates), reasons=reasons_52w)
         return rank_52w(candidates)
 
     def _recently_sold_symbols(self) -> set[str]:
@@ -332,11 +377,13 @@ class TradingEngine:
         # would show a permanently stale/"not yet scanned" timestamp on the
         # dashboard even while the engine keeps running normally.
         self.storage.set_last_scan_at(datetime.now().isoformat(timespec="seconds"))
+        mode = self.strategy_cfg.get("mode", "52w_high")
 
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))
         if room <= 0:
             log.info("Max open positions reached (%d); skipping entry scan", self.risk.max_open_positions)
+            self._record_scan_diagnostics(mode, "portfolio_full")
             return
 
         if not self.market_regime_ok():
@@ -344,9 +391,9 @@ class TradingEngine:
                 "Market regime filter: %s below its %sd average; skipping new entries this scan",
                 self.regime_cfg.get("index_symbol", "^NSEI"), self.regime_cfg.get("ma_days", 200),
             )
+            self._record_scan_diagnostics(mode, "regime_blocked")
             return
 
-        mode = self.strategy_cfg.get("mode", "52w_high")
         exclude = set(positions) | self._recently_sold_symbols()
         ranked = self.find_candidates(exclude_symbols=exclude)
         max_new = min(room, self.strategy_cfg.get("max_new_positions_per_scan", 3))
