@@ -44,9 +44,23 @@ class TradingEngine:
         # only by grepping data/papertrader.log. In-memory only -- it
         # describes "as of the last scan this process ran", which is
         # meaningless to carry across a restart; the next scan after one
-        # repopulates it within a cycle. Guarded by _state_lock since it's
-        # written from this engine's background thread and read from a
-        # Flask request thread.
+        # repopulates it within a cycle.
+        #
+        # Deliberately guarded by its OWN lock, never _state_lock:
+        # run_forever() holds _state_lock for the whole
+        # check_exits()+mark_to_market()+scan_for_entries() block, and
+        # _record_scan_diagnostics() is called from inside that same call
+        # chain on that same thread. threading.Lock is not reentrant, so
+        # reusing _state_lock here would make the very first scan after
+        # every restart deadlock immediately and permanently on that
+        # thread -- and separately, every dashboard page load's
+        # get_scan_diagnostics() would then block for the full duration of
+        # whatever scan happens to be in progress, which is exactly the
+        # blocking behavior every build_* function in data_api.py is
+        # written to avoid. A dedicated lock only ever needs to be held for
+        # the instant it takes to copy a small dict, so contention here is
+        # never a real concern the way it is for _state_lock.
+        self._scan_diagnostics_lock = threading.Lock()
         self._last_scan_diagnostics: dict | None = None
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
@@ -184,7 +198,7 @@ class TradingEngine:
         `status` is one of "portfolio_full", "regime_blocked", "scanned",
         or "scan_failed" -- see get_scan_diagnostics()'s docstring for how
         the dashboard uses each."""
-        with self._state_lock:
+        with self._scan_diagnostics_lock:
             self._last_scan_diagnostics = {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "mode": mode,
@@ -201,7 +215,7 @@ class TradingEngine:
         buying anything" -- a barren scan (status="scanned", candidates=0)
         and a regime-blocked one look identical from the outside otherwise,
         and both used to be visible only in the log file."""
-        with self._state_lock:
+        with self._scan_diagnostics_lock:
             return dict(self._last_scan_diagnostics) if self._last_scan_diagnostics else None
 
     def find_candidates(self, exclude_symbols: set[str] | None = None) -> list:
