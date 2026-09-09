@@ -325,6 +325,8 @@
   .ticker-detail { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; }
   .ticker-pnl { font-size: 11.5px; margin-left: auto; white-space: nowrap; }
   .ticker-reason { font-size: 11px; color: var(--ink-faint); line-height: 1.4; overflow-wrap: anywhere; }
+  .ticker-rationale { font-size: 11.5px; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; font-style: italic; margin-top: 2px; }
+  .ticker-rationale .ai-badge { font-style: normal; font-weight: 700; font-size: 9px; letter-spacing: 0.04em; color: var(--accent-ink); background: var(--accent-grad); border-radius: 4px; padding: 1px 5px; margin-right: 5px; vertical-align: 1px; }
   .ticker-empty { padding: 28px 16px; text-align: center; color: var(--ink-faint); font-size: 12.5px; }
 
   .badge-side { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 6px; }
@@ -1088,6 +1090,7 @@ function renderTrades(trades) {
         ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}₹${fmt(t.realized_pnl)}</span>` : ""}
       </div>
       <div class="ticker-reason">${t.reason}</div>
+      ${t.rationale ? `<div class="ticker-rationale"><span class="ai-badge">AI</span>${escapeText(t.rationale)}</div>` : ""}
     </div>
   `).join("");
 }

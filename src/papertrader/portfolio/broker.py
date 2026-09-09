@@ -60,7 +60,7 @@ class PaperBroker:
         self.storage.upsert_position(pos)
         self.storage.set_cash(cash - cost)
         trade = Trade(id=None, symbol=symbol, side="BUY", quantity=quantity, price=fill_price, charges=self.flat_charges_inr, reason=reason, timestamp=now)
-        self.storage.record_trade(trade)
+        trade.id = self.storage.record_trade(trade)
         log.info("BUY  %-10s qty=%-6d price=%-10.2f reason=%s", symbol, quantity, fill_price, reason)
         return trade
 
@@ -84,7 +84,7 @@ class PaperBroker:
 
         self.storage.set_cash(self.storage.get_cash() + proceeds)
         trade = Trade(id=None, symbol=symbol, side="SELL", quantity=quantity, price=fill_price, charges=self.flat_charges_inr, reason=reason, timestamp=now, realized_pnl=realized_pnl)
-        self.storage.record_trade(trade)
+        trade.id = self.storage.record_trade(trade)
         log.info("SELL %-10s qty=%-6d price=%-10.2f reason=%s", symbol, quantity, fill_price, reason)
         return trade
 

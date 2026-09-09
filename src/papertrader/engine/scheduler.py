@@ -24,6 +24,7 @@ from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
 from ..strategy import consolidation_breakout
+from ..intelligence.rationale import generate_buy_rationale
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -396,10 +397,28 @@ class TradingEngine:
                 if cand.volume_multiple is not None:
                     reason += f", volume {cand.volume_multiple:.1f}x baseline"
             try:
-                self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
+                trade = self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)
                 spent += cost_estimate
+                self._attach_rationale(trade.id, mode, cand.symbol, reason)
             except InsufficientFundsError as exc:
                 log.warning("Insufficient funds for %s: %s", cand.symbol, exc)
+
+    def _attach_rationale(self, trade_id: int | None, mode: str, symbol: str, reason: str) -> None:
+        """Best-effort: turn the structured `reason` already computed for a
+        BUY into one plain-English sentence and attach it to the trade
+        that's already been recorded. Runs only when intelligence.enabled
+        is set, and any failure here is swallowed by generate_buy_rationale
+        itself -- see intelligence/rationale.py's module docstring for why
+        this can never affect the trade it's decorating."""
+        if trade_id is None or not self.cfg.is_intelligence_enabled():
+            return
+        rationale = generate_buy_rationale(
+            symbol, mode, reason,
+            model=self.cfg.get_intelligence_model(),
+            timeout_seconds=self.cfg.get_intelligence_timeout_seconds(),
+        )
+        if rationale:
+            self.storage.set_trade_rationale(trade_id, rationale)
 
     def mark_to_market(self) -> None:
         quotes = {}

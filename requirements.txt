@@ -9,3 +9,8 @@ Flask>=3.0
 ruamel.yaml>=0.18
 pytest>=8.0
 
+# Optional: only needed if intelligence.enabled is set in config.yaml
+# (per-trade LLM rationale). The app runs fine without it -- rationale
+# generation is skipped and logged, never a hard error.
+anthropic>=0.40
+

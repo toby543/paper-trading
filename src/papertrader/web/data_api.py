@@ -268,6 +268,7 @@ def build_trades(engine, limit: int = 100) -> list[dict]:
             "value": round(t.gross_value, 2),
             "reason": t.reason,
             "realized_pnl": round(t.realized_pnl, 2) if t.realized_pnl is not None else None,
+            "rationale": t.rationale,
         }
         for t in trades
     ]

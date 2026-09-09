@@ -397,11 +397,14 @@ also prints the full trade log; `--export` saves the daily equity curve
 to a CSV for charting elsewhere.
 
 **Caveats:**
-- It needs `momentum_lookback_days`/`slow_ma_days` worth of price history
-  *before* `--start` to compute moving averages and momentum correctly —
-  it fetches a ~420-day buffer automatically, but very early dates in a
-  long backtest may still show few/no candidates simply because the
-  buffer itself is still warming up.
+- It needs `momentum_lookback_days`/`slow_ma_days` (and, for
+  cross-sectional/consolidation-breakout, their own lookbacks) worth of
+  price history *before* `--start` to compute moving averages and
+  momentum correctly — it works out the longest lookback the profile
+  being tested actually needs and fetches a calendar-day buffer wide
+  enough to cover it (with margin for holiday clusters), but very early
+  dates in a long backtest may still show few/no candidates simply
+  because the buffer itself is still warming up.
 - A larger universe (e.g. the Nifty 500 list) or longer date range means
   more symbols × more days to fetch and simulate — expect it to take a
   while for anything beyond a small universe or a few months. Fetches
@@ -415,16 +418,57 @@ to a CSV for charting elsewhere.
   it validates that the *logic* behaves as intended against history, not
   that the strategy will keep working going forward.
 
+## Optional: AI trade rationale
+
+Off by default. When enabled, every BUY placed by the live engine gets a
+one-sentence, plain-English rationale attached in the trade log —
+generated from the numbers the strategy already computed for that
+candidate (score, momentum, distance from 52-week high, volume, etc).
+
+**This never decides or changes a trade.** `evaluate_candidate`,
+`check_exit`, and `rank_candidates` still make every buy/sell decision on
+their own, deterministically, exactly as without this feature — the
+rationale is generated strictly *after* a trade has already executed and
+been recorded, purely as a human-readable annotation. It's deliberately
+left out of the backtester for the same reason a backtest reuses
+`PaperBroker` unchanged but not this: a backtest can place dozens of buys
+per run and exists to be re-run repeatedly while tuning a strategy, so
+attaching a paid, network-dependent call to every one of those buys would
+make backtests slow, costly, and non-reproducible for a feature that only
+decorates a report.
+
+To enable it:
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```yaml
+# config.yaml
+intelligence:
+  enabled: true
+  model: claude-opus-5
+  timeout_seconds: 8
+```
+
+If the package isn't installed, the key isn't set, or the API call fails
+for any reason (network, rate limit, timeout), the trade still goes
+through normally — it simply won't have a rationale attached, and the
+reason is logged. This costs a small amount per trade once enabled (a
+handful of buys per scan across all profiles, never per symbol scanned).
+
 ## Testing
 
 ```bash
 pytest
 ```
 
-Tests cover the strategy's entry/exit rules (using synthetic price
-series, no network needed), the paper broker's order/cash/position
-bookkeeping, the NSE market-hours calendar, and the backtest's summary
-statistics (drawdown, CAGR, win rate).
+Tests cover the strategies' entry/exit rules (using synthetic price
+series, no network needed), the paper broker's order/cash/position/trade
+bookkeeping, the NSE market-hours calendar, the backtest's summary
+statistics (drawdown, CAGR, win rate), and universe-symbol repair
+(`validate-universe`).
 
 ## Notes & limitations
 
