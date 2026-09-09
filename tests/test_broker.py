@@ -65,28 +65,3 @@ def test_trade_history_recorded(broker):
     assert len(trades) == 2
     assert trades[0].side == "SELL"  # most recent first
     assert trades[1].side == "BUY"
-
-
-def test_buy_and_sell_return_a_real_row_id(broker):
-    """record_trade's lastrowid used to be discarded, so Trade.id was
-    always None -- nothing needed it until rationale attachment did."""
-    buy = broker.buy("RELIANCE", 5, 2500.0, reason="test")
-    assert buy.id is not None
-    sell = broker.sell("RELIANCE", 5, 2600.0, reason="exit")
-    assert sell.id is not None
-    assert sell.id != buy.id
-
-
-def test_trade_rationale_round_trips_and_defaults_to_none(broker):
-    buy = broker.buy("RELIANCE", 5, 2500.0, reason="test")
-    fetched = broker.storage.get_trades(limit=1)[0]
-    assert fetched.rationale is None  # nothing attached yet
-
-    broker.storage.set_trade_rationale(buy.id, "Strong momentum near its 52-week high.")
-    fetched = broker.storage.get_trades(limit=1)[0]
-    assert fetched.rationale == "Strong momentum near its 52-week high."
-
-    sell = broker.sell("RELIANCE", 5, 2600.0, reason="exit")
-    fetched_sell = broker.storage.get_trades(limit=1)[0]
-    assert fetched_sell.id == sell.id
-    assert fetched_sell.rationale is None  # rationale is per-trade, not inherited

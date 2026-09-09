@@ -266,25 +266,3 @@ data_source:
 logging:
   file: data/papertrader.log
   level: INFO
-
-intelligence:
-  # Optional: attach a one-sentence, plain-English rationale to each BUY
-  # in the trade log, generated from the numbers the strategy already
-  # computed (score, momentum, distance from 52w-high, volume, etc).
-  # This NEVER decides or changes a trade -- momentum_52w_high,
-  # cross_sectional_momentum and consolidation_breakout still make every
-  # buy/sell decision on their own, exactly as before. It only narrates a
-  # trade after it has already executed.
-  #
-  # Requires `pip install anthropic` and an ANTHROPIC_API_KEY environment
-  # variable. If either is missing, or the API call fails for any reason
-  # (network, rate limit, timeout), the trade still goes through
-  # normally -- it just won't have a rationale attached. This costs a
-  # small amount per trade once enabled (a handful of buys per scan, not
-  # per symbol scanned) -- see intelligence/rationale.py.
-  enabled: false
-  model: claude-opus-5
-  # A slow LLM response must never delay a scan that already computed and
-  # executed a real trade -- this timeout applies only to the rationale
-  # call, made strictly after the trade is recorded.
-  timeout_seconds: 8

@@ -153,19 +153,6 @@ class Config:
         """Check if multi-profile mode is enabled (run all profiles simultaneously)."""
         return self.get("multi_profile_mode", default=False)
 
-    def is_intelligence_enabled(self) -> bool:
-        """Whether per-trade LLM rationale generation is turned on. Off by
-        default -- it's a nice-to-have annotation on the trade log, not
-        something any trade decision depends on, and it costs real money
-        per call once enabled. See intelligence/rationale.py."""
-        return bool(self.get("intelligence", "enabled", default=False))
-
-    def get_intelligence_model(self) -> str:
-        return self.get("intelligence", "model", default="claude-opus-5")
-
-    def get_intelligence_timeout_seconds(self) -> float:
-        return float(self.get("intelligence", "timeout_seconds", default=8.0))
-
     def get_profile_starting_capital(self, profile_name: str | None = None) -> float:
         """Get starting capital for a specific profile (or active profile if not specified)."""
         if profile_name is None:

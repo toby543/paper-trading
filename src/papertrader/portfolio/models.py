@@ -40,11 +40,6 @@ class Trade:
     reason: str
     timestamp: str
     realized_pnl: float | None = None  # set for SELL trades only
-    # Optional one-sentence plain-English rationale, generated after the
-    # trade executed by intelligence/rationale.py (BUY trades only, and
-    # only when intelligence.enabled is set) -- purely decorative, never
-    # read by any trading/backtest logic. None when not generated.
-    rationale: str | None = None
 
     @property
     def gross_value(self) -> float:
