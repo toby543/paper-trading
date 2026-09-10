@@ -131,7 +131,7 @@
           <td>
             <div class="row-actions">
               {% if u.username != current_username %}
-              <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.');">
+              <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" class="delete-user-form" data-username="{{ u.username }}">
                 <button type="submit" class="btn danger">Delete</button>
               </form>
               {% endif %}
@@ -167,5 +167,21 @@
     </div>
   </div>
 </div>
+<script>
+// Wired via addEventListener + .dataset rather than an inline onsubmit
+// with the username interpolated into the JS source: a username is
+// free-form text (nothing stops an admin from typing a quote into it),
+// and Jinja's HTML-escaping of that string doesn't stop the browser from
+// decoding it right back before running it as the event handler's JS --
+// so building the confirm text in JS from .dataset.username instead
+// closes off that injection entirely, regardless of what the username contains.
+document.querySelectorAll(".delete-user-form").forEach(function (form) {
+  form.addEventListener("submit", function (e) {
+    if (!confirm("Delete user " + form.dataset.username + "? This cannot be undone.")) {
+      e.preventDefault();
+    }
+  });
+});
+</script>
 </body>
 </html>

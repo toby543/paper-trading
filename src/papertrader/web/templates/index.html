@@ -1426,7 +1426,7 @@ async function saveSettings() {
       showEditBanner("success", "Saved to <code>config.yaml</code>. <strong>Restart the engine/dashboard</strong> (Ctrl+C, then re-run) for these changes to actually govern trading.");
       await loadSettings();
     } else {
-      showEditBanner("error", "Not saved:<br>" + (data.errors || ["Unknown error"]).map(e => `&bull; ${e}`).join("<br>"));
+      showEditBanner("error", "Not saved:<br>" + (data.errors || ["Unknown error"]).map(e => `&bull; ${escapeText(e)}`).join("<br>"));
       updateSaveButtonState();
     }
   } catch (e) {
@@ -1689,7 +1689,7 @@ function pollBacktestJob(jobId) {
       const data = await res.json();
       if (!data.ok) {
         clearInterval(backtestPollTimer);
-        showBacktestBanner("error", "Backtest failed: " + (data.error || "unknown error"));
+        showBacktestBanner("error", "Backtest failed: " + escapeText(data.error || "unknown error"));
         resetBacktestButton();
         return;
       }
@@ -1713,12 +1713,12 @@ function pollBacktestJob(jobId) {
       } else if (job.status === "error") {
         clearInterval(backtestPollTimer);
         document.getElementById("backtestProgressWrap").style.display = "none";
-        showBacktestBanner("error", "Backtest failed: " + (job.error || "unknown error"));
+        showBacktestBanner("error", "Backtest failed: " + escapeText(job.error || "unknown error"));
         resetBacktestButton();
       }
     } catch (e) {
       clearInterval(backtestPollTimer);
-      showBacktestBanner("error", "Lost contact with the backtest job: " + e);
+      showBacktestBanner("error", "Lost contact with the backtest job: " + escapeText(e));
       resetBacktestButton();
     }
   }, 1500);
@@ -1756,14 +1756,14 @@ async function runBacktest() {
     });
     const data = await res.json();
     if (!data.ok) {
-      showBacktestBanner("error", "Could not start backtest: " + (data.error || "unknown error"));
+      showBacktestBanner("error", "Could not start backtest: " + escapeText(data.error || "unknown error"));
       document.getElementById("backtestProgressWrap").style.display = "none";
       resetBacktestButton();
       return;
     }
     pollBacktestJob(data.job_id);
   } catch (e) {
-    showBacktestBanner("error", "Could not start backtest: " + e);
+    showBacktestBanner("error", "Could not start backtest: " + escapeText(e));
     document.getElementById("backtestProgressWrap").style.display = "none";
     resetBacktestButton();
   }
@@ -1870,7 +1870,7 @@ async function scanWatchlist() {
       `${data.total_qualifying} qualifying · last scanned ${timeOf(data.as_of)}`;
   } catch (e) {
     document.getElementById("watchlistTableBody").innerHTML =
-      `<tr class="empty-row"><td colspan="7">Scan failed: ${e}</td></tr>`;
+      `<tr class="empty-row"><td colspan="7">Scan failed: ${escapeText(e)}</td></tr>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Scan Now";
