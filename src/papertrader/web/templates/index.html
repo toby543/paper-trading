@@ -912,12 +912,12 @@
       <div>
         <div class="settings-col-label">Account</div>
         <div class="setting">
-          <div class="setting-top"><span class="setting-label">Starting capital</span><span class="setting-value mono">₹{{ account.get('starting_capital', 0)|inr }}</span></div>
-          <div class="setting-desc">Virtual capital seeded into a fresh ledger. Only applies the first time data/state.db is created — editing this later won't change an existing account's cash.</div>
+          <div class="setting-top"><span class="setting-label">Starting capital</span><span class="setting-value mono">₹{{ active_starting_capital|inr }}</span></div>
+          <div class="setting-desc">This profile's own virtual capital, seeded into its ledger the first time it's created — editing this later won't change an existing account's cash.</div>
         </div>
         <div class="setting">
-          <div class="setting-top"><span class="setting-label">Ledger file</span><span class="setting-value mono">{{ account.get('state_file', '—') }}</span></div>
-          <div class="setting-desc">SQLite file holding cash, open positions, and the full trade history.</div>
+          <div class="setting-top"><span class="setting-label">Ledger file</span><span class="setting-value mono" title="{{ active_state_file }}">{{ active_state_file_short }}</span></div>
+          <div class="setting-desc">This profile's own SQLite file, holding its cash, open positions, and full trade history — isolated from every other profile.</div>
         </div>
 
         <div class="settings-col-label">Universe</div>

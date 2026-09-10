@@ -226,6 +226,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         active_profile = cfg.get("active_profile", default="52w_high")
         active_state_file = cfg.get_profile_state_file(active_profile)
         active_state_file_short = os.path.basename(active_state_file)
+        active_starting_capital = cfg.get_profile_starting_capital(active_profile)
 
         # This profile's own strategy parameters (mode + any of its own
         # overrides merged over the shared base) -- what actually governs
@@ -251,6 +252,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             active_profile=active_profile,
             active_state_file=active_state_file,
             active_state_file_short=active_state_file_short,
+            active_starting_capital=active_starting_capital,
             multi_profile_mode=cfg.is_multi_profile_mode(),
         )
 
