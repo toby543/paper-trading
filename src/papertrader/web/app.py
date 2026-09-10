@@ -524,7 +524,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                     "ok": True,
                     "message": f"Now viewing {display_name} (strategy: {profile_strategy}).",
                     "restart_required": False,
-                    "note": "All 3 profiles are trading simultaneously -- this only changed which one you're viewing."
+                    "note": f"All {len(profiles)} profiles are trading simultaneously -- this only changed which one you're viewing."
                 }), 200
 
             # Single-profile mode: actually reload the one running engine
