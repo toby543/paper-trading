@@ -659,7 +659,7 @@
       <div id="watchlistBanner" class="edit-banner" style="display:none;"></div>
       <div class="table-scroll">
         <table id="watchlistTable">
-          <thead>
+          <thead id="watchlistTableHead">
             <tr>
               <th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>
             </tr>
@@ -1789,23 +1789,68 @@ function renderWatchlistNote(data) {
   }
 }
 
-function renderWatchlistTable(candidates) {
-  const tbody = document.getElementById("watchlistTableBody");
-  if (!candidates.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No stocks currently qualify against the strategy's filters.</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = candidates.map(c => `
-    <tr>
+// Column set per strategy mode -- consolidation_breakout and
+// pivot_supertrend candidates carry entirely different fields from
+// 52w_high/cross_sectional_momentum (no week52_high/relative_strength_pct/
+// volume_multiple at all), so one hardcoded column set can't represent
+// all four honestly. Explicit per-mode functions, matching how the
+// Strategy Rules panel already branches by mode, rather than a generic
+// config-driven renderer that would obscure the per-mode formatting
+// (signed %, the 52w-high tooltip, etc.) each one actually needs.
+const WATCHLIST_HEAD = {
+  consolidation_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
+  pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>Pivot</th><th>Above Pivot</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
+  default: `<th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>`,
+};
+
+function watchlistRowHtml(mode, c) {
+  if (mode === "consolidation_breakout") {
+    return `
       <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="From 52W High" title="52w high: ₹${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
+      <td class="mono" data-label="Breakout High">₹${fmt(c.consolidation_high)}</td>
       <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
-      <td class="mono ${c.relative_strength_pct === null ? "" : (c.relative_strength_pct >= 0 ? "up" : "down")}" data-label="RS vs Index">${c.relative_strength_pct === null ? "—" : (c.relative_strength_pct >= 0 ? "+" : "") + c.relative_strength_pct.toFixed(1) + "pp"}</td>
-      <td class="mono" data-label="Volume">${c.volume_multiple === null ? "—" : c.volume_multiple.toFixed(1) + "×"}</td>
+      <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
-    </tr>
-  `).join("");
+    `;
+  }
+  if (mode === "pivot_supertrend") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Pivot">₹${fmt(c.pivot)}</td>
+      <td class="mono up" data-label="Above Pivot">+${c.pct_above_pivot.toFixed(1)}%</td>
+      <td class="mono" data-label="SuperTrend">₹${fmt(c.supertrend_value)}</td>
+      <td class="mono" data-label="ATR">${fmt(c.atr)}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  // 52w_high and cross_sectional_momentum share this shape.
+  return `
+    <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+    <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+    <td class="mono" data-label="From 52W High" title="52w high: ₹${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
+    <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
+    <td class="mono ${c.relative_strength_pct === null ? "" : (c.relative_strength_pct >= 0 ? "up" : "down")}" data-label="RS vs Index">${c.relative_strength_pct === null ? "—" : (c.relative_strength_pct >= 0 ? "+" : "") + c.relative_strength_pct.toFixed(1) + "pp"}</td>
+    <td class="mono" data-label="Volume">${c.volume_multiple === null ? "—" : c.volume_multiple.toFixed(1) + "×"}</td>
+    <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+  `;
+}
+
+function renderWatchlistTable(data) {
+  const mode = data.mode || "52w_high";
+  const candidates = data.candidates || [];
+  const columnCount = (WATCHLIST_HEAD[mode] || WATCHLIST_HEAD.default).split("<th>").length - 1;
+
+  document.getElementById("watchlistTableHead").innerHTML =
+    `<tr>${WATCHLIST_HEAD[mode] || WATCHLIST_HEAD.default}</tr>`;
+
+  const tbody = document.getElementById("watchlistTableBody");
+  if (!candidates.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${columnCount}">No stocks currently qualify against the strategy's filters.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = candidates.map(c => `<tr>${watchlistRowHtml(mode, c)}</tr>`).join("");
 }
 
 async function scanWatchlist() {
@@ -1820,7 +1865,7 @@ async function scanWatchlist() {
   try {
     const data = await authFetch("/api/candidates?limit=15").then(r => r.json());
     renderWatchlistNote(data);
-    renderWatchlistTable(data.candidates);
+    renderWatchlistTable(data);
     document.getElementById("watchlistMeta").textContent =
       `${data.total_qualifying} qualifying · last scanned ${timeOf(data.as_of)}`;
   } catch (e) {

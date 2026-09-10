@@ -369,29 +369,66 @@ def build_candidates(engine, limit: int = 20) -> dict:
     """Preview of what the strategy currently finds worth buying, without
     placing any trades. Expensive (network calls across the whole
     universe) -- meant to be triggered on demand from the dashboard, not
-    auto-polled like the rest of /api/*."""
+    auto-polled like the rest of /api/*.
+
+    The Candidate shape returned by find_candidates() differs by mode:
+    52w_high and cross_sectional_momentum both use
+    momentum_52w_high.Candidate (cross_sectional imports it directly), but
+    consolidation_breakout.Candidate and pivot_supertrend.Candidate are
+    separate dataclasses with none of that shape's fields (no
+    week52_high, pct_from_52w_high, relative_strength_pct,
+    volume_multiple). Building one hardcoded row shape for every mode
+    previously raised AttributeError the moment either of those two modes
+    actually found a candidate -- silently fine at zero candidates, which
+    is exactly why it went unnoticed. `mode` is included in the response
+    so the dashboard can render the right columns instead of guessing.
+    """
     positions = engine.broker.positions()
     room = engine.risk.room_for_new_positions(len(positions))
     regime = _market_regime(engine)
     regime_blocking = regime["enabled"] and regime["status"] == "down"
 
+    mode = engine.strategy_cfg.get("mode", "52w_high")
     ranked = engine.find_candidates(exclude_symbols=set(positions))
 
     rows = []
     for cand in ranked[:limit]:
-        rows.append({
-            "symbol": cand.symbol,
-            "ltp": round(cand.ltp, 2),
-            "week52_high": round(cand.week52_high, 2),
-            "pct_from_52w_high": round(cand.pct_from_52w_high, 2),
-            "momentum_return_pct": round(cand.momentum_return_pct, 2),
-            "relative_strength_pct": round(cand.relative_strength_pct, 2) if cand.relative_strength_pct is not None else None,
-            "volume_multiple": round(cand.volume_multiple, 2) if cand.volume_multiple is not None else None,
-            "score": round(cand.score, 2),
-        })
+        if mode == "consolidation_breakout":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "consolidation_high": round(cand.consolidation_high, 2),
+                "consolidation_low": round(cand.consolidation_low, 2),
+                "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
+                "momentum_return_pct": round(cand.momentum_return_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "pivot_supertrend":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "pivot": round(cand.pivot, 2),
+                "pct_above_pivot": round(cand.pct_above_pivot, 2),
+                "supertrend_value": round(cand.supertrend_value, 2),
+                "atr": round(cand.atr, 2),
+                "score": round(cand.score, 2),
+            })
+        else:
+            # 52w_high and cross_sectional_momentum share this shape.
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "week52_high": round(cand.week52_high, 2),
+                "pct_from_52w_high": round(cand.pct_from_52w_high, 2),
+                "momentum_return_pct": round(cand.momentum_return_pct, 2),
+                "relative_strength_pct": round(cand.relative_strength_pct, 2) if cand.relative_strength_pct is not None else None,
+                "volume_multiple": round(cand.volume_multiple, 2) if cand.volume_multiple is not None else None,
+                "score": round(cand.score, 2),
+            })
 
     return {
         "as_of": datetime.now().isoformat(timespec="seconds"),
+        "mode": mode,
         "index_symbol": regime["index_symbol"],
         "regime_blocking": regime_blocking,
         "room_available": room,
