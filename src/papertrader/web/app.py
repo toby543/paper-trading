@@ -43,7 +43,7 @@ from .data_api import (
     build_trades,
 )
 from .filters import indian_currency
-from .settings_schema import EDITABLE_SETTINGS, coerce_and_validate, get_value
+from .settings_schema import EDITABLE_SETTINGS, applies_to_mode, coerce_and_validate, get_value
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger(__name__)
@@ -365,8 +365,12 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         field (strategy.* or starting_capital) shows that profile's own
         value, so switching the profile dropdown and reopening this
         panel shows and edits that profile's own settings, not some
-        other profile's."""
+        other profile's. A strategy-specific field (e.g. pivot_supertrend's
+        ATR period) is left out entirely when the active profile runs a
+        different strategy -- those settings have no effect on it, so
+        showing them there is just confusing, not merely inapplicable."""
         active_profile = cfg.get("active_profile", default="52w_high")
+        active_mode = cfg.get_profile_strategy_mode(active_profile)
         effective_raw = {
             **cfg.raw,
             "strategy": cfg.get_profile_strategy_config(active_profile),
@@ -374,6 +378,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         }
         fields = []
         for spec in EDITABLE_SETTINGS:
+            if not applies_to_mode(spec["path"], active_mode):
+                continue
             fields.append({
                 **spec,
                 "path": list(spec["path"]),

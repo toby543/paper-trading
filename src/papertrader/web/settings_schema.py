@@ -171,6 +171,27 @@ EDITABLE_SETTINGS: list[dict] = [
 
 _BY_PATH = {tuple(entry["path"]): entry for entry in EDITABLE_SETTINGS}
 
+# Which strategy_mode a strategy.<subsection>.* field's settings actually
+# govern. Everything else (universe, the shared strategy.* entry filters,
+# regime, risk, execution, engine, data_source, logging, account) applies
+# to every mode, so isn't listed here.
+_STRATEGY_SUBSECTION_MODE = {
+    "cross_sectional": "cross_sectional_momentum",
+    "consolidation_breakout": "consolidation_breakout",
+    "pivot_supertrend": "pivot_supertrend",
+}
+
+
+def applies_to_mode(path: tuple[str, ...], mode: str) -> bool:
+    """False for a field that belongs to a *different* strategy's own
+    subsection than the one currently active -- e.g. ATR period only
+    means anything for pivot_supertrend, so it has no business showing up
+    while viewing a 52w_high profile. Used to filter the Edit Settings
+    panel down to what the active profile's strategy actually reads."""
+    if len(path) >= 2 and path[0] == "strategy" and path[1] in _STRATEGY_SUBSECTION_MODE:
+        return _STRATEGY_SUBSECTION_MODE[path[1]] == mode
+    return True
+
 
 def get_value(raw_cfg: dict, path: tuple[str, ...]):
     node = raw_cfg
