@@ -794,6 +794,34 @@
           {%- endif -%}
         </span></div>
         {% endif %}
+        {% elif strategy.get('mode') == 'pivot_supertrend' %}
+        {% set ps = strategy.get('pivot_supertrend', {}) %}
+        <div class="rules-col-label">Entry — pivot point + SuperTrend</div>
+        <div class="rule"><span>Bias</span><span class="mono">price &gt; prior day's pivot, (H+L+C)&divide;3</span></div>
+        <div class="rule"><span>Trigger</span><span class="mono">fresh SuperTrend flip to uptrend</span></div>
+        <div class="rule"><span>ATR period</span><span class="mono">{{ ps.get('atr_period', '—') }}d</span></div>
+        <div class="rule"><span>SuperTrend factor</span><span class="mono">{{ ps.get('supertrend_multiplier', '—') }}&times; ATR</span></div>
+        {% if ps.get('min_pct_above_pivot') %}
+        <div class="rule"><span>Min above pivot</span><span class="mono">&ge; {{ ps.get('min_pct_above_pivot') }}%</span></div>
+        {% endif %}
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        {% if regime.get('enabled') %}
+        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+        {% set min_ltp = strategy.get('min_ltp_inr') %}
+        {% set max_ltp = strategy.get('max_ltp_inr') %}
+        {% if min_ltp or max_ltp %}
+        <div class="rule"><span>Price range</span><span class="mono">
+          {%- if min_ltp and max_ltp -%}
+            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+          {%- elif min_ltp -%}
+            &ge; ₹{{ min_ltp|inr }}
+          {%- else -%}
+            &le; ₹{{ max_ltp|inr }}
+          {%- endif -%}
+        </span></div>
+        {% endif %}
         {% elif strategy.get('mode') == 'consolidation_breakout' %}
         {% set cb = strategy.get('consolidation_breakout', {}) %}
         <div class="rules-col-label">Entry — consolidation breakout</div>
@@ -857,7 +885,9 @@
         {% endif %}
         <div class="rule"><span>Stop loss</span><span class="mono down">&minus;{{ risk.get('stop_loss_pct', '—') }}% from entry</span></div>
         <div class="rule"><span>Trailing stop</span><span class="mono down">&minus;{{ risk.get('trailing_stop_pct', '—') }}% from peak close</span></div>
-        {% if risk.get('exit_below_fast_ma') %}
+        {% if strategy.get('mode') == 'pivot_supertrend' %}
+        <div class="rule"><span>SuperTrend flip</span><span class="mono down">line flips back to downtrend</span></div>
+        {% elif risk.get('exit_below_fast_ma') %}
         <div class="rule"><span>Momentum breakdown</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% endif %}
         <div class="rules-col-label" style="margin-top: 14px;">Sizing &amp; exposure</div>
