@@ -1128,7 +1128,7 @@ function perfComparisonHtml(perf) {
   let html = `<span>You — <b class="mono ${stratCls}">${perf.strategy_return_pct >= 0 ? "+" : ""}${perf.strategy_return_pct}%</b></span>`;
   if (perf.benchmark_available) {
     const bmCls = pnlClass(perf.benchmark_return_pct);
-    const bmLabel = (perf.benchmark_symbol || "").replace("^", "");
+    const bmLabel = escapeText((perf.benchmark_symbol || "").replace("^", ""));
     html += `<span>${bmLabel} — <b class="mono ${bmCls}">${perf.benchmark_return_pct >= 0 ? "+" : ""}${perf.benchmark_return_pct}%</b></span>`;
   }
   return html;
