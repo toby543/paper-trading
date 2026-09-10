@@ -48,6 +48,17 @@ from .settings_schema import EDITABLE_SETTINGS, applies_to_mode, coerce_and_vali
 _HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger(__name__)
 
+# Same whitelist Edit Settings already enforces for universe.file (see
+# settings_schema.py) -- reused here so /api/backtest/run's universe_file
+# can't be used to make load_universe() open() an arbitrary path. Without
+# this, Config._resolve() passes an absolute path straight through
+# unchanged, so a raw API call (the <select> in the UI only ever offers
+# these two, but nothing stopped a direct POST) could point a backtest at
+# any file on the server's filesystem.
+_UNIVERSE_FILE_CHOICES = next(
+    spec["choices"] for spec in EDITABLE_SETTINGS if spec["path"] == ("universe", "file")
+)
+
 
 def _safe_next_path(value: str | None) -> str | None:
     """Only accept a same-site relative path for post-login redirect.
@@ -312,6 +323,13 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         universe_file = (payload.get("universe_file") or "").strip() or None
         if not start or not end:
             return jsonify({"ok": False, "error": "Start and end dates are both required."}), 400
+        if universe_file and universe_file not in _UNIVERSE_FILE_CHOICES:
+            # Reject anything not on the same whitelist Edit Settings
+            # enforces -- load_universe() will open() this path verbatim,
+            # and Config._resolve() passes an absolute path through
+            # unchanged, so an unvalidated value here would let any
+            # authenticated user read an arbitrary file on the server.
+            return jsonify({"ok": False, "error": "Unknown universe file."}), 400
         # Backtester itself validates start < end etc., but that happens
         # inside the background thread (see backtest_jobs.py) -- any such
         # error surfaces via the job's "error" status on the next poll,
