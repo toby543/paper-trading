@@ -9,7 +9,7 @@ import threading
 
 from tabulate import tabulate
 
-from .config import Config
+from .config import REPO_ROOT, Config
 from .engine.scheduler import TradingEngine
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,55 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         print(f"\nEquity curve written to {args.export}")
 
 
+def cmd_sync_config(args: argparse.Namespace) -> None:
+    """Safely merge any settings config.default.yaml has picked up (since
+    this config.yaml was created or last synced) into the live file --
+    e.g. a new profile added by a `git pull`. Additive only: never
+    touches a key the live file already has, customized or not. See
+    config.default.yaml's own header comment and
+    config_editor.find_missing_keys's docstring for the exact guarantee.
+    """
+    import yaml as _yaml
+    from .config_editor import find_missing_keys, update_config_file
+
+    live_path = args.config or os.path.join(REPO_ROOT, "config.yaml")
+    default_path = args.default or os.path.join(os.path.dirname(live_path) or ".", "config.default.yaml")
+
+    if not os.path.exists(default_path):
+        print(f"No template found at {default_path} -- nothing to sync against.", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(live_path):
+        print(f"No live config at {live_path} yet -- run any normal command first "
+              f"(e.g. `python main.py once`) to create it from the template, then sync-config "
+              f"has nothing to do until the template changes again.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(default_path, "r", encoding="utf-8") as fh:
+        default = _yaml.safe_load(fh)
+    with open(live_path, "r", encoding="utf-8") as fh:
+        live = _yaml.safe_load(fh)
+
+    missing = find_missing_keys(default, live)
+    if not missing:
+        print(f"{live_path} is already up to date with {default_path} -- nothing to add.")
+        return
+
+    print(f"{len(missing)} setting(s) in {default_path} are missing from {live_path}:")
+    for path, value in missing:
+        preview = repr(value)
+        if len(preview) > 90:
+            preview = preview[:90] + "..."
+        print(f"  + {'.'.join(path)} = {preview}")
+
+    if args.dry_run:
+        print("\n(--dry-run: nothing written. Re-run without it to apply.)")
+        return
+
+    update_config_file(live_path, missing)
+    print(f"\nAdded {len(missing)} setting(s) to {live_path} (backed up to {live_path}.bak first). "
+          f"Nothing you'd already customized was touched.")
+
+
 def cmd_validate_universe(args: argparse.Namespace) -> None:
     cfg = Config.load(args.config)
     _setup_logging(cfg)
@@ -402,6 +451,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Which profile's strategy to replay (default: the active_profile). "
                           "Each profile has its own strategy mode and parameters.")
     bt.set_defaults(func=cmd_backtest)
+
+    sc = sub.add_parser("sync-config",
+                        help="Merge any new settings from config.default.yaml into your live config.yaml, "
+                             "without touching anything you've already customized")
+    sc.add_argument("--default", default=None,
+                    help="Path to the template (default: config.default.yaml next to your config.yaml)")
+    sc.add_argument("--dry-run", action="store_true", help="Show what would be added without writing anything")
+    sc.set_defaults(func=cmd_sync_config)
 
     vu = sub.add_parser("validate-universe",
                         help="Check every universe symbol against Yahoo Finance and repair stale tickers")

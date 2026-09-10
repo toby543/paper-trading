@@ -9,6 +9,12 @@ data/state_*.db
 data/price_cache/
 data/papertrader.log
 data/auth_secrets.json
+# Your live config -- config.default.yaml is the tracked template; see
+# its header comment. Bootstrapped automatically on first run, never
+# touched by git again after that, so dashboard/hand edits survive every
+# `git pull` instead of risking being discarded as "local changes that
+# would be overwritten by merge."
+config.yaml
 config.yaml.bak
 config.yaml.tmp
 .env

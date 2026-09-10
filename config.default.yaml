@@ -1,6 +1,19 @@
 # Configuration for the autonomous NSE momentum paper-trading system.
-
-# Configuration for the autonomous NSE momentum paper-trading system.
+#
+# THIS FILE IS THE TEMPLATE, NOT YOUR LIVE CONFIG.
+# The app actually reads config.yaml (a sibling of this file, gitignored --
+# see .gitignore), which `python main.py` creates automatically by copying
+# this file the first time it doesn't find one. From then on, config.yaml
+# is yours: dashboard edits, hand edits, anything you change there is
+# permanent and `git pull` will never touch, overwrite, or ask you to
+# discard it, because git no longer tracks that file at all.
+#
+# When a `git pull` updates THIS file with something new (a new profile,
+# a new setting), run `python main.py sync-config` to safely merge just
+# the new keys into your live config.yaml -- it only ever ADDS a key
+# that's missing from your file; it never overwrites a value you already
+# have, customized or not. Run it any time after pulling; it's a no-op
+# if there's nothing new to add.
 #
 # PROFILE SYSTEM:
 # Each profile maintains completely separate positions, cash, and trade history.

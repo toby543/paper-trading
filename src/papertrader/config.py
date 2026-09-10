@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,6 +18,32 @@ def _resolve(path: str) -> str:
     if os.path.isabs(path):
         return path
     return os.path.join(REPO_ROOT, path)
+
+
+def _bootstrap_from_default(path: str) -> None:
+    """First-run convenience: if `path` doesn't exist yet but a sibling
+    config.default.yaml does, copy it over before loading.
+
+    config.yaml is gitignored on purpose (see .gitignore and
+    config.default.yaml's own header comment) so dashboard/hand edits are
+    never at risk from a `git pull` -- but that means a completely fresh
+    clone has no config.yaml at all, and `python main.py ...` should still
+    work immediately rather than failing with a bare FileNotFoundError
+    and no indication of what to do about it. If no default exists either
+    (a custom --config path pointing somewhere else entirely, or someone
+    removed config.default.yaml too), do nothing and let the normal
+    FileNotFoundError from the caller's own `open()` explain the problem
+    -- inventing a file here would be worse than a clear error.
+    """
+    if os.path.exists(path):
+        return
+    default_path = os.path.join(os.path.dirname(path) or ".", "config.default.yaml")
+    if not os.path.exists(default_path):
+        return
+    shutil.copyfile(default_path, path)
+    log.info("No %s found -- created it from %s (first run). Edit it, or use the "
+             "dashboard's Edit Settings panel, freely: this file is yours now and "
+             "`git pull` will never touch it again.", path, default_path)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -46,6 +73,7 @@ class Config:
     @classmethod
     def load(cls, path: str | None = None) -> "Config":
         path = path or os.path.join(REPO_ROOT, "config.yaml")
+        _bootstrap_from_default(path)
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
         return cls(raw=raw, path=path)

@@ -175,6 +175,45 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Your settings are permanent, `git pull` will never touch them
+
+`config.yaml` — the file the app actually reads, and the one the
+dashboard's Edit Settings panel writes to — is **not tracked by git**.
+The first time you run any command, it's created automatically by
+copying `config.default.yaml` (the tracked template). From then on it's
+entirely yours: dashboard edits, hand edits, anything you change there
+survives every `git pull` untouched, because git doesn't know the file
+exists.
+
+When a `git pull` brings in a change to `config.default.yaml` — a new
+strategy profile, a new setting — run this to pick it up:
+
+```bash
+python main.py sync-config          # preview with: python main.py sync-config --dry-run
+```
+
+It only ever **adds** a setting that's missing from your `config.yaml`;
+it never overwrites or removes anything you already have, customized or
+not. Safe to run after every pull, every time, whether or not anything
+actually changed — it's a no-op if there's nothing new.
+
+**If you already had a `config.yaml` from before this changed:** it was
+tracked by git up to now, so the first pull after this needs one manual
+step — git will refuse it outright rather than risk your settings
+(tested: your file is never at risk here, the pull just won't proceed on
+its own):
+
+```bash
+cp config.yaml config.yaml.mine   # back it up, just in case
+git rm --cached config.yaml       # tell git to stop tracking your copy too
+rm config.yaml                    # clear the way for the pull
+git pull origin UAT               # now proceeds cleanly
+mv config.yaml.mine config.yaml   # restore your settings exactly as they were
+```
+
+After that one-time step, `config.yaml` is untracked for good — every
+pull after this one just works, the same as a fresh clone.
+
 ### One-click launchers (Windows / macOS)
 
 If you'd rather not run commands by hand, double-click:

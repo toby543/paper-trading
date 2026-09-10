@@ -66,3 +66,43 @@ def update_config_file(path: str, updates: list[tuple[list[str], object]]) -> No
         except Exception as e:
             log.error("Failed to update config file: %s", e)
             raise
+
+
+def find_missing_keys(
+    default: dict, live: dict, _prefix: list[str] | None = None,
+) -> list[tuple[list[str], object]]:
+    """Recursively find keys present in `default` (config.default.yaml,
+    the tracked template) but absent from `live` (the user's actual
+    config.yaml), returned as (key_path, value) pairs ready for
+    update_config_file -- this is the whole of `sync-config`.
+
+    Deliberately additive-only, in both directions:
+      - A key missing from `live` entirely gets added, whole subtree and
+        all (e.g. a brand-new profile block) -- no partial copy that
+        could leave a malformed fragment behind.
+      - A key `live` already has is NEVER touched, even if the default's
+        value has since changed -- the user's customization always wins,
+        full stop. This is the entire point: sync-config must be safe to
+        run blindly after every pull without re-reviewing every setting.
+      - We only recurse into a key when BOTH sides have a dict there (a
+        profile the user has partially customized still picks up any new
+        field added to its strategy: block, without touching the fields
+        they already set). If the user's value isn't a dict where the
+        default's is, we leave it alone rather than recursing into or
+        replacing it -- their value, whatever shape it is, is final.
+      - Nothing in `live` but absent from `default` is ever reported or
+        touched -- this only ever adds, never removes a setting the user
+        has (even one from an older template that this version of
+        config.default.yaml no longer defines).
+    """
+    prefix = _prefix or []
+    missing: list[tuple[list[str], object]] = []
+    for key, default_value in default.items():
+        path = prefix + [key]
+        if key not in live:
+            missing.append((path, default_value))
+        elif isinstance(default_value, dict) and isinstance(live.get(key), dict):
+            missing.extend(find_missing_keys(default_value, live[key], path))
+        # else: `live` already has this key (as a non-dict, or `default`
+        # isn't a dict here) -- it wins, untouched, no recursion.
+    return missing
