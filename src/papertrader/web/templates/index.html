@@ -1778,7 +1778,7 @@ function renderWatchlistNote(data) {
 
   if (data.regime_blocking) {
     banner.className = "edit-banner error";
-    banner.innerHTML = `Market regime filter is currently blocking new entries (${data.index_symbol} is below its own average) -- these candidates qualify on their own merits but would NOT be bought right now.`;
+    banner.innerHTML = `Market regime filter is currently blocking new entries (${escapeText(data.index_symbol)} is below its own average) -- these candidates qualify on their own merits but would NOT be bought right now.`;
     banner.style.display = "block";
   } else if (data.room_available <= 0) {
     banner.className = "edit-banner error";
@@ -1918,8 +1918,8 @@ function renderInsights(summary) {
     <div class="insight ${i.level}">
       <span class="ico">${INSIGHT_ICON[i.level] || "i"}</span>
       <div class="body">
-        <div class="title">${i.title}</div>
-        ${i.detail ? `<div class="detail">${i.detail}</div>` : ""}
+        <div class="title">${escapeText(i.title)}</div>
+        ${i.detail ? `<div class="detail">${escapeText(i.detail)}</div>` : ""}
       </div>
     </div>
   `).join("");
