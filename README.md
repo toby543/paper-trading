@@ -100,11 +100,29 @@ strategy, plus its own trigger — the SuperTrend line flipping back to a
 downtrend — in place of the moving-average momentum-breakdown check the
 other strategies use.
 
+**Strategy — Trend Pullback** (`strategy.mode: trend_pullback`): buys a
+shallow, controlled dip within an already-established uptrend, rather
+than chasing a breakout or buying right at a high. Requires price above
+both moving averages (`strategy.fast_ma_days`/`slow_ma_days` — shorter
+windows than the other strategies by default, since this reads trend on
+a shorter horizon), then a pullback of
+`strategy.trend_pullback.min_pullback_pct` to `max_pullback_pct` below
+the highest close of the last `pullback_lookback_days`, and finally a
+**turn-up confirmation**: today's close above yesterday's — the first
+sign the dip is resolving back up, rather than buying mid-fall. Ranked
+by a combination of how shallow the pullback is (closer to the trend,
+less ground given up) and how strong today's turn-up is. Exits reuse the
+same hard-stop/trailing-stop/take-profit rules as every other strategy,
+plus its own trigger — a close below the **slow** moving average (not
+the fast one, unlike the other strategies) — since a pullback entry is
+often already sitting near or below the fast MA by construction.
+
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, a strategy-specific
 **trend-reversal exit** (a moving-average momentum breakdown for
 52w_high/cross_sectional/consolidation_breakout, a SuperTrend flip for
-pivot_supertrend), or an optional **take profit** target — whichever
+pivot_supertrend, a close below the slow MA for trend_pullback), or an
+optional **take profit** target — whichever
 comes first. Take profit is off by default (`risk.take_profit_pct: 0`):
 momentum strategies are usually better served by the trailing stop's
 "let winners run" behavior than by capping upside at a fixed target, but
@@ -159,6 +177,7 @@ src/papertrader/
   strategy/cross_sectional_momentum.py   cross_sectional_momentum entry logic
   strategy/consolidation_breakout.py     consolidation_breakout entry/exit logic
   strategy/pivot_supertrend.py    pivot_supertrend entry/exit logic
+  strategy/trend_pullback.py      trend_pullback entry/exit logic
   portfolio/{models,storage,broker}.py   Paper execution engine + persistence
   risk/risk_manager.py       Position sizing & exposure limits
   engine/{market_hours,scheduler}.py     Autonomous scan loop
@@ -428,10 +447,11 @@ Two supported ways to keep it running unattended:
 
 All thresholds live in `config.yaml`:
 
-- `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, or `pivot_supertrend` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
+- `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, `pivot_supertrend`, or `trend_pullback` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
 - `strategy.cross_sectional.lookback_days` / `skip_recent_days` / `top_pct` — only used in `cross_sectional_momentum` mode: the trailing-return ranking window and the top percentile bought.
 - `strategy.consolidation_breakout.consolidation_days` / `max_consolidation_range_pct` / `volume_multiple` — only used in `consolidation_breakout` mode: the base period, how tight it must be, and the breakout volume threshold.
 - `strategy.pivot_supertrend.atr_period` / `supertrend_multiplier` / `min_pct_above_pivot` — only used in `pivot_supertrend` mode: the ATR window, SuperTrend band width, and how far above the prior day's pivot a flip must occur.
+- `strategy.trend_pullback.pullback_lookback_days` / `min_pullback_pct` / `max_pullback_pct` — only used in `trend_pullback` mode: the window used to find the recent high, and the depth range a pullback from it must fall within.
 - `strategy.proximity_to_52w_high_pct` — how close to the 52-week high a stock must be to qualify (52w_high mode only).
 - `strategy.min_momentum_return_pct` / `momentum_lookback_days` — trailing momentum filter.
 - `strategy.fast_ma_days` / `slow_ma_days` — trend-confirmation moving averages.
@@ -503,7 +523,7 @@ to a CSV for charting elsewhere.
 pytest
 ```
 
-Tests cover all four strategies' entry/exit rules (using synthetic price
+Tests cover all five strategies' entry/exit rules (using synthetic price
 series, no network needed), the paper broker's order/cash/position/trade
 bookkeeping, the NSE market-hours calendar, the backtest's summary
 statistics (drawdown, CAGR, win rate), universe-symbol repair

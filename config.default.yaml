@@ -23,6 +23,7 @@
 # - cross_sectional: Independent copy of capital for cross-sectional momentum
 # - consolidation_breakout: Independent copy of capital for consolidation breakout
 # - pivot_supertrend: Independent copy of capital for the pivot point + SuperTrend combo
+# - trend_pullback: Independent copy of capital for the trend-pullback combo
 #
 # Each profile also has its own `strategy:` block below, letting it tune its
 # own moving averages, momentum thresholds, etc. independently of the other
@@ -142,6 +143,34 @@ profiles:
         # flip to happen with more room above the pivot, i.e. a more
         # decisively bullish-biased day, not just barely above it.
         min_pct_above_pivot: 0.0
+
+  trend_pullback:
+    display_name: "Trend Pullback"
+    # Fresh ledger independent from the other four profiles
+    state_file: data/state_trend_pullback.db
+    starting_capital: 100000.0
+    strategy_mode: trend_pullback
+    # This profile starts fresh with new capital
+    strategy:
+      # Shorter windows than the 50/200 used by the longer-horizon
+      # strategies above -- this strategy buys a shallow dip WITHIN an
+      # uptrend, which is a shorter-term read on trend than "above the
+      # 200-day average" (that's what the trend_break exit checks
+      # instead, via slow_ma_days below).
+      fast_ma_days: 20
+      slow_ma_days: 50
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
+      trend_pullback:
+        # Window used to find the recent high the pullback is measured from.
+        pullback_lookback_days: 20
+        # Today's close must sit at least this far below that recent high...
+        min_pullback_pct: 3.0
+        # ...but no more than this far below it -- deeper than this and the
+        # uptrend may already be broken rather than just pulling back.
+        max_pullback_pct: 12.0
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile

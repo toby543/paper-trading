@@ -23,7 +23,7 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
-from ..strategy import consolidation_breakout, pivot_supertrend
+from ..strategy import consolidation_breakout, pivot_supertrend, trend_pullback
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -184,6 +184,8 @@ class TradingEngine:
                 should_exit, reason = consolidation_breakout.check_exit(pos, quote, history, cfg)
             elif mode == "pivot_supertrend":
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history, cfg)
+            elif mode == "trend_pullback":
+                should_exit, reason = trend_pullback.check_exit(pos, quote, history, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history, cfg)
             if should_exit:
@@ -364,6 +366,44 @@ class TradingEngine:
             self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
                                           candidates=len(candidates), reasons=reasons)
             return pivot_supertrend.rank_candidates(candidates)
+
+        if mode == "trend_pullback":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = trend_pullback.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one symbol's malformed data must never
+                    # take down the whole scan, let alone this engine's entire background thread.
+                    log.warning("trend_pullback: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "trend_pullback scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return trend_pullback.rank_candidates(candidates)
 
         # Default: 52w_high strategy
         # Fetch the benchmark index once per scan (cached) so every

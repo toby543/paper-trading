@@ -39,7 +39,7 @@ from ..strategy.momentum_52w_high import (
     is_market_in_uptrend,
     rank_candidates as rank_52w,
 )
-from ..strategy import consolidation_breakout, pivot_supertrend
+from ..strategy import consolidation_breakout, pivot_supertrend, trend_pullback
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
@@ -72,6 +72,12 @@ def _required_trading_days(strategy_cfg: dict) -> int:
         cs_cfg = strategy_cfg.get("cross_sectional") or {}
         needed = max(needed, int(cs_cfg.get("lookback_days", 252))
                      + int(cs_cfg.get("skip_recent_days", 21)) + 1)
+    elif mode == "trend_pullback":
+        # Doesn't use momentum_lookback_days at all -- its own lookback is
+        # the pullback window, usually much shorter than the 252-day
+        # momentum window the other modes need.
+        tp_cfg = strategy_cfg.get("trend_pullback") or {}
+        needed = max(needed, int(tp_cfg.get("pullback_lookback_days", 20)))
     else:
         needed = max(needed, int(strategy_cfg.get("momentum_lookback_days", 252) or 0) + 1)
     if mode == "consolidation_breakout":
@@ -366,6 +372,8 @@ class Backtester:
                 should_exit, reason = consolidation_breakout.check_exit(pos, quote, history_upto, cfg)
             elif mode == "pivot_supertrend":
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history_upto, cfg)
+            elif mode == "trend_pullback":
+                should_exit, reason = trend_pullback.check_exit(pos, quote, history_upto, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
@@ -459,6 +467,26 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = pivot_supertrend.rank_candidates(candidates)
+        elif mode == "trend_pullback":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = trend_pullback.evaluate_candidate(
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
+                    reasons=self._entry_rejections,
+                )
+                if cand:
+                    candidates.append(cand)
+            ranked = trend_pullback.rank_candidates(candidates)
         else:
             candidates: list[Candidate52w] = []
             for symbol in self.universe:

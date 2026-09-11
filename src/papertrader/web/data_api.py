@@ -374,14 +374,15 @@ def build_candidates(engine, limit: int = 20) -> dict:
     The Candidate shape returned by find_candidates() differs by mode:
     52w_high and cross_sectional_momentum both use
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
-    consolidation_breakout.Candidate and pivot_supertrend.Candidate are
-    separate dataclasses with none of that shape's fields (no
-    week52_high, pct_from_52w_high, relative_strength_pct,
-    volume_multiple). Building one hardcoded row shape for every mode
-    previously raised AttributeError the moment either of those two modes
-    actually found a candidate -- silently fine at zero candidates, which
-    is exactly why it went unnoticed. `mode` is included in the response
-    so the dashboard can render the right columns instead of guessing.
+    consolidation_breakout.Candidate, pivot_supertrend.Candidate, and
+    trend_pullback.Candidate are all separate dataclasses with none of
+    that shape's fields (no week52_high, pct_from_52w_high,
+    relative_strength_pct, volume_multiple). Building one hardcoded row
+    shape for every mode previously raised AttributeError the moment one
+    of the non-momentum_52w_high modes actually found a candidate --
+    silently fine at zero candidates, which is exactly why it went
+    unnoticed the first time. `mode` is included in the response so the
+    dashboard can render the right columns instead of guessing.
     """
     positions = engine.broker.positions()
     room = engine.risk.room_for_new_positions(len(positions))
@@ -411,6 +412,15 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "pct_above_pivot": round(cand.pct_above_pivot, 2),
                 "supertrend_value": round(cand.supertrend_value, 2),
                 "atr": round(cand.atr, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "trend_pullback":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "recent_high": round(cand.recent_high, 2),
+                "pct_from_high": round(cand.pct_from_high, 2),
+                "day_change_pct": round(cand.day_change_pct, 2),
                 "score": round(cand.score, 2),
             })
         else:

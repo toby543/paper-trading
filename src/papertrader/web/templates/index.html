@@ -847,6 +847,30 @@
           {%- endif -%}
         </span></div>
         {% endif %}
+        {% elif strategy.get('mode') == 'trend_pullback' %}
+        {% set tp = strategy.get('trend_pullback', {}) %}
+        <div class="rules-col-label">Entry — trend pullback</div>
+        <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; {{ strategy.get('fast_ma_days', '—') }}DMA &gt; {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
+        <div class="rule"><span>Pullback depth</span><span class="mono">{{ tp.get('min_pullback_pct', '—') }}&ndash;{{ tp.get('max_pullback_pct', '—') }}% below {{ tp.get('pullback_lookback_days', '—') }}d high</span></div>
+        <div class="rule"><span>Turn confirmation</span><span class="mono">today's close &gt; yesterday's close</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        {% if regime.get('enabled') %}
+        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+        {% set min_ltp = strategy.get('min_ltp_inr') %}
+        {% set max_ltp = strategy.get('max_ltp_inr') %}
+        {% if min_ltp or max_ltp %}
+        <div class="rule"><span>Price range</span><span class="mono">
+          {%- if min_ltp and max_ltp -%}
+            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+          {%- elif min_ltp -%}
+            &ge; ₹{{ min_ltp|inr }}
+          {%- else -%}
+            &le; ₹{{ max_ltp|inr }}
+          {%- endif -%}
+        </span></div>
+        {% endif %}
         {% else %}
         <div class="rules-col-label">Entry — 52-week-high momentum, all must pass</div>
         <div class="rule"><span>Proximity to 52w high</span><span class="mono">&le; {{ strategy.get('proximity_to_52w_high_pct', '—') }}%</span></div>
@@ -887,6 +911,8 @@
         <div class="rule"><span>Trailing stop</span><span class="mono down">&minus;{{ risk.get('trailing_stop_pct', '—') }}% from peak close</span></div>
         {% if strategy.get('mode') == 'pivot_supertrend' %}
         <div class="rule"><span>SuperTrend flip</span><span class="mono down">line flips back to downtrend</span></div>
+        {% elif strategy.get('mode') == 'trend_pullback' %}
+        <div class="rule"><span>Trend break</span><span class="mono down">close below {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
         {% elif risk.get('exit_below_fast_ma') %}
         <div class="rule"><span>Momentum breakdown</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -1800,6 +1826,7 @@ function renderWatchlistNote(data) {
 const WATCHLIST_HEAD = {
   consolidation_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
   pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>Pivot</th><th>Above Pivot</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
+  trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
   default: `<th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>`,
 };
 
@@ -1822,6 +1849,16 @@ function watchlistRowHtml(mode, c) {
       <td class="mono up" data-label="Above Pivot">+${c.pct_above_pivot.toFixed(1)}%</td>
       <td class="mono" data-label="SuperTrend">₹${fmt(c.supertrend_value)}</td>
       <td class="mono" data-label="ATR">${fmt(c.atr)}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "trend_pullback") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Recent High">₹${fmt(c.recent_high)}</td>
+      <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
+      <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }

@@ -88,6 +88,16 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Pivot point + SuperTrend", "label": "Min % above pivot", "unit": "%",
      "desc": "How far above the prior day's pivot point a SuperTrend flip must occur to qualify."},
 
+    {"path": ("strategy", "trend_pullback", "pullback_lookback_days"), "type": "int", "min": 3, "max": 100,
+     "group": "Trend Pullback", "label": "Pullback lookback", "unit": "days",
+     "desc": "Window used to find the recent high a pullback is measured from. Only applies when strategy mode is trend_pullback."},
+    {"path": ("strategy", "trend_pullback", "min_pullback_pct"), "type": "float", "min": 0, "max": 50,
+     "group": "Trend Pullback", "label": "Min pullback depth", "unit": "%",
+     "desc": "Today's close must sit at least this far below the recent high to count as a real pullback, not noise."},
+    {"path": ("strategy", "trend_pullback", "max_pullback_pct"), "type": "float", "min": 0.5, "max": 90,
+     "group": "Trend Pullback", "label": "Max pullback depth", "unit": "%",
+     "desc": "Deeper than this and the uptrend may already be broken rather than just pulling back."},
+
     {"path": ("regime", "enabled"), "type": "bool",
      "group": "Market regime", "label": "Regime filter", "unit": "",
      "desc": "Block new entries while the benchmark index is below its own moving average."},
@@ -179,6 +189,7 @@ _STRATEGY_SUBSECTION_MODE = {
     "cross_sectional": "cross_sectional_momentum",
     "consolidation_breakout": "consolidation_breakout",
     "pivot_supertrend": "pivot_supertrend",
+    "trend_pullback": "trend_pullback",
 }
 
 
