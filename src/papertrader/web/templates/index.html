@@ -1181,6 +1181,8 @@ function renderEquityChart(curve, opts) {
   const accent = styles.getPropertyValue("--accent").trim();
   const border = styles.getPropertyValue("--border").trim();
   const inkFaint = styles.getPropertyValue("--ink-faint").trim();
+  const good = styles.getPropertyValue("--good").trim();
+  const bad = styles.getPropertyValue("--bad").trim();
 
   if (curve.length < 2) {
     document.getElementById(legendId).innerHTML = "";
@@ -1234,6 +1236,55 @@ function renderEquityChart(curve, opts) {
   ctx.lineWidth = 1.75;
   ctx.lineJoin = "round";
   ctx.stroke();
+
+  // Buy/sell markers: each trade is placed at the equity-curve point for
+  // its own day (curve is one point per day; a trade's own timestamp is
+  // finer-grained, so match on the date portion only -- several same-day
+  // trades land on the same point, which is the correct, honest picture
+  // rather than an invented sub-day position on a curve that doesn't
+  // track sub-day equity at all).
+  const trades = opts.trades || [];
+  if (trades.length) {
+    const curveDates = curve.map(p => String(p.timestamp).slice(0, 10));
+    let buyCount = 0, sellCount = 0;
+    trades.forEach(t => {
+      const tDate = String(t.timestamp || t.date).slice(0, 10);
+      let idx = curveDates.indexOf(tDate);
+      if (idx === -1) {
+        // No exact-day equity point (e.g. a trade on a day mark-to-market
+        // hasn't recorded yet) -- fall back to the closest earlier day so
+        // the marker still lands somewhere meaningful on the curve.
+        for (let i = curveDates.length - 1; i >= 0; i--) {
+          if (curveDates[i] <= tDate) { idx = i; break; }
+        }
+      }
+      if (idx === -1) return;
+      const isBuy = (t.side || "").toUpperCase() === "BUY";
+      if (isBuy) buyCount++; else sellCount++;
+      const px = x(idx), py = y(series[idx]);
+      const markerColor = isBuy ? good : bad;
+      ctx.beginPath();
+      if (isBuy) {
+        // Upward triangle above the curve point.
+        ctx.moveTo(px, py - 9);
+        ctx.lineTo(px - 4, py - 2);
+        ctx.lineTo(px + 4, py - 2);
+      } else {
+        // Downward triangle below the curve point.
+        ctx.moveTo(px, py + 9);
+        ctx.lineTo(px - 4, py + 2);
+        ctx.lineTo(px + 4, py + 2);
+      }
+      ctx.closePath();
+      ctx.fillStyle = markerColor;
+      ctx.fill();
+    });
+    if (buyCount || sellCount) {
+      document.getElementById(legendId).innerHTML +=
+        `<span><span class="mono" style="color:${good};">▲</span> Buy (${buyCount})</span>` +
+        `<span><span class="mono" style="color:${bad};">▼</span> Sell (${sellCount})</span>`;
+    }
+  }
 
   const lastX = x(series.length - 1), lastY = y(last);
   ctx.beginPath();
@@ -1645,6 +1696,7 @@ function renderBacktestResult(result, profileDisplay) {
   renderEquityChart(curve, {
     canvasId: "btEquityCanvas", legendId: "btChartLegend", metaId: null,
     emptyMessage: "No equity curve points for this range.",
+    trades: result.trade_log,
   });
 
   const tbody = document.getElementById("btTradesBody");
@@ -2013,17 +2065,23 @@ async function refreshComparison() {
 
 async function refresh() {
   try {
-    const [summary, trades, curve, perf] = await Promise.all([
+    const [summary, trades, curve, perf, chartTrades] = await Promise.all([
       authFetch("/api/summary").then(r => r.json()),
       authFetch("/api/trades?limit=50").then(r => r.json()),
       authFetch("/api/equity_curve").then(r => r.json()),
       authFetch("/api/performance").then(r => r.json()),
+      // A separate, longer fetch just for the chart's buy/sell markers --
+      // the Trade Log ticker above intentionally only shows the most
+      // recent 50, but the equity curve spans up to 500 days, so capping
+      // markers at the same 50 would silently drop older trades off the
+      // chart while the curve itself still shows that history.
+      authFetch("/api/trades?limit=500").then(r => r.json()),
     ]);
     renderStats(summary);
     renderInsights(summary);
     renderPositions(summary);
     renderTrades(trades);
-    renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf) });
+    renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf), trades: chartTrades });
     refreshIndices();
     refreshComparison();
   } catch (e) {
