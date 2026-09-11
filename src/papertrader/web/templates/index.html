@@ -1237,6 +1237,16 @@ function renderEquityChart(curve, opts) {
   ctx.lineJoin = "round";
   ctx.stroke();
 
+  // Last-point accent dot drawn BEFORE the buy/sell markers below, so a
+  // marker landing on the most recent day (a very common case -- the
+  // latest trade is often still today's) draws on top of it instead of
+  // being partly hidden underneath it.
+  const lastX = x(series.length - 1), lastY = y(last);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = accent;
+  ctx.fill();
+
   // Buy/sell markers: each trade is placed at the equity-curve point for
   // its own day (curve is one point per day; a trade's own timestamp is
   // finer-grained, so match on the date portion only -- several same-day
@@ -1285,12 +1295,6 @@ function renderEquityChart(curve, opts) {
         `<span><span class="mono" style="color:${bad};">▼</span> Sell (${sellCount})</span>`;
     }
   }
-
-  const lastX = x(series.length - 1), lastY = y(last);
-  ctx.beginPath();
-  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
-  ctx.fillStyle = accent;
-  ctx.fill();
 
   ctx.fillStyle = inkFaint;
   ctx.font = "10.5px 'IBM Plex Mono', monospace";
