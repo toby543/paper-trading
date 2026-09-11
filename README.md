@@ -84,17 +84,19 @@ other strategy, plus its own momentum-breakdown check (close below the
 a classical retail swing-trading combo, adapted to this app's daily-bar
 cadence (not true intraday day-trading, which would need a different
 data source and a much shorter scan interval across the whole engine).
-The prior day's floor-trader pivot point — `(High + Low + Close) / 3` —
-sets the day's bullish/bearish bias; a stock only qualifies while
-trading above it. The actual entry trigger is a **SuperTrend flip**: an
-ATR-based trailing band (Wilder-smoothed, `strategy.pivot_supertrend.atr_period`
-days, `supertrend_multiplier` ATRs wide — the standard SuperTrend
-definition) that hugs price from below in an uptrend and above it in a
-downtrend, switching sides whenever price closes through it. A *fresh*
-flip from downtrend to uptrend is the buy signal, not merely "currently
-above the line" (which would re-qualify every day of an
-already-established uptrend). Ranked by how decisively price cleared the
-line, in ATR units, plus how far above the pivot it's trading. Exits
+The prior day's floor-trader pivot point — `P = (High + Low + Close) / 3`,
+then `R1 = 2P − Low` — sets the day's bullish/bearish bias; a stock only
+qualifies while trading above **R1** (the first resistance level, a
+stricter/higher bar than the central pivot P). The actual entry trigger
+is a **SuperTrend flip**: an ATR-based trailing band (Wilder-smoothed,
+`strategy.pivot_supertrend.atr_period` days, `supertrend_multiplier`
+ATRs wide — the standard SuperTrend definition) that hugs price from
+below in an uptrend and above it in a downtrend, switching sides
+whenever price closes through it. A *fresh* flip from downtrend to
+uptrend is the buy signal, not merely "currently above the line" (which
+would re-qualify every day of an already-established uptrend). Ranked by
+how decisively price cleared the line, in ATR units, plus how far above
+R1 it's trading. Exits
 reuse the same hard-stop/trailing-stop/take-profit rules as every other
 strategy, plus its own trigger — the SuperTrend line flipping back to a
 downtrend — in place of the moving-average momentum-breakdown check the
@@ -450,7 +452,7 @@ All thresholds live in `config.yaml`:
 - `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, `pivot_supertrend`, or `trend_pullback` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
 - `strategy.cross_sectional.lookback_days` / `skip_recent_days` / `top_pct` — only used in `cross_sectional_momentum` mode: the trailing-return ranking window and the top percentile bought.
 - `strategy.consolidation_breakout.consolidation_days` / `max_consolidation_range_pct` / `volume_multiple` — only used in `consolidation_breakout` mode: the base period, how tight it must be, and the breakout volume threshold.
-- `strategy.pivot_supertrend.atr_period` / `supertrend_multiplier` / `min_pct_above_pivot` — only used in `pivot_supertrend` mode: the ATR window, SuperTrend band width, and how far above the prior day's pivot a flip must occur.
+- `strategy.pivot_supertrend.atr_period` / `supertrend_multiplier` / `min_pct_above_r1` — only used in `pivot_supertrend` mode: the ATR window, SuperTrend band width, and how far above the prior day's R1 (first resistance) a flip must occur.
 - `strategy.trend_pullback.pullback_lookback_days` / `min_pullback_pct` / `max_pullback_pct` — only used in `trend_pullback` mode: the window used to find the recent high, and the depth range a pullback from it must fall within.
 - `strategy.proximity_to_52w_high_pct` — how close to the 52-week high a stock must be to qualify (52w_high mode only).
 - `strategy.min_momentum_return_pct` / `momentum_lookback_days` — trailing momentum filter.

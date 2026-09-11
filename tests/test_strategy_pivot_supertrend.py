@@ -20,7 +20,7 @@ import pytest
 from papertrader.data.nse_client import Quote
 from papertrader.strategy.pivot_supertrend import (
     _atr,
-    _prior_day_pivot,
+    _prior_day_r1,
     _supertrend,
     check_exit,
     evaluate_candidate,
@@ -29,7 +29,7 @@ from papertrader.portfolio.models import Position
 
 CFG = {
     "min_avg_daily_turnover_inr": 50_000_000,
-    "pivot_supertrend": {"atr_period": 10, "supertrend_multiplier": 3.0, "min_pct_above_pivot": 0.0},
+    "pivot_supertrend": {"atr_period": 10, "supertrend_multiplier": 3.0, "min_pct_above_r1": 0.0},
 }
 
 PERIOD = 10
@@ -92,12 +92,13 @@ def test_atr_is_positive_and_stable_once_seeded():
     assert 0.5 < atr.iloc[-3] < 1.5
 
 
-def test_pivot_uses_only_the_prior_bar():
+def test_r1_uses_only_the_prior_bar():
     hist = _reversal_history()
-    pivot = _prior_day_pivot(hist)
+    r1 = _prior_day_r1(hist)
     prev = hist.iloc[-2]
-    expected = (prev["High"] + prev["Low"] + prev["Close"]) / 3.0
-    assert pivot == pytest.approx(expected)
+    expected_pivot = (prev["High"] + prev["Low"] + prev["Close"]) / 3.0
+    expected_r1 = 2.0 * expected_pivot - prev["Low"]
+    assert r1 == pytest.approx(expected_r1)
 
 
 # --------------------------------------------------------------- entries
@@ -110,7 +111,7 @@ def test_genuine_reversal_qualifies():
                               avg_daily_turnover=100_000_000, cfg=CFG)
     assert cand is not None
     assert cand.symbol == "TEST"
-    assert cand.pct_above_pivot > 0
+    assert cand.pct_above_r1 > 0
     assert cand.supertrend_value < breakout_close
 
 
@@ -135,15 +136,15 @@ def test_illiquid_symbol_rejected():
     assert reasons == {"illiquid": 1}
 
 
-def test_min_pct_above_pivot_filter():
+def test_min_pct_above_r1_filter():
     hist = _reversal_history()
     breakout_close = float(hist["Close"].iloc[-1])
-    strict_cfg = {**CFG, "pivot_supertrend": {**CFG["pivot_supertrend"], "min_pct_above_pivot": 50.0}}
+    strict_cfg = {**CFG, "pivot_supertrend": {**CFG["pivot_supertrend"], "min_pct_above_r1": 50.0}}
     reasons: dict[str, int] = {}
     cand = evaluate_candidate("TEST", _quote(breakout_close), hist,
                               avg_daily_turnover=100_000_000, cfg=strict_cfg, reasons=reasons)
     assert cand is None
-    assert reasons == {"below_pivot": 1}
+    assert reasons == {"below_r1": 1}
 
 
 def test_insufficient_history_rejected_not_crashed():

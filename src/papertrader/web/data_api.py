@@ -408,8 +408,8 @@ def build_candidates(engine, limit: int = 20) -> dict:
             rows.append({
                 "symbol": cand.symbol,
                 "ltp": round(cand.ltp, 2),
-                "pivot": round(cand.pivot, 2),
-                "pct_above_pivot": round(cand.pct_above_pivot, 2),
+                "r1": round(cand.r1, 2),
+                "pct_above_r1": round(cand.pct_above_r1, 2),
                 "supertrend_value": round(cand.supertrend_value, 2),
                 "atr": round(cand.atr, 2),
                 "score": round(cand.score, 2),

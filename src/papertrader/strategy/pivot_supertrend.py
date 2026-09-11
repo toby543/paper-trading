@@ -2,10 +2,16 @@
 
 A popular retail day/swing-trading combo: classical floor-trader pivot
 points set the day's directional bias, and the ATR-based SuperTrend
-indicator triggers the actual entry/exit.
+indicator triggers the actual entry/exit. Modeled on a specific published
+version of this combo (SuperTrend(10,3) + Pivot Points Traditional, R1 as
+the entry trigger level, daily chart) rather than the generic "trade
+above the central pivot" variant -- R1 is a materially higher, stricter
+bar to clear than the central pivot P would be.
 
-  1. Pivot point: P = (prior day's High + Low + Close) / 3. Trading above
-     P is the bullish-bias zone; this strategy only goes long there.
+  1. Pivot point: P = (prior day's High + Low + Close) / 3, then
+     R1 = 2P - prior day's Low (the standard first-resistance level).
+     Trading above R1 -- not merely above P -- is the bullish-bias zone
+     this strategy requires before it'll go long.
   2. SuperTrend: an ATR-based trailing band (Wilder-smoothed ATR, the
      standard SuperTrend definition) that flips sides whenever price
      closes through it. A fresh flip from below the line to above it is
@@ -42,8 +48,8 @@ from ..portfolio.models import Position
 class Candidate:
     symbol: str
     ltp: float
-    pivot: float
-    pct_above_pivot: float
+    r1: float
+    pct_above_r1: float
     supertrend_value: float
     atr: float
     score: float
@@ -124,17 +130,20 @@ def _supertrend(history: pd.DataFrame, period: int, multiplier: float):
     )
 
 
-def _prior_day_pivot(history: pd.DataFrame) -> float | None:
-    """Standard floor-trader pivot from the PRIOR bar's High/Low/Close.
-    Deliberately excludes today's own bar -- using today's own high/low
-    to judge whether today is trading above/below its own pivot would be
-    circular."""
+def _prior_day_r1(history: pd.DataFrame) -> float | None:
+    """Standard floor-trader R1 (first resistance) from the PRIOR bar's
+    High/Low/Close: P = (H+L+C)/3, then R1 = 2P - L. Deliberately
+    excludes today's own bar -- using today's own high/low to judge
+    whether today is trading above/below its own pivot levels would be
+    circular. R1, not the central pivot P, is the level this strategy
+    requires price to clear -- a stricter, higher bar than P."""
     if len(history) < 2:
         return None
     prev = history.iloc[-2]
     if pd.isna(prev["High"]) or pd.isna(prev["Low"]) or pd.isna(prev["Close"]):
         return None
-    return float((prev["High"] + prev["Low"] + prev["Close"]) / 3.0)
+    pivot = (prev["High"] + prev["Low"] + prev["Close"]) / 3.0
+    return float(2.0 * pivot - prev["Low"])
 
 
 def evaluate_candidate(
@@ -180,15 +189,15 @@ def evaluate_candidate(
         reject("no_supertrend_flip")
         return None
 
-    pivot = _prior_day_pivot(history)
-    if pivot is None or pivot <= 0:
+    r1 = _prior_day_r1(history)
+    if r1 is None or r1 <= 0:
         reject("insufficient_history")
         return None
 
-    pct_above_pivot = (quote.ltp - pivot) / pivot * 100.0
-    min_pct_above_pivot = ps_cfg.get("min_pct_above_pivot", 0.0)
-    if pct_above_pivot < min_pct_above_pivot:
-        reject("below_pivot")
+    pct_above_r1 = (quote.ltp - r1) / r1 * 100.0
+    min_pct_above_r1 = ps_cfg.get("min_pct_above_r1", 0.0)
+    if pct_above_r1 < min_pct_above_r1:
+        reject("below_r1")
         return None
 
     atr_series = _atr(history, atr_period)
@@ -197,17 +206,17 @@ def evaluate_candidate(
 
     # Score: how decisively price cleared the SuperTrend line, in ATR
     # units so it's comparable across stocks at very different price
-    # levels, plus a smaller bonus for trading further above the day's
-    # pivot -- a flip right at the pivot is a weaker bullish-bias signal
-    # than one with real room above it.
+    # levels, plus a smaller bonus for trading further above R1 -- a
+    # flip right at R1 is a weaker bullish-bias signal than one with
+    # real room above it.
     breakout_strength = (quote.ltp - supertrend_value) / atr_value if atr_value > 0 else 0.0
-    score = breakout_strength * 10.0 + pct_above_pivot
+    score = breakout_strength * 10.0 + pct_above_r1
 
     return Candidate(
         symbol=symbol,
         ltp=quote.ltp,
-        pivot=round(pivot, 2),
-        pct_above_pivot=round(pct_above_pivot, 2),
+        r1=round(r1, 2),
+        pct_above_r1=round(pct_above_r1, 2),
         supertrend_value=round(supertrend_value, 2),
         atr=round(atr_value, 2),
         score=score,

@@ -797,12 +797,12 @@
         {% elif strategy.get('mode') == 'pivot_supertrend' %}
         {% set ps = strategy.get('pivot_supertrend', {}) %}
         <div class="rules-col-label">Entry — pivot point + SuperTrend</div>
-        <div class="rule"><span>Bias</span><span class="mono">price &gt; prior day's pivot, (H+L+C)&divide;3</span></div>
+        <div class="rule"><span>Bias</span><span class="mono">price &gt; prior day's R1 (2P &minus; Low)</span></div>
         <div class="rule"><span>Trigger</span><span class="mono">fresh SuperTrend flip to uptrend</span></div>
         <div class="rule"><span>ATR period</span><span class="mono">{{ ps.get('atr_period', '—') }}d</span></div>
         <div class="rule"><span>SuperTrend factor</span><span class="mono">{{ ps.get('supertrend_multiplier', '—') }}&times; ATR</span></div>
-        {% if ps.get('min_pct_above_pivot') %}
-        <div class="rule"><span>Min above pivot</span><span class="mono">&ge; {{ ps.get('min_pct_above_pivot') }}%</span></div>
+        {% if ps.get('min_pct_above_r1') %}
+        <div class="rule"><span>Min above R1</span><span class="mono">&ge; {{ ps.get('min_pct_above_r1') }}%</span></div>
         {% endif %}
         <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
@@ -1825,7 +1825,7 @@ function renderWatchlistNote(data) {
 // (signed %, the 52w-high tooltip, etc.) each one actually needs.
 const WATCHLIST_HEAD = {
   consolidation_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
-  pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>Pivot</th><th>Above Pivot</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
+  pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>R1</th><th>Above R1</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
   trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
   default: `<th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>`,
 };
@@ -1845,8 +1845,8 @@ function watchlistRowHtml(mode, c) {
     return `
       <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="Pivot">₹${fmt(c.pivot)}</td>
-      <td class="mono up" data-label="Above Pivot">+${c.pct_above_pivot.toFixed(1)}%</td>
+      <td class="mono" data-label="R1">₹${fmt(c.r1)}</td>
+      <td class="mono up" data-label="Above R1">+${c.pct_above_r1.toFixed(1)}%</td>
       <td class="mono" data-label="SuperTrend">₹${fmt(c.supertrend_value)}</td>
       <td class="mono" data-label="ATR">${fmt(c.atr)}</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>

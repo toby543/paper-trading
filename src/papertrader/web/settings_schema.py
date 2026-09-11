@@ -84,9 +84,9 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "pivot_supertrend", "supertrend_multiplier"), "type": "float", "min": 0.5, "max": 10.0,
      "group": "Pivot point + SuperTrend", "label": "SuperTrend multiplier", "unit": "× ATR",
      "desc": "Band width either side of the midpoint. Wider means fewer, more decisive flips (less whipsaw, later entries)."},
-    {"path": ("strategy", "pivot_supertrend", "min_pct_above_pivot"), "type": "float", "min": 0, "max": 50,
-     "group": "Pivot point + SuperTrend", "label": "Min % above pivot", "unit": "%",
-     "desc": "How far above the prior day's pivot point a SuperTrend flip must occur to qualify."},
+    {"path": ("strategy", "pivot_supertrend", "min_pct_above_r1"), "type": "float", "min": 0, "max": 50,
+     "group": "Pivot point + SuperTrend", "label": "Min % above R1", "unit": "%",
+     "desc": "How far above the prior day's R1 (first resistance) a SuperTrend flip must occur to qualify."},
 
     {"path": ("strategy", "trend_pullback", "pullback_lookback_days"), "type": "int", "min": 3, "max": 100,
      "group": "Trend Pullback", "label": "Pullback lookback", "unit": "days",

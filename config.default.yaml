@@ -138,11 +138,11 @@ profiles:
         # flips (less whipsaw, later entries); narrower = more, earlier,
         # noisier flips.
         supertrend_multiplier: 3.0
-        # A SuperTrend flip alone qualifies at min_pct_above_pivot: 0 (any
-        # amount above the prior day's pivot). Raise this to require the
-        # flip to happen with more room above the pivot, i.e. a more
+        # A SuperTrend flip alone qualifies at min_pct_above_r1: 0 (any
+        # amount above the prior day's R1). Raise this to require the
+        # flip to happen with more room above R1, i.e. a more
         # decisively bullish-biased day, not just barely above it.
-        min_pct_above_pivot: 0.0
+        min_pct_above_r1: 0.0
 
   trend_pullback:
     display_name: "Trend Pullback"
