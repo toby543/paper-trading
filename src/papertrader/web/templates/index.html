@@ -2063,25 +2063,44 @@ async function refreshComparison() {
   }
 }
 
+// The chart-markers trade list only needs to be reasonably fresh, not
+// live -- trades happen at most a few times a day, nowhere near the 10s
+// cadence refresh() otherwise polls at. Re-fetching all 500 on every
+// single tick would be a lot of pointless repeated querying for data
+// that's almost always unchanged since the last tick; cache it and only
+// refetch once every REFRESH_TICKS_PER_CHART_TRADES_FETCH ticks instead.
+let chartTradesCache = [];
+let refreshTickCount = 0;
+const REFRESH_TICKS_PER_CHART_TRADES_FETCH = 6; // ~once a minute at the 10s cadence below
+
 async function refresh() {
   try {
-    const [summary, trades, curve, perf, chartTrades] = await Promise.all([
+    const dueForChartTrades = refreshTickCount % REFRESH_TICKS_PER_CHART_TRADES_FETCH === 0;
+    refreshTickCount++;
+
+    const fetches = [
       authFetch("/api/summary").then(r => r.json()),
       authFetch("/api/trades?limit=50").then(r => r.json()),
       authFetch("/api/equity_curve").then(r => r.json()),
       authFetch("/api/performance").then(r => r.json()),
-      // A separate, longer fetch just for the chart's buy/sell markers --
-      // the Trade Log ticker above intentionally only shows the most
-      // recent 50, but the equity curve spans up to 500 days, so capping
-      // markers at the same 50 would silently drop older trades off the
-      // chart while the curve itself still shows that history.
-      authFetch("/api/trades?limit=500").then(r => r.json()),
-    ]);
+    ];
+    // A separate, longer fetch just for the chart's buy/sell markers --
+    // the Trade Log ticker above intentionally only shows the most
+    // recent 50, but the equity curve spans up to 500 days, so capping
+    // markers at the same 50 would silently drop older trades off the
+    // chart while the curve itself still shows that history.
+    if (dueForChartTrades) {
+      fetches.push(authFetch("/api/trades?limit=500").then(r => r.json()));
+    }
+
+    const [summary, trades, curve, perf, chartTrades] = await Promise.all(fetches);
+    if (dueForChartTrades) chartTradesCache = chartTrades;
+
     renderStats(summary);
     renderInsights(summary);
     renderPositions(summary);
     renderTrades(trades);
-    renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf), trades: chartTrades });
+    renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf), trades: chartTradesCache });
     refreshIndices();
     refreshComparison();
   } catch (e) {
