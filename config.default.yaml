@@ -45,6 +45,8 @@ multi_profile_mode: true
 profiles:
   52w_high:
     display_name: "52-Week High Momentum"
+    # Which dashboard tab this profile shows under: "swing" or "long_term".
+    category: swing
     # Existing trades stay here - if you have data/state.db, it will be used as the base
     state_file: data/state_52w_high.db
     starting_capital: 100000.0
@@ -70,6 +72,7 @@ profiles:
 
   cross_sectional:
     display_name: "Cross-Sectional Momentum"
+    category: swing
     # Fresh ledger independent from 52w_high
     state_file: data/state_cross_sectional.db
     starting_capital: 100000.0
@@ -89,6 +92,7 @@ profiles:
 
   consolidation_breakout:
     display_name: "Consolidation Breakout"
+    category: swing
     # Fresh ledger independent from 52w_high
     state_file: data/state_consolidation.db
     starting_capital: 100000.0
@@ -120,6 +124,7 @@ profiles:
 
   pivot_supertrend:
     display_name: "Pivot Point + SuperTrend"
+    category: swing
     # Fresh ledger independent from the other three profiles
     state_file: data/state_pivot_supertrend.db
     starting_capital: 100000.0
@@ -146,6 +151,7 @@ profiles:
 
   trend_pullback:
     display_name: "Trend Pullback"
+    category: swing
     # Fresh ledger independent from the other four profiles
     state_file: data/state_trend_pullback.db
     starting_capital: 100000.0
@@ -171,6 +177,46 @@ profiles:
         # ...but no more than this far below it -- deeper than this and the
         # uptrend may already be broken rather than just pulling back.
         max_pullback_pct: 12.0
+
+  long_term_trend:
+    display_name: "Long Term Trend"
+    category: long_term
+    # Fresh ledger independent from the other five profiles
+    state_file: data/state_long_term_trend.db
+    starting_capital: 100000.0
+    strategy_mode: long_term_trend
+    # This profile starts fresh with new capital
+    strategy:
+      # Years-long windows, not weeks -- this profile asks "is this stock
+      # in a well-established multi-year uptrend?", not "is today a good
+      # entry?". fast_ma_days/slow_ma_days here play the same structural
+      # role (price > fast > slow) as every other profile's moving
+      # averages, just stretched from weeks to years.
+      fast_ma_days: 200
+      slow_ma_days: 400
+      # A real, multi-year return required on top of the trend check --
+      # merely sitting above a long average for a year of sideways drift
+      # isn't the "already compounding" story this strategy looks for.
+      momentum_lookback_days: 252
+      min_momentum_return_pct: 12.0
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      min_ltp_inr: 0
+      max_ltp_inr: 0
+    # Deliberately much wider than the swing profiles' shared risk
+    # defaults -- risk is profile-scoped (like strategy) precisely so
+    # this profile can tolerate the ordinary volatility of a years-long
+    # hold without getting stopped out of what's still a perfectly
+    # healthy uptrend. Position sizing stays modest (fewer, longer-held
+    # names) rather than the swing profiles' faster-turnover sizing.
+    risk:
+      stop_loss_pct: 20.0
+      trailing_stop_pct: 25.0
+      take_profit_pct: 0
+      position_size_pct_of_equity: 10.0
+      max_open_positions: 8
+      max_cash_deployed_per_scan_pct: 40.0
+      reentry_cooldown_days: 3
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile

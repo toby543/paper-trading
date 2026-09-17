@@ -239,11 +239,12 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         active_state_file_short = os.path.basename(active_state_file)
         active_starting_capital = cfg.get_profile_starting_capital(active_profile)
 
-        # This profile's own strategy parameters (mode + any of its own
-        # overrides merged over the shared base) -- what actually governs
-        # its live trading and what the Strategy Rules / Edit Settings
-        # panels display and edit.
+        # This profile's own strategy and risk parameters (mode + any of
+        # its own overrides merged over the shared base) -- what actually
+        # governs its live trading and what the Strategy Rules / All
+        # Settings / Edit Settings panels display and edit.
         strategy = cfg.get_profile_strategy_config(active_profile)
+        risk = cfg.get_profile_risk_config(active_profile)
 
         return render_template(
             "index.html",
@@ -251,7 +252,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
             strategy=strategy,
-            risk=cfg.get("risk", default={}),
+            risk=risk,
             regime=cfg.get("regime", default={}),
             account=cfg.get("account", default={}),
             universe_cfg=cfg.get("universe", default={}),
@@ -260,6 +261,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             data_source=cfg.get("data_source", default={}),
             logging_cfg=cfg.get("logging", default={}),
             profiles=cfg.list_profiles(),
+            profile_categories=cfg.list_profile_categories(),
             active_profile=active_profile,
             active_state_file=active_state_file,
             active_state_file_short=active_state_file_short,
@@ -355,14 +357,17 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         """Where a logical setting path (as used in EDITABLE_SETTINGS and
         coerce_and_validate) actually lives in config.yaml for the
         currently active profile. Most settings are global and map
-        straight through; a profile-scoped one -- every "strategy.*"
-        field (see Config.get_profile_strategy_config), plus
-        starting_capital (Config.get_profile_starting_capital) -- is
-        redirected under profiles.<active_profile>.* instead of the
-        shared/legacy global field, since that's what each profile's
-        own engine actually reads."""
-        if logical_path and logical_path[0] == "strategy":
-            return ["profiles", active_profile, "strategy", *logical_path[1:]]
+        straight through; a profile-scoped one -- every "strategy.*" or
+        "risk.*" field (see Config.get_profile_strategy_config /
+        get_profile_risk_config), plus starting_capital
+        (Config.get_profile_starting_capital) -- is redirected under
+        profiles.<active_profile>.* instead of the shared/legacy global
+        field, since that's what each profile's own engine actually
+        reads. risk.* became profile-scoped alongside strategy.* so a
+        long-horizon profile can run much wider stops than a swing one
+        without dragging every other profile's risk settings along with it."""
+        if logical_path and logical_path[0] in ("strategy", "risk"):
+            return ["profiles", active_profile, logical_path[0], *logical_path[1:]]
         if logical_path == ("account", "starting_capital"):
             return ["profiles", active_profile, "starting_capital"]
         return list(logical_path)
@@ -380,18 +385,20 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     def api_get_settings():
         """Every field's current value, resolved against whichever
         profile the dashboard is currently viewing: a profile-scoped
-        field (strategy.* or starting_capital) shows that profile's own
-        value, so switching the profile dropdown and reopening this
-        panel shows and edits that profile's own settings, not some
-        other profile's. A strategy-specific field (e.g. pivot_supertrend's
-        ATR period) is left out entirely when the active profile runs a
-        different strategy -- those settings have no effect on it, so
-        showing them there is just confusing, not merely inapplicable."""
+        field (strategy.*, risk.*, or starting_capital) shows that
+        profile's own value, so switching the profile dropdown and
+        reopening this panel shows and edits that profile's own
+        settings, not some other profile's. A strategy-specific field
+        (e.g. pivot_supertrend's ATR period) is left out entirely when
+        the active profile runs a different strategy -- those settings
+        have no effect on it, so showing them there is just confusing,
+        not merely inapplicable."""
         active_profile = cfg.get("active_profile", default="52w_high")
         active_mode = cfg.get_profile_strategy_mode(active_profile)
         effective_raw = {
             **cfg.raw,
             "strategy": cfg.get_profile_strategy_config(active_profile),
+            "risk": cfg.get_profile_risk_config(active_profile),
             "account": {**cfg.get("account", default={}), "starting_capital": cfg.get_profile_starting_capital(active_profile)},
         }
         fields = []

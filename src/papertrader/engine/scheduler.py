@@ -23,7 +23,7 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
-from ..strategy import consolidation_breakout, pivot_supertrend, trend_pullback
+from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -79,10 +79,11 @@ class TradingEngine:
             slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
         )
+        profile_risk_cfg = cfg.get_profile_risk_config(self.profile_name)
         self.risk = RiskManager(
-            max_open_positions=cfg.get("risk", "max_open_positions", default=10),
-            position_size_pct_of_equity=cfg.get("risk", "position_size_pct_of_equity", default=8.0),
-            max_cash_deployed_per_scan_pct=cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0),
+            max_open_positions=profile_risk_cfg.get("max_open_positions", 10),
+            position_size_pct_of_equity=profile_risk_cfg.get("position_size_pct_of_equity", 8.0),
+            max_cash_deployed_per_scan_pct=profile_risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0),
         )
         self.data = MarketDataClient(
             preferred=cfg.get("data_source", "preferred", default="nse"),
@@ -96,7 +97,7 @@ class TradingEngine:
         # TradingEngine instances sharing this same Config object in
         # multi_profile_mode.
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
-        self.risk_cfg = cfg.get("risk", default={})
+        self.risk_cfg = profile_risk_cfg
         self.regime_cfg = cfg.get("regime", default={})
 
     def reload_profile(self) -> str:
@@ -134,7 +135,7 @@ class TradingEngine:
             )
 
             new_strategy_cfg = self.cfg.get_profile_strategy_config(new_profile)
-            new_risk_cfg = self.cfg.get("risk", default={})
+            new_risk_cfg = self.cfg.get_profile_risk_config(new_profile)
             new_regime_cfg = self.cfg.get("regime", default={})
 
             with self._state_lock:
@@ -144,6 +145,13 @@ class TradingEngine:
                 self.strategy_cfg = new_strategy_cfg
                 self.risk_cfg = new_risk_cfg
                 self.regime_cfg = new_regime_cfg
+                # Profiles can now genuinely differ here (e.g. a long-term
+                # profile's much wider position sizing), so the live
+                # RiskManager's own mutable attributes need updating too,
+                # not just the risk_cfg dict passed into check_exit calls.
+                self.risk.max_open_positions = new_risk_cfg.get("max_open_positions", 10)
+                self.risk.position_size_pct_of_equity = new_risk_cfg.get("position_size_pct_of_equity", 8.0)
+                self.risk.max_cash_deployed_per_scan_pct = new_risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
 
             log.info("✓ Engine reloaded successfully for profile: %s (strategy: %s, ledger: %s)",
                      new_profile, self.strategy_cfg.get("mode"), state_file)
@@ -186,6 +194,8 @@ class TradingEngine:
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history, cfg)
             elif mode == "trend_pullback":
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history, cfg)
+            elif mode == "long_term_trend":
+                should_exit, reason = long_term_trend.check_exit(pos, quote, history, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history, cfg)
             if should_exit:
@@ -405,6 +415,44 @@ class TradingEngine:
                                           candidates=len(candidates), reasons=reasons)
             return trend_pullback.rank_candidates(candidates)
 
+        if mode == "long_term_trend":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="2y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = long_term_trend.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one symbol's malformed data must never
+                    # take down the whole scan, let alone this engine's entire background thread.
+                    log.warning("long_term_trend: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "long_term_trend scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return long_term_trend.rank_candidates(candidates)
+
         # Default: 52w_high strategy
         # Fetch the benchmark index once per scan (cached) so every
         # candidate's relative strength is judged against the same frame,
@@ -572,13 +620,14 @@ class TradingEngine:
                 # the two can't interleave and leave stale values in place.
                 if self.cfg.reload():
                     strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
+                    risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
                     with self._state_lock:
                         self.strategy_cfg = strategy_cfg
-                        self.risk_cfg = self.cfg.get("risk", default={})
+                        self.risk_cfg = risk_cfg
                         self.regime_cfg = self.cfg.get("regime", default={})
-                        self.risk.max_open_positions = self.cfg.get("risk", "max_open_positions", default=10)
-                        self.risk.position_size_pct_of_equity = self.cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-                        self.risk.max_cash_deployed_per_scan_pct = self.cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                        self.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
+                        self.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
+                        self.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
                         self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
                     log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
 

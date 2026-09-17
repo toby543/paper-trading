@@ -319,6 +319,7 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
     engine wrote to its equity_curve during mark_to_market (refreshed
     every exit-check cycle), which is already live-marked."""
     display_names = cfg.list_profiles()
+    categories = cfg.list_profile_categories()
     rows = []
 
     for profile_name, engine in engines.items():
@@ -344,6 +345,7 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
             rows.append({
                 "profile": profile_name,
                 "display_name": display_names.get(profile_name, profile_name),
+                "category": categories.get(profile_name, "swing"),
                 "strategy_mode": cfg.get_profile_strategy_mode(profile_name),
                 "starting_capital": round(starting_capital, 2),
                 "total_equity": round(total_equity, 2),
@@ -374,9 +376,9 @@ def build_candidates(engine, limit: int = 20) -> dict:
     The Candidate shape returned by find_candidates() differs by mode:
     52w_high and cross_sectional_momentum both use
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
-    consolidation_breakout.Candidate, pivot_supertrend.Candidate, and
-    trend_pullback.Candidate are all separate dataclasses with none of
-    that shape's fields (no week52_high, pct_from_52w_high,
+    consolidation_breakout.Candidate, pivot_supertrend.Candidate,
+    trend_pullback.Candidate, and long_term_trend.Candidate are all
+    separate dataclasses with none of that shape's fields (no week52_high, pct_from_52w_high,
     relative_strength_pct, volume_multiple). Building one hardcoded row
     shape for every mode previously raised AttributeError the moment one
     of the non-momentum_52w_high modes actually found a candidate --
@@ -421,6 +423,15 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "recent_high": round(cand.recent_high, 2),
                 "pct_from_high": round(cand.pct_from_high, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "long_term_trend":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "fast_ma": round(cand.fast_ma, 2),
+                "slow_ma": round(cand.slow_ma, 2),
+                "momentum_return_pct": round(cand.momentum_return_pct, 2),
                 "score": round(cand.score, 2),
             })
         else:

@@ -39,7 +39,7 @@ from ..strategy.momentum_52w_high import (
     is_market_in_uptrend,
     rank_candidates as rank_52w,
 )
-from ..strategy import consolidation_breakout, pivot_supertrend, trend_pullback
+from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,11 @@ def _required_trading_days(strategy_cfg: dict) -> int:
         tp_cfg = strategy_cfg.get("trend_pullback") or {}
         needed = max(needed, int(tp_cfg.get("pullback_lookback_days", 20)))
     else:
+        # Also covers long_term_trend, which uses momentum_lookback_days
+        # exactly like 52w_high does -- its slow_ma_days (typically ~400,
+        # a years-long average) is already picked up by the max() above,
+        # since that reads straight from strategy_cfg rather than
+        # hardcoding the other modes' 200-day default.
         needed = max(needed, int(strategy_cfg.get("momentum_lookback_days", 252) or 0) + 1)
     if mode == "consolidation_breakout":
         cb_cfg = strategy_cfg.get("consolidation_breakout") or {}
@@ -163,10 +168,11 @@ class Backtester:
         # Profile-scoped, exactly like TradingEngine does it -- otherwise a
         # backtest would replay the shared fallback block that no profile
         # actually runs verbatim, silently testing the wrong strategy with
-        # the wrong parameters. risk/regime/universe stay global, matching
-        # live trading.
+        # the wrong parameters. risk is profile-scoped too (a long-horizon
+        # profile can run much wider stops than a swing one); regime/
+        # universe stay global, matching live trading.
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
-        self.risk_cfg = cfg.get("risk", default={})
+        self.risk_cfg = cfg.get_profile_risk_config(self.profile_name)
         self.regime_cfg = cfg.get("regime", default={})
         # Bounds every yfinance .history() call below -- without it, a
         # stalled connection on any one symbol hangs the whole fetch loop
@@ -188,9 +194,9 @@ class Backtester:
         )
 
         self.risk = RiskManager(
-            max_open_positions=cfg.get("risk", "max_open_positions", default=10),
-            position_size_pct_of_equity=cfg.get("risk", "position_size_pct_of_equity", default=8.0),
-            max_cash_deployed_per_scan_pct=cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0),
+            max_open_positions=self.risk_cfg.get("max_open_positions", 10),
+            position_size_pct_of_equity=self.risk_cfg.get("position_size_pct_of_equity", 8.0),
+            max_cash_deployed_per_scan_pct=self.risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0),
         )
         self.starting_capital = cfg.get_profile_starting_capital(self.profile_name)
 
@@ -374,6 +380,8 @@ class Backtester:
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history_upto, cfg)
             elif mode == "trend_pullback":
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history_upto, cfg)
+            elif mode == "long_term_trend":
+                should_exit, reason = long_term_trend.check_exit(pos, quote, history_upto, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
@@ -487,6 +495,26 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = trend_pullback.rank_candidates(candidates)
+        elif mode == "long_term_trend":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = long_term_trend.evaluate_candidate(
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
+                    reasons=self._entry_rejections,
+                )
+                if cand:
+                    candidates.append(cand)
+            ranked = long_term_trend.rank_candidates(candidates)
         else:
             candidates: list[Candidate52w] = []
             for symbol in self.universe:

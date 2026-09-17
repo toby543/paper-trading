@@ -194,6 +194,20 @@
   .period-select:hover { color: var(--ink); border-color: var(--accent); }
   .period-select:focus { outline: none; border-color: var(--accent); }
 
+  /* ---------- trading-horizon tabs ---------- */
+  .tab-bar {
+    display: flex; gap: 4px; padding: 4px; margin-bottom: 20px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+    width: fit-content;
+  }
+  .trading-tab {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; font-weight: 600;
+    padding: 8px 18px; border-radius: 999px; border: none; background: transparent; color: var(--ink-dim);
+    cursor: pointer; transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  .trading-tab:hover { color: var(--ink); }
+  .trading-tab.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+
   /* ---------- profile selector ---------- */
   .profile-select {
     appearance: none; -webkit-appearance: none;
@@ -520,6 +534,17 @@
 </div>
 
 <div class="shell">
+
+  <!-- Trading-horizon tabs: filters which profiles the selector/comparison
+       panel below show. Swing profiles existed before this tab system did,
+       so a profile with no explicit category defaults to "swing" -- see
+       Config.list_profile_categories(). -->
+  {% if profile_categories.values() | unique | list | length > 1 %}
+  <div class="tab-bar" id="tradingTabBar">
+    <button class="trading-tab" data-category="swing" id="tabSwing">Swing Trading</button>
+    <button class="trading-tab" data-category="long_term" id="tabLongTerm">Long Term Trading</button>
+  </div>
+  {% endif %}
 
   <!-- Profile Info Banner -->
   {% if profiles %}
@@ -871,6 +896,28 @@
           {%- endif -%}
         </span></div>
         {% endif %}
+        {% elif strategy.get('mode') == 'long_term_trend' %}
+        <div class="rules-col-label">Entry — long term trend</div>
+        <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; {{ strategy.get('fast_ma_days', '—') }}DMA &gt; {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
+        <div class="rule"><span>Participation</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        {% if regime.get('enabled') %}
+        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
+        {% endif %}
+        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
+        {% set min_ltp = strategy.get('min_ltp_inr') %}
+        {% set max_ltp = strategy.get('max_ltp_inr') %}
+        {% if min_ltp or max_ltp %}
+        <div class="rule"><span>Price range</span><span class="mono">
+          {%- if min_ltp and max_ltp -%}
+            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+          {%- elif min_ltp -%}
+            &ge; ₹{{ min_ltp|inr }}
+          {%- else -%}
+            &le; ₹{{ max_ltp|inr }}
+          {%- endif -%}
+        </span></div>
+        {% endif %}
         {% else %}
         <div class="rules-col-label">Entry — 52-week-high momentum, all must pass</div>
         <div class="rule"><span>Proximity to 52w high</span><span class="mono">&le; {{ strategy.get('proximity_to_52w_high_pct', '—') }}%</span></div>
@@ -913,6 +960,8 @@
         <div class="rule"><span>SuperTrend flip</span><span class="mono down">line flips back to downtrend</span></div>
         {% elif strategy.get('mode') == 'trend_pullback' %}
         <div class="rule"><span>Trend break</span><span class="mono down">close below {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
+        {% elif strategy.get('mode') == 'long_term_trend' %}
+        <div class="rule"><span>Trend break</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% elif risk.get('exit_below_fast_ma') %}
         <div class="rule"><span>Momentum breakdown</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -1050,6 +1099,7 @@ const fmtInt = (n) => Number(n ?? 0).toLocaleString("en-IN");
 const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
 const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
 const ACTIVE_PROFILE = {{ active_profile | tojson }};
+const PROFILE_CATEGORIES = {{ profile_categories | tojson }};
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour12: false });
 
@@ -1590,6 +1640,57 @@ if (profileSelector) {
   });
 }
 
+// ---- Trading-horizon tabs: Swing Trading / Long Term Trading -----------
+// Purely a view filter -- every profile keeps trading regardless of which
+// tab is active (same principle as the profile dropdown itself in
+// multi_profile_mode). Which tab starts active is derived from whichever
+// profile the server rendered as ACTIVE_PROFILE, so a page reload after
+// switching profiles (see switchProfile() above) naturally lands on the
+// right tab without any extra state to reconcile.
+let activeTab = PROFILE_CATEGORIES[ACTIVE_PROFILE] || "swing";
+
+function profilesInTab(tab) {
+  return Object.keys(PROFILE_CATEGORIES).filter(p => (PROFILE_CATEGORIES[p] || "swing") === tab);
+}
+
+function applyTabFilter() {
+  const tabBar = document.getElementById("tradingTabBar");
+  if (tabBar) {
+    tabBar.querySelectorAll(".trading-tab").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.category === activeTab);
+    });
+  }
+  if (profileSelector) {
+    Array.from(profileSelector.options).forEach(opt => {
+      const cat = PROFILE_CATEGORIES[opt.value] || "swing";
+      opt.hidden = cat !== activeTab;
+    });
+  }
+}
+
+function selectTab(tab) {
+  if (tab === activeTab) return;
+  const inNewTab = profilesInTab(tab);
+  if (!inNewTab.includes(ACTIVE_PROFILE)) {
+    // Currently-viewed profile doesn't belong to the tab being switched
+    // to -- jump to that tab's first profile (switchProfile() reloads
+    // the page, which re-derives activeTab from the new ACTIVE_PROFILE
+    // on load, so there's nothing further to do here after calling it).
+    if (inNewTab.length) {
+      switchProfile(inNewTab[0]);
+    }
+    return;
+  }
+  activeTab = tab;
+  applyTabFilter();
+  renderComparison(lastComparisonData);
+}
+
+document.querySelectorAll(".trading-tab").forEach(btn => {
+  btn.addEventListener("click", () => selectTab(btn.dataset.category));
+});
+applyTabFilter();
+
 loadSettings();
 
 // ---- Collapse/expand any settings panel, remembered per-browser --------
@@ -1883,6 +1984,7 @@ const WATCHLIST_HEAD = {
   consolidation_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
   pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>R1</th><th>Above R1</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
   trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
+  long_term_trend: `<th>Symbol</th><th>LTP</th><th>200DMA</th><th>400DMA</th><th>1Y Return</th><th>Score</th>`,
   default: `<th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>`,
 };
 
@@ -1915,6 +2017,16 @@ function watchlistRowHtml(mode, c) {
       <td class="mono" data-label="Recent High">₹${fmt(c.recent_high)}</td>
       <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "long_term_trend") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="200DMA">₹${fmt(c.fast_ma)}</td>
+      <td class="mono" data-label="400DMA">₹${fmt(c.slow_ma)}</td>
+      <td class="mono up" data-label="1Y Return">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }
@@ -2019,14 +2131,25 @@ function renderInsights(summary) {
 }
 
 // ---- Strategy comparison: every profile side by side -----------------
+// Cached so selectTab() can re-render instantly on tab switch (a pure
+// view filter) without waiting for the next refreshComparison() poll.
+let lastComparisonData = { profiles: [] };
+
 function renderComparison(data) {
   const tbody = document.getElementById("compareBody2");
   if (!tbody) return;  // panel only rendered when more than one profile exists
-  const rows = (data && data.profiles) || [];
+  lastComparisonData = data || { profiles: [] };
+  const allRows = (data && data.profiles) || [];
+  // Only compare profiles within the tab currently being viewed -- a
+  // long-term profile's return over years isn't a meaningful comparison
+  // against a swing profile's return over weeks anyway.
+  const rows = allRows.filter(r => (r.category || "swing") === activeTab);
   const meta = document.getElementById("compareMeta");
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">No profile data yet.</td></tr>`;
+    tbody.innerHTML = allRows.length
+      ? `<tr class="empty-row"><td colspan="8">No profiles running in this tab yet.</td></tr>`
+      : `<tr class="empty-row"><td colspan="8">No profile data yet.</td></tr>`;
     return;
   }
   if (meta) {

@@ -143,6 +143,16 @@ class Config:
             result[name] = cfg.get("display_name", name)
         return result
 
+    def list_profile_categories(self) -> dict[str, str]:
+        """Return dict of profile_name -> category ("swing" or "long_term")
+        for all configured profiles, used to filter the dashboard's tabs.
+        A profile without an explicit `category` falls back to "swing" --
+        every profile that existed before the long-term tab was added is
+        a swing strategy, so this keeps them showing up correctly without
+        requiring every existing config.yaml to be touched."""
+        profiles = self.get("profiles", default={})
+        return {name: cfg.get("category", "swing") for name, cfg in profiles.items()}
+
     def get_profile_strategy_mode(self, profile_name: str | None = None) -> str:
         """Get the strategy mode for a specific profile (or active profile if not specified)."""
         if profile_name is None:
@@ -176,6 +186,24 @@ class Config:
         merged = _deep_merge(base, overrides)
         merged["mode"] = self.get_profile_strategy_mode(profile_name)
         return merged
+
+    def get_profile_risk_config(self, profile_name: str | None = None) -> dict[str, Any]:
+        """Full risk parameter set for a profile: the top-level `risk:`
+        section as a base, with that profile's own `profiles.<name>.risk:`
+        block layered on top -- same pattern as get_profile_strategy_config.
+        Lets a long-horizon profile run much wider stops (it needs to
+        survive an ordinary pullback within a multi-year uptrend without
+        being stopped out early) than a swing profile, instead of every
+        profile being forced to share one global stop-loss/trailing-stop.
+        Always returns a fresh dict, safe to mutate."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        base = dict(self.get("risk", default={}))
+        profiles = self.get("profiles", default={})
+        profile_cfg = (profiles.get(profile_name) or {}) if profile_name else {}
+        overrides = profile_cfg.get("risk") or {}
+        return _deep_merge(base, overrides)
 
     def is_multi_profile_mode(self) -> bool:
         """Check if multi-profile mode is enabled (run all profiles simultaneously)."""

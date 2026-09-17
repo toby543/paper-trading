@@ -119,17 +119,57 @@ plus its own trigger — a close below the **slow** moving average (not
 the fast one, unlike the other strategies) — since a pullback entry is
 often already sitting near or below the fast MA by construction.
 
+**Strategy — Long Term Trend** (`strategy.mode: long_term_trend`): the
+buy-and-hold-oriented counterpart to the five swing strategies above,
+shown under its own **Long Term Trading** dashboard tab (see below).
+This app only has price/volume data, no fundamentals feed, so "long
+term" here means genuinely long lookback windows rather than a
+quality/fundamentals screen: price must sit above both a long moving
+average and an even longer one (`strategy.fast_ma_days`/`slow_ma_days`
+— 200/400 days by default, the same structural shape as every other
+strategy's moving averages, just stretched from weeks to years), plus a
+real multi-year return over `momentum_lookback_days` — merely sitting
+above a long average for a year of sideways drift isn't the "already
+compounding" story this strategy looks for. No breakout/pullback timing
+precision, since entry timing matters far less over a years-long hold.
+Exits reuse the hard-stop/trailing-stop/take-profit shape too, but are
+expected to run much wider (this profile's own `risk:` block, since risk
+is profile-scoped exactly like strategy — see below) so an ordinary
+multi-week pullback doesn't stop the position out of what's still a
+healthy uptrend; the strategy-specific exit is a close below the long
+moving average, not the short one.
+
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, a strategy-specific
 **trend-reversal exit** (a moving-average momentum breakdown for
 52w_high/cross_sectional/consolidation_breakout, a SuperTrend flip for
-pivot_supertrend, a close below the slow MA for trend_pullback), or an
+pivot_supertrend, a close below the slow MA for trend_pullback, a close
+below the long MA for long_term_trend), or an
 optional **take profit** target — whichever
 comes first. Take profit is off by default (`risk.take_profit_pct: 0`):
 momentum strategies are usually better served by the trailing stop's
 "let winners run" behavior than by capping upside at a fixed target, but
 it's there if you want a hard sell target anyway. Exits always apply
 regardless of market regime (see below) — only new entries are gated.
+
+**Risk settings are profile-scoped**, the same way each profile tunes
+its own `strategy:` block: `risk.*` (stop-loss, trailing stop, take
+profit, position sizing, max open positions, cash deployed per scan,
+re-entry cooldown) falls back to the shared top-level `risk:` block, but
+any profile can override it under its own `profiles.<name>.risk:`. This
+is what lets `long_term_trend` run 20%/25% stop-loss/trailing-stop
+instead of the swing profiles' tighter defaults, without changing
+anything for the other five.
+
+**Dashboard tabs**: the dashboard groups profiles into two tabs —
+**Swing Trading** (the five swing strategies) and **Long Term Trading**
+(`long_term_trend`) — via each profile's `category` field
+(`profiles.<name>.category: swing` or `long_term`; defaults to `swing`
+if omitted). Purely a display filter on the profile dropdown and the
+Strategy Comparison panel — every profile keeps trading regardless of
+which tab is currently being viewed, same as the profile dropdown
+itself in `multi_profile_mode`. The tab bar only appears once more than
+one category actually exists among your configured profiles.
 
 **Re-entry cooldown:** without a safeguard here, a stock stopped out on
 a small dip that still passes the entry filters would get immediately
@@ -180,6 +220,7 @@ src/papertrader/
   strategy/consolidation_breakout.py     consolidation_breakout entry/exit logic
   strategy/pivot_supertrend.py    pivot_supertrend entry/exit logic
   strategy/trend_pullback.py      trend_pullback entry/exit logic
+  strategy/long_term_trend.py     long_term_trend entry/exit logic
   portfolio/{models,storage,broker}.py   Paper execution engine + persistence
   risk/risk_manager.py       Position sizing & exposure limits
   engine/{market_hours,scheduler}.py     Autonomous scan loop
@@ -449,7 +490,9 @@ Two supported ways to keep it running unattended:
 
 All thresholds live in `config.yaml`:
 
-- `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, `pivot_supertrend`, or `trend_pullback` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
+- `strategy.mode` — `52w_high` (default), `cross_sectional_momentum`, `consolidation_breakout`, `pivot_supertrend`, `trend_pullback`, or `long_term_trend` (see above). A restart is required to switch, like any other engine-construction-time setting. In `multi_profile_mode`, each profile sets its own `strategy_mode` independently instead.
+- `risk.*` (stop_loss_pct, trailing_stop_pct, take_profit_pct, position_size_pct_of_equity, max_open_positions, max_cash_deployed_per_scan_pct, reentry_cooldown_days) — profile-scoped exactly like `strategy.*`: each profile's own `profiles.<name>.risk:` block overrides the shared base, so e.g. `long_term_trend` can run much wider stops than the swing profiles without dragging every other profile's risk settings along with it.
+- `profiles.<name>.category` — `swing` (default, if omitted) or `long_term`. Purely a dashboard display grouping: which of the two tabs (Swing Trading / Long Term Trading) a profile's dropdown entry and Strategy Comparison row show up under. Every profile keeps trading regardless of which tab is currently being viewed.
 - `strategy.cross_sectional.lookback_days` / `skip_recent_days` / `top_pct` — only used in `cross_sectional_momentum` mode: the trailing-return ranking window and the top percentile bought.
 - `strategy.consolidation_breakout.consolidation_days` / `max_consolidation_range_pct` / `volume_multiple` — only used in `consolidation_breakout` mode: the base period, how tight it must be, and the breakout volume threshold.
 - `strategy.pivot_supertrend.atr_period` / `supertrend_multiplier` / `min_pct_above_r1` — only used in `pivot_supertrend` mode: the ATR window, SuperTrend band width, and how far above the prior day's R1 (first resistance) a flip must occur.
@@ -525,7 +568,7 @@ to a CSV for charting elsewhere.
 pytest
 ```
 
-Tests cover all five strategies' entry/exit rules (using synthetic price
+Tests cover all six strategies' entry/exit rules (using synthetic price
 series, no network needed), the paper broker's order/cash/position/trade
 bookkeeping, the NSE market-hours calendar, the backtest's summary
 statistics (drawdown, CAGR, win rate), universe-symbol repair
