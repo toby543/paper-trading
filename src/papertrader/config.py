@@ -205,6 +205,24 @@ class Config:
         overrides = profile_cfg.get("risk") or {}
         return _deep_merge(base, overrides)
 
+    def get_profile_regime_config(self, profile_name: str | None = None) -> dict[str, Any]:
+        """Full regime-filter parameter set for a profile: the top-level
+        `regime:` section as a base, with that profile's own
+        `profiles.<name>.regime:` block layered on top -- same pattern as
+        get_profile_strategy_config/get_profile_risk_config. Lets a crypto
+        profile disable the Nifty 50 uptrend filter entirely (crypto trades
+        24/7 with its own cycles, uncorrelated with NSE) without touching
+        the global regime block that equity profiles still rely on.
+        Always returns a fresh dict, safe to mutate."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        base = dict(self.get("regime", default={}))
+        profiles = self.get("profiles", default={})
+        profile_cfg = (profiles.get(profile_name) or {}) if profile_name else {}
+        overrides = profile_cfg.get("regime") or {}
+        return _deep_merge(base, overrides)
+
     def is_multi_profile_mode(self) -> bool:
         """Check if multi-profile mode is enabled (run all profiles simultaneously)."""
         return self.get("multi_profile_mode", default=False)
@@ -248,6 +266,23 @@ class Config:
 
         profiles = self.get("profiles", default={})
         return profiles.get(profile_name, {}) if profile_name else {}
+
+    def get_profile_universe_file(self, profile_name: str | None = None) -> str:
+        """Universe file path for a specific profile (or active profile if
+        not specified). Lets a profile scan its own symbol list -- e.g. a
+        crypto profile's `universe_file: data/universe_crypto.csv` instead
+        of the shared NSE universe every equity profile scans -- falling
+        back to the global `universe.file` setting when the profile
+        doesn't override it."""
+        profile_cfg = self.get_profile_config(profile_name)
+        return profile_cfg.get("universe_file") or self.universe_file
+
+    def get_profile_trades_24_7(self, profile_name: str | None = None) -> bool:
+        """True if this profile trades around the clock (crypto) and must
+        never be gated by the NSE calendar's open/close hours, weekends, or
+        holidays. Derived from the profile's `category` field."""
+        profile_cfg = self.get_profile_config(profile_name)
+        return profile_cfg.get("category") == "crypto"
 
     @property
     def state_file(self) -> str:

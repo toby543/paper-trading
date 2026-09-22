@@ -91,10 +91,14 @@ class TradingEngine:
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
         )
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
-        # Falls back to global universe_file if profile doesn't override
-        profile_universe_file = cfg.get_profile_config(self.profile_name).get("universe_file")
-        universe_file = profile_universe_file if profile_universe_file else cfg.universe_file
-        self.universe = load_universe(universe_file)
+        self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))
+        # Crypto trades 24/7 on global exchanges -- it has no NSE session to
+        # wait for. A profile whose category is "crypto" must never be
+        # gated by self.calendar (NSE open/close hours, weekends, NSE
+        # holidays) in run_forever() below, or it would sit idle ~20
+        # hours/day and every weekend, defeating the entire point of a
+        # crypto strategy. Equity profiles keep the NSE calendar gate.
+        self.trades_24_7 = cfg.get_profile_trades_24_7(self.profile_name)
         # Profile-specific strategy parameters (mode + any overrides that
         # profile's own strategy: block sets) merged over the shared
         # base. Always a fresh dict -- safe even with several
@@ -103,9 +107,7 @@ class TradingEngine:
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = profile_risk_cfg
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
-        # Falls back to global regime config if profile doesn't override
-        profile_regime_cfg = cfg.get_profile_config(self.profile_name).get("regime")
-        self.regime_cfg = profile_regime_cfg if profile_regime_cfg else cfg.get("regime", default={})
+        self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
 
     def reload_profile(self) -> str:
         """Reload engine configuration from disk after profile has changed.
@@ -144,8 +146,15 @@ class TradingEngine:
             new_strategy_cfg = self.cfg.get_profile_strategy_config(new_profile)
             new_risk_cfg = self.cfg.get_profile_risk_config(new_profile)
             # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
-            profile_regime_cfg = self.cfg.get_profile_config(new_profile).get("regime")
-            new_regime_cfg = profile_regime_cfg if profile_regime_cfg else self.cfg.get("regime", default={})
+            new_regime_cfg = self.cfg.get_profile_regime_config(new_profile)
+            # Profile-specific universe (e.g. crypto's own symbol list) and
+            # 24/7 flag -- both must be re-derived on every profile switch,
+            # exactly like __init__, or switching from an equity profile
+            # into a crypto one (or back) would keep scanning the OLD
+            # profile's universe/calendar behavior under the new profile's
+            # name.
+            new_universe = load_universe(self.cfg.get_profile_universe_file(new_profile))
+            new_trades_24_7 = self.cfg.get_profile_trades_24_7(new_profile)
 
             with self._state_lock:
                 self.profile_name = new_profile
@@ -154,6 +163,8 @@ class TradingEngine:
                 self.strategy_cfg = new_strategy_cfg
                 self.risk_cfg = new_risk_cfg
                 self.regime_cfg = new_regime_cfg
+                self.universe = new_universe
+                self.trades_24_7 = new_trades_24_7
                 # Profiles can now genuinely differ here (e.g. a long-term
                 # profile's much wider position sizing), so the live
                 # RiskManager's own mutable attributes need updating too,
@@ -669,21 +680,34 @@ class TradingEngine:
                 if self.cfg.reload():
                     strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
                     risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
+                    # Profile-specific regime override (e.g. crypto disables
+                    # the Nifty 50 filter) -- must be re-derived the same way
+                    # __init__ does it, NOT reset to the bare global `regime:`
+                    # block, or a crypto profile's disabled-regime override
+                    # gets silently clobbered back to the Nifty 50 filter on
+                    # every hot config reload.
+                    regime_cfg = self.cfg.get_profile_regime_config(self.profile_name)
                     with self._state_lock:
                         self.strategy_cfg = strategy_cfg
                         self.risk_cfg = risk_cfg
-                        self.regime_cfg = self.cfg.get("regime", default={})
+                        self.regime_cfg = regime_cfg
                         self.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
                         self.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
                         self.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
                         self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
                     log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
 
-                now_dt = self.calendar.now()
-                if not self.calendar.is_market_open(now_dt):
-                    log.info("Market closed (%s). Sleeping 5 minutes...", now_dt.strftime("%Y-%m-%d %H:%M %Z"))
-                    time.sleep(300)
-                    continue
+                # Crypto profiles trade 24/7 and must never be gated by the
+                # NSE calendar (see self.trades_24_7's definition above) --
+                # otherwise a crypto profile would sit idle outside NSE
+                # hours (nights, weekends, NSE holidays) instead of trading
+                # around the clock like a real crypto exchange.
+                if not self.trades_24_7:
+                    now_dt = self.calendar.now()
+                    if not self.calendar.is_market_open(now_dt):
+                        log.info("Market closed (%s). Sleeping 5 minutes...", now_dt.strftime("%Y-%m-%d %H:%M %Z"))
+                        time.sleep(300)
+                        continue
 
                 # Held for the whole iteration so a concurrent reload_profile()
                 # (from a Flask request thread, single-profile mode only)

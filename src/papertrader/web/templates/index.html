@@ -726,6 +726,7 @@
           <select id="btUniverse" class="edit-input wide">
             <option value="data/universe.csv" {{ 'selected' if universe_cfg.get('file', 'data/universe.csv') == 'data/universe.csv' else '' }}>Default (data/universe.csv)</option>
             <option value="data/universe_nifty500.csv" {{ 'selected' if universe_cfg.get('file') == 'data/universe_nifty500.csv' else '' }}>Nifty 500 (data/universe_nifty500.csv)</option>
+            <option value="data/universe_crypto.csv" {{ 'selected' if universe_cfg.get('file') == 'data/universe_crypto.csv' else '' }}>Crypto (data/universe_crypto.csv)</option>
           </select>
         </div>
         <button id="backtestRunBtn" class="edit-save-btn">Run Backtest</button>
@@ -1164,7 +1165,7 @@ function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No open positions — the next scan will look for 52-week-high momentum breakouts.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No open positions — the next scan will look for qualifying entries.</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {

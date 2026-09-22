@@ -31,6 +31,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from . import auth
 from ..config import Config
 from ..config_editor import update_config_file
+from ..data.universe import load_universe
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
 from .data_api import (
@@ -253,9 +254,15 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
             strategy=strategy,
             risk=risk,
-            regime=cfg.get("regime", default={}),
+            # Profile-scoped, matching strategy/risk above -- a crypto
+            # profile's disabled regime filter must show as disabled here
+            # too, not fall back to showing the global Nifty 50 filter.
+            regime=cfg.get_profile_regime_config(active_profile),
             account=cfg.get("account", default={}),
-            universe_cfg=cfg.get("universe", default={}),
+            # Profile's own universe file (e.g. crypto's universe_crypto.csv)
+            # so the Backtest panel's dropdown defaults to what this profile
+            # actually scans, not the global equity universe.
+            universe_cfg={**cfg.get("universe", default={}), "file": cfg.get_profile_universe_file(active_profile)},
             execution=cfg.get("execution", default={}),
             engine_cfg=cfg.get("engine", default={}),
             data_source=cfg.get("data_source", default={}),
@@ -488,18 +495,32 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         # Reload components that can be updated live (don't affect in-flight trades)
         try:
             for eng in engines.values():
+                # Every one of these must be resolved per-PROFILE (mode +
+                # that profile's own overrides), never read off the bare
+                # global block -- otherwise this handler (the dashboard's
+                # "Reload Config" button) would silently overwrite a
+                # profile's own risk/regime overrides with the shared
+                # defaults on every reload. This is exactly what was
+                # clobbering a crypto profile's disabled regime filter
+                # (and crypto-specific risk settings) back to the equity
+                # defaults -- including the Nifty 50 regime filter -- the
+                # moment anyone hit "Reload Config".
                 strategy_cfg = cfg.get_profile_strategy_config(eng.profile_name)
+                risk_cfg = cfg.get_profile_risk_config(eng.profile_name)
+                regime_cfg = cfg.get_profile_regime_config(eng.profile_name)
                 # Under the engine's own lock so this can't interleave with
                 # its background run_forever() loop or a reload_profile().
                 with eng._state_lock:
                     eng.strategy_cfg = strategy_cfg
-                    eng.risk_cfg = cfg.get("risk", default={})
-                    eng.regime_cfg = cfg.get("regime", default={})
+                    eng.risk_cfg = risk_cfg
+                    eng.regime_cfg = regime_cfg
+                    eng.universe = load_universe(cfg.get_profile_universe_file(eng.profile_name))
+                    eng.trades_24_7 = cfg.get_profile_trades_24_7(eng.profile_name)
 
-                    # Update RiskManager with new risk settings
-                    eng.risk.max_open_positions = cfg.get("risk", "max_open_positions", default=10)
-                    eng.risk.position_size_pct_of_equity = cfg.get("risk", "position_size_pct_of_equity", default=8.0)
-                    eng.risk.max_cash_deployed_per_scan_pct = cfg.get("risk", "max_cash_deployed_per_scan_pct", default=40.0)
+                    # Update RiskManager with this profile's own risk settings
+                    eng.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
+                    eng.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
+                    eng.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
 
                     # Update data source timeout settings
                     eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)

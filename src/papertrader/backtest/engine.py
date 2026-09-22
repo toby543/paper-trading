@@ -186,19 +186,14 @@ class Backtester:
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = cfg.get_profile_risk_config(self.profile_name)
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
-        # Falls back to global regime config if profile doesn't override
-        profile_regime_cfg = cfg.get_profile_config(self.profile_name).get("regime")
-        self.regime_cfg = profile_regime_cfg if profile_regime_cfg else cfg.get("regime", default={})
+        self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
         # Bounds every yfinance .history() call below -- without it, a
         # stalled connection on any one symbol hangs the whole fetch loop
         # indefinitely with no exception raised (the surrounding try/except
         # only helps once something actually raises).
         self._fetch_timeout = cfg.get("data_source", "request_timeout_seconds", default=15)
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
-        # Falls back to global universe_file if profile doesn't override
-        profile_universe_file = cfg.get_profile_config(self.profile_name).get("universe_file")
-        universe_file = profile_universe_file if profile_universe_file else cfg.universe_file
-        self.universe = load_universe(universe_file)
+        self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))
 
         # Make sure the fetch window is wide enough that every lookback this
         # profile needs is already satisfied on the FIRST simulated day --
@@ -280,7 +275,15 @@ class Backtester:
                     _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
                 last_call = _time.time()
                 try:
-                    df = yf.Ticker(symbol + ".NS").history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
+                    # Crypto universe symbols ("BTC-USD") are already full
+                    # Yahoo Finance tickers -- unlike NSE equity codes,
+                    # which need ".NS" appended. Mirrors
+                    # MarketDataClient._is_crypto_symbol; without this, every
+                    # backtest for a crypto profile would fetch the
+                    # nonexistent ticker "BTC-USD.NS" and silently end up
+                    # with zero history for every symbol.
+                    ticker_symbol = symbol if "-" in symbol else symbol + ".NS"
+                    df = yf.Ticker(ticker_symbol).history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
                     if not df.empty:
                         df.index = df.index.tz_localize(None)
                         merged = price_cache.save(symbol, df, existing=cached)

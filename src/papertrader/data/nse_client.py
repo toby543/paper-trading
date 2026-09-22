@@ -118,8 +118,28 @@ class MarketDataClient:
             time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
         self._last_yfinance_call = time.time()
 
+    @staticmethod
+    def _is_crypto_symbol(symbol: str) -> bool:
+        """Crypto universe symbols are already full Yahoo Finance tickers
+        (e.g. "BTC-USD", "ETH-USD") -- unlike NSE equity codes, which are
+        bare ("RELIANCE") and need a ".NS" suffix appended before they're
+        valid Yahoo Finance tickers. Without this check, a crypto symbol
+        would get mangled into "BTC-USD.NS" (not a real ticker, always
+        fails) and would also get sent through the NSE equity-quote API,
+        which has no concept of crypto pairs. Yahoo Finance's crypto
+        ticker convention is always "<ASSET>-<FIAT>", so a literal "-" is
+        a reliable signal -- no bare NSE symbol contains one."""
+        return "-" in symbol
+
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:
+        if self._is_crypto_symbol(symbol):
+            # Crypto has no NSE equivalent -- go straight to Yahoo Finance
+            # using the symbol as-is (no ".NS" suffix).
+            try:
+                return self._quote_from_yfinance(symbol, is_crypto=True)
+            except Exception as exc:  # noqa: BLE001
+                raise DataUnavailableError(f"No data source available for {symbol}: {exc}") from exc
         if self.preferred == "nse" and not self._nse_broken:
             try:
                 return self._quote_from_nse(symbol)
@@ -146,11 +166,12 @@ class MarketDataClient:
             source="nse",
         )
 
-    def _quote_from_yfinance(self, symbol: str) -> Quote:
+    def _quote_from_yfinance(self, symbol: str, is_crypto: bool = False) -> Quote:
         import yfinance as yf
 
         self._throttle_yfinance()
-        ticker = yf.Ticker(symbol + ".NS")
+        ticker_symbol = symbol if is_crypto else symbol + ".NS"
+        ticker = yf.Ticker(ticker_symbol)
         # `timeout` bounds the underlying HTTP call the same way self.timeout
         # already bounds every NSE request -- without it, a stalled
         # connection here hangs this call forever. Since this runs inside
@@ -188,13 +209,17 @@ class MarketDataClient:
         import yfinance as yf
 
         self._throttle_yfinance()
+        # Crypto symbols (e.g. "BTC-USD") are already full Yahoo Finance
+        # tickers -- see _is_crypto_symbol -- and must NOT get the ".NS"
+        # equity suffix, or every history fetch for a crypto profile fails.
+        ticker_symbol = symbol if self._is_crypto_symbol(symbol) else symbol + ".NS"
         try:
             # timeout=self.timeout: see the comment in _quote_from_yfinance --
             # without it, a stalled connection hangs this call forever with
             # no exception and no log line, which freezes the whole
             # autonomous loop (this call sits in check_exits()'s per-symbol
             # loop, ahead of scan_for_entries() in the same cycle).
-            df = yf.Ticker(symbol + ".NS").history(period=period, interval="1d", timeout=self.timeout)
+            df = yf.Ticker(ticker_symbol).history(period=period, interval="1d", timeout=self.timeout)
         except Exception as exc:  # noqa: BLE001 - a timeout/network error on ONE symbol
             # must be a normal "skip this symbol" outcome (matching every other
             # DataUnavailableError call site), never an uncaught exception that

@@ -20,6 +20,16 @@ _INDEX_TILES = [
     ("Sensex", "^BSESN"),
 ]
 
+# Same idea, but for crypto profiles: showing NSE/Sensex tiles on a
+# Crypto Trading tab is exactly the kind of "why am I still seeing Nifty
+# 50 here" confusion a crypto-only profile must never produce. Major caps
+# so the tiles stay informative even on a fresh/mostly-empty crypto book.
+_CRYPTO_INDEX_TILES = [
+    ("Bitcoin", "BTC-USD"),
+    ("Ethereum", "ETH-USD"),
+    ("Solana", "SOL-USD"),
+]
+
 
 def _safe_quote(engine, symbol: str):
     try:
@@ -52,7 +62,15 @@ def _pct_from_52w_high(week52_high: float | None, ltp: float) -> float | None:
 
 
 def _market_regime(engine) -> dict:
-    regime_cfg = engine.cfg.get("regime", default={}) or {}
+    # Must read the engine's own profile-scoped regime_cfg (set in
+    # TradingEngine.__init__/reload_profile from that profile's
+    # `profiles.<name>.regime:` override, falling back to the global
+    # `regime:` block only if the profile doesn't set one) -- NOT
+    # engine.cfg.get("regime", ...) directly, which always reads the
+    # global block and would show every profile (including crypto, whose
+    # profile config disables this filter entirely) the same Nifty 50/500
+    # trend pill regardless of what that profile is actually configured to use.
+    regime_cfg = engine.regime_cfg or {}
     index_symbol = regime_cfg.get("index_symbol", "^NSEI")
     ma_days = regime_cfg.get("ma_days", 200)
     if not regime_cfg.get("enabled", False):
@@ -260,7 +278,12 @@ def build_summary(engine) -> dict:
     total_realized_pnl = engine.storage.get_total_realized_pnl()
     total_realized_pnl_pct = (total_realized_pnl / starting_capital * 100.0) if starting_capital else 0.0
 
-    market_open = engine.calendar.is_market_open()
+    # Crypto profiles trade 24/7 on global exchanges -- they have no NSE
+    # session to be "closed" against. engine.trades_24_7 is set from the
+    # profile's category (see TradingEngine.__init__/reload_profile), so
+    # this stays in sync with whichever profile is actually being viewed
+    # instead of showing every profile the NSE calendar's open/closed state.
+    market_open = True if engine.trades_24_7 else engine.calendar.is_market_open()
     last_scan_at = engine.storage.get_last_scan_at()
     sorted_positions = sorted(position_rows, key=lambda r: r["market_value"], reverse=True)
     try:
@@ -470,12 +493,16 @@ def build_candidates(engine, limit: int = 20) -> dict:
 
 
 def build_index_charts(engine, period: str = "6mo") -> list[dict]:
-    """Sparkline data for the Nifty 50 / Nifty 500 / Sensex cards: each
-    stock's own price scale is wildly different (~25,000 vs. ~80,000), so
-    the series is normalized to % change from the first close in the
-    window rather than plotted at absolute levels."""
+    """Sparkline data for the market-indices cards: each stock's own price
+    scale is wildly different (~25,000 vs. ~80,000), so the series is
+    normalized to % change from the first close in the window rather than
+    plotted at absolute levels. Crypto profiles get Bitcoin/Ethereum/Solana
+    tiles instead of Nifty 50/Nifty 500/Sensex -- a crypto-only profile
+    showing NSE index tiles is precisely the "why is this still showing
+    Nifty 50" confusion this must avoid."""
+    tiles = _CRYPTO_INDEX_TILES if engine.trades_24_7 else _INDEX_TILES
     charts = []
-    for label, symbol in _INDEX_TILES:
+    for label, symbol in tiles:
         try:
             history = engine.data.get_index_history(symbol, period=period)
         except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky index fetch
