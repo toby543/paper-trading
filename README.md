@@ -139,12 +139,14 @@ multi-week pullback doesn't stop the position out of what's still a
 healthy uptrend; the strategy-specific exit is a close below the long
 moving average, not the short one.
 
+**Strategy — Crypto Momentum** (`strategy.mode: crypto_momentum`): a 24/7 strategy designed for cryptocurrency markets. Entries require price above both a short (20-day) and medium (50-day) moving average, RSI(14) momentum above a threshold (`strategy.min_rsi`, default 50), and a minimum return over `momentum_lookback_days` (30 days by default). Crypto pairs are ranked by RSI strength and their proximity to the moving averages. Exits trigger on RSI momentum loss (RSI < 40), a trend break (close below 20-day MA), or the standard hard-stop/trailing-stop/take-profit limits. Risk settings for crypto are typically tighter than equity strategies to account for higher volatility, and can be configured via a separate `crypto` profile category shown under its own **Crypto Trading** dashboard tab.
+
 Positions are exited on a **hard stop-loss** from entry, a **trailing
 stop** from the highest close since entry, a strategy-specific
 **trend-reversal exit** (a moving-average momentum breakdown for
 52w_high/cross_sectional/consolidation_breakout, a SuperTrend flip for
 pivot_supertrend, a close below the slow MA for trend_pullback, a close
-below the long MA for long_term_trend), or an
+below the long MA for long_term_trend, or RSI momentum loss for crypto_momentum), or an
 optional **take profit** target — whichever
 comes first. Take profit is off by default (`risk.take_profit_pct: 0`):
 momentum strategies are usually better served by the trailing stop's
@@ -161,11 +163,10 @@ is what lets `long_term_trend` run 20%/25% stop-loss/trailing-stop
 instead of the swing profiles' tighter defaults, without changing
 anything for the other five.
 
-**Dashboard tabs**: the dashboard groups profiles into two tabs —
-**Swing Trading** (the five swing strategies) and **Long Term Trading**
-(`long_term_trend`) — via each profile's `category` field
-(`profiles.<name>.category: swing` or `long_term`; defaults to `swing`
-if omitted). Purely a display filter on the profile dropdown and the
+**Dashboard tabs**: the dashboard groups profiles into tabs via each profile's `category` field
+(`profiles.<name>.category: swing`, `long_term`, or `crypto`; defaults to `swing`
+if omitted). This creates **Swing Trading**, **Long Term Trading**, and **Crypto Trading** tabs as needed.
+Purely a display filter on the profile dropdown and the
 Strategy Comparison panel — every profile keeps trading regardless of
 which tab is currently being viewed, same as the profile dropdown
 itself in `multi_profile_mode`. The tab bar only appears once more than
