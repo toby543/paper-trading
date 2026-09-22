@@ -218,6 +218,60 @@ profiles:
       max_cash_deployed_per_scan_pct: 40.0
       reentry_cooldown_days: 3
 
+  crypto_momentum:
+    display_name: "Crypto Momentum"
+    category: crypto
+    # Fresh ledger for crypto trading
+    state_file: data/state_crypto_momentum.db
+    starting_capital: 100000.0
+    strategy_mode: crypto_momentum
+    # Crypto-specific strategy config: 24/7 markets, higher volatility
+    strategy:
+      # Shorter lookback windows for crypto's faster pace
+      momentum_lookback_days: 30
+      min_momentum_return_pct: 5.0
+      min_rsi: 50.0
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+    # Crypto positions held shorter-term than long_term_trend, tighter risk
+    risk:
+      stop_loss_pct: 10.0
+      trailing_stop_pct: 15.0
+      take_profit_pct: 25.0
+      position_size_pct_of_equity: 8.0
+      max_open_positions: 10
+      max_cash_deployed_per_scan_pct: 50.0
+      reentry_cooldown_days: 1
+
+  crypto_breakout:
+    display_name: "Crypto Breakout"
+    category: crypto
+    # Fresh ledger for crypto breakout strategy
+    state_file: data/state_crypto_breakout.db
+    starting_capital: 100000.0
+    strategy_mode: consolidation_breakout
+    # Reuse consolidation_breakout logic but adapted for crypto volatility
+    strategy:
+      momentum_lookback_days: 21
+      min_momentum_return_pct: 3.0
+      fast_ma_days: 20
+      slow_ma_days: 50
+      min_avg_daily_turnover_inr: 50000000
+      max_new_positions_per_scan: 3
+      consolidation_breakout:
+        consolidation_days: 7  # Shorter consolidation window for crypto
+        max_consolidation_range_pct: 5.0  # Wider range due to volatility
+        volume_multiple: 1.5  # Lower volume multiple for crypto
+    # Tighter risk management for breakout trades
+    risk:
+      stop_loss_pct: 8.0
+      trailing_stop_pct: 12.0
+      take_profit_pct: 20.0
+      position_size_pct_of_equity: 6.0
+      max_open_positions: 12
+      max_cash_deployed_per_scan_pct: 60.0
+      reentry_cooldown_days: 1
+
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile
 account:

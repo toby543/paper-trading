@@ -1,0 +1,169 @@
+"""Crypto momentum strategy using RSI and moving average crossovers.
+
+Designed for 24/7 crypto markets with higher volatility and faster price moves.
+Entry: Price above 20-day MA, RSI(14) > 50 (momentum phase), 20-day > 50-day MA (uptrend)
+Exit: RSI drops below 40 (momentum loss), price closes below 20-day MA (trend break),
+      or stop-loss/trailing-stop thresholds hit.
+"""
+from __future__ import annotations
+
+import pandas as pd
+
+from papertrader.data.nse_client import Quote
+from papertrader.portfolio.models import Position
+
+
+def _moving_average(history: pd.DataFrame, days: int) -> float | None:
+    """Calculate simple moving average. Returns None if insufficient data."""
+    if len(history) < days:
+        return None
+    return float(history["Close"].tail(days).mean())
+
+
+def _rsi(history: pd.DataFrame, period: int = 14) -> float | None:
+    """Calculate RSI(14). Returns None if insufficient data."""
+    if len(history) < period + 1:
+        return None
+    closes = history["Close"]
+    deltas = closes.diff()
+    gains = (deltas.where(deltas > 0, 0)).rolling(period).mean()
+    losses = (-deltas.where(deltas < 0, 0)).rolling(period).mean()
+    rs = gains / losses
+    rsi = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1])
+
+
+def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | None:
+    """Return % gain over the past lookback_days. Crypto typically uses 30-90 day lookback."""
+    if len(history) <= lookback_days:
+        return None
+    lookback_idx = -lookback_days - 1
+    past_close = history["Close"].iloc[lookback_idx]
+    current_close = history["Close"].iloc[-1]
+    if past_close <= 0:
+        return None
+    return ((current_close - past_close) / past_close) * 100
+
+
+def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_turnover_inr: float,
+                       config: dict, reasons: dict[str, int] | None = None) -> dict | None:
+    """
+    Evaluate a crypto candidate for entry.
+
+    Returns dict with symbol, ltp, ma20, ma50, rsi, momentum_return_pct, score
+    or None if doesn't qualify.
+
+    Entry criteria:
+    - Sufficient history (50 days for MAs)
+    - Price > 20-day MA (above short-term support)
+    - 20-day MA > 50-day MA (uptrend confirmation)
+    - RSI(14) > 50 (momentum phase)
+    - 30-day return >= config["min_momentum_return_pct"] (participation)
+    - Adequate liquidity (daily_turnover >= min_avg_daily_turnover_inr)
+    """
+    if reasons is None:
+        reasons = {}
+
+    # Liquidity check first
+    min_turnover = config.get("min_avg_daily_turnover_inr", 50_000_000)
+    if daily_turnover_inr < min_turnover:
+        reasons["illiquid"] = reasons.get("illiquid", 0) + 1
+        return None
+
+    # History sufficiency
+    if len(history) < 50:
+        reasons["insufficient_history"] = reasons.get("insufficient_history", 0) + 1
+        return None
+
+    ma20 = _moving_average(history, 20)
+    ma50 = _moving_average(history, 50)
+    rsi14 = _rsi(history, 14)
+    momentum_days = config.get("momentum_lookback_days", 30)
+    momentum_pct = _momentum_return_pct(history, momentum_days)
+
+    # Validate all required indicators
+    if ma20 is None or ma50 is None or rsi14 is None or momentum_pct is None:
+        reasons["insufficient_history"] = reasons.get("insufficient_history", 0) + 1
+        return None
+
+    # Uptrend check: price > MA20 > MA50
+    if quote.ltp <= ma20 or ma20 <= ma50:
+        reasons["not_in_uptrend"] = reasons.get("not_in_uptrend", 0) + 1
+        return None
+
+    # RSI momentum check
+    min_rsi = config.get("min_rsi", 50.0)
+    if rsi14 < min_rsi:
+        reasons["weak_momentum"] = reasons.get("weak_momentum", 0) + 1
+        return None
+
+    # Participation check
+    min_momentum = config.get("min_momentum_return_pct", 5.0)
+    if momentum_pct < min_momentum:
+        reasons["weak_participation"] = reasons.get("weak_participation", 0) + 1
+        return None
+
+    # Score based on how far above MAs and RSI strength
+    ma_score = ((quote.ltp - ma50) / ma50) * 100  # How far above 50-day MA
+    rsi_score = (rsi14 - min_rsi) / (100 - min_rsi) * 100  # RSI strength
+    momentum_score = min(momentum_pct / min_momentum * 100, 100)  # Cap momentum contribution
+
+    score = (ma_score * 0.4 + rsi_score * 0.4 + momentum_score * 0.2)
+
+    return {
+        "symbol": symbol,
+        "ltp": quote.ltp,
+        "ma20": ma20,
+        "ma50": ma50,
+        "rsi": rsi14,
+        "momentum_return_pct": momentum_pct,
+        "score": score,
+    }
+
+
+def rank_candidates(candidates: list[dict]) -> list[dict]:
+    """Rank candidates by score, highest first."""
+    return sorted(candidates, key=lambda c: c["score"], reverse=True)
+
+
+def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:
+    """
+    Determine if a crypto position should exit.
+
+    Exit conditions (in order):
+    1. Stop-loss: price < avg_price * (1 - stop_loss_pct/100)
+    2. Trailing-stop: price < highest_close_since_entry * (1 - trailing_stop_pct/100)
+    3. RSI < 40: momentum loss signal
+    4. Price closes below 20-day MA: trend break
+    """
+    stop_loss_pct = config.get("stop_loss_pct", 10.0)
+    trailing_stop_pct = config.get("trailing_stop_pct", 15.0)
+    take_profit_pct = config.get("take_profit_pct", 0)
+
+    # Stop-loss
+    stop_price = position.avg_price * (1 - stop_loss_pct / 100)
+    if quote.ltp < stop_price:
+        return True, f"stop_loss ({stop_loss_pct}%)"
+
+    # Trailing-stop
+    trail_price = position.highest_close_since_entry * (1 - trailing_stop_pct / 100)
+    if quote.ltp < trail_price:
+        return True, f"trailing_stop ({trailing_stop_pct}%)"
+
+    # Take-profit (only if configured > 0)
+    if take_profit_pct > 0:
+        target_price = position.avg_price * (1 + take_profit_pct / 100)
+        if quote.ltp > target_price:
+            return True, f"take_profit ({take_profit_pct}%)"
+
+    # RSI momentum loss
+    rsi14 = _rsi(history, 14)
+    if rsi14 is not None and rsi14 < 40:
+        return True, "rsi_momentum_loss (RSI < 40)"
+
+    # Trend break: price closes below 20-day MA
+    ma20 = _moving_average(history, 20)
+    if ma20 is not None and quote.ltp < ma20:
+        return True, "trend_break (below 20-day MA)"
+
+    return False, ""

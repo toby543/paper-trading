@@ -23,7 +23,7 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
-from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback
+from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
