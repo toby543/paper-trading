@@ -44,6 +44,18 @@ from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
 
+
+class _CandidateAdapter:
+    """Wraps dict-based candidates (from crypto_momentum) to support dot notation access."""
+    def __init__(self, data: dict):
+        self._data = data
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            return super().__getattribute__(name)
+        return self._data.get(name)
+
+
 # Trading-day approximation of "52 weeks", matching how a ~1y lookback
 # behaves elsewhere in this codebase (e.g. yfinance's period="1y").
 _WEEK52_TRADING_DAYS = 252
@@ -382,6 +394,8 @@ class Backtester:
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history_upto, cfg)
             elif mode == "long_term_trend":
                 should_exit, reason = long_term_trend.check_exit(pos, quote, history_upto, cfg)
+            elif mode == "crypto_momentum":
+                should_exit, reason = crypto_momentum.check_exit(pos, quote, history_upto, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
@@ -515,6 +529,25 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = long_term_trend.rank_candidates(candidates)
+        elif mode == "crypto_momentum":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                cand = crypto_momentum.evaluate_candidate(
+                    symbol, quote, history_upto, self.strategy_cfg,
+                    reasons=self._entry_rejections,
+                )
+                if cand:
+                    candidates.append(cand)
+            ranked = [_CandidateAdapter(c) for c in crypto_momentum.rank_candidates(candidates)]
         else:
             candidates: list[Candidate52w] = []
             for symbol in self.universe:

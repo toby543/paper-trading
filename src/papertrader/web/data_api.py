@@ -434,6 +434,16 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "momentum_return_pct": round(cand.momentum_return_pct, 2),
                 "score": round(cand.score, 2),
             })
+        elif mode == "crypto_momentum":
+            rows.append({
+                "symbol": cand["symbol"],
+                "ltp": round(cand["ltp"], 2),
+                "ma20": round(cand["ma20"], 2),
+                "ma50": round(cand["ma50"], 2),
+                "rsi": round(cand["rsi"], 2),
+                "momentum_return_pct": round(cand["momentum_return_pct"], 2),
+                "score": round(cand["score"], 2),
+            })
         else:
             # 52w_high and cross_sectional_momentum share this shape.
             rows.append({
