@@ -39,7 +39,7 @@ from ..strategy.momentum_52w_high import (
     is_market_in_uptrend,
     rank_candidates as rank_52w,
 )
-from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback
+from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
