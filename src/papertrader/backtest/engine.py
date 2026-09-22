@@ -541,8 +541,9 @@ class Backtester:
                 quote = self._quote_for(symbol, history_upto)
                 if quote is None:
                     continue
+                turnover = _avg_daily_turnover(history_upto)
                 cand = crypto_momentum.evaluate_candidate(
-                    symbol, quote, history_upto, self.strategy_cfg,
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
                     reasons=self._entry_rejections,
                 )
                 if cand:
