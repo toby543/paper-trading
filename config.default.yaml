@@ -218,6 +218,20 @@ profiles:
       max_cash_deployed_per_scan_pct: 40.0
       reentry_cooldown_days: 3
 
+  # ============================================================================
+  # CRYPTO TRADING PROFILES
+  # ============================================================================
+  # These profiles trade ONLY cryptocurrency on 24/7 crypto exchanges.
+  # They are COMPLETELY INDEPENDENT from equity profiles:
+  #   - Universe: crypto-only symbols (BTC-USD, ETH-USD, etc.), not NSE stocks
+  #   - Regime: No Nifty 50 filter; crypto has independent market cycles
+  #   - Hours: 24/7 trading (no market open/close checks)
+  #   - Regime Index: BTC-USD (if regime ever re-enabled), not Nifty 50
+  #
+  # NOTE: These profiles use YFinance as fallback for crypto data.
+  # For production trading, integrate Binance/Kraken APIs for real-time data.
+  # ============================================================================
+
   crypto_momentum:
     display_name: "Crypto Momentum"
     category: crypto
@@ -228,10 +242,12 @@ profiles:
     # Crypto-specific universe: only crypto symbols (BTC-USD, ETH-USD, etc.)
     # Profiles can override the global universe setting
     universe_file: data/universe_crypto.csv
-    # Crypto-specific regime filter: disable Nifty 50 check since crypto trades 24/7
-    # with independent market cycles. Crypto regime would require Bitcoin/Ethereum indices.
+    # Crypto regime: completely independent from equity market filters
+    # Crypto trades 24/7 with its own market cycles - no correlation with NSE/Nifty 50
     regime:
-      enabled: false  # Disable Nifty 50 regime filter for crypto
+      enabled: false  # No regime filter for crypto; crypto has independent cycles
+      # Use BTC-USD as potential crypto regime benchmark (if ever enabled in future)
+      index_symbol: "BTC-USD"  # Crypto-native benchmark, not Nifty 50
     # Crypto-specific strategy config: 24/7 markets, faster price discovery, higher volatility
     strategy:
       # Shorter lookback windows for crypto's faster pace vs equity markets
@@ -275,9 +291,12 @@ profiles:
     strategy_mode: consolidation_breakout
     # Crypto-specific universe: only crypto symbols (BTC-USD, ETH-USD, etc.)
     universe_file: data/universe_crypto.csv
-    # Crypto-specific regime filter: disable Nifty 50 check for same reason as crypto_momentum
+    # Crypto regime: completely independent from equity market filters
+    # Crypto trades 24/7 with its own market cycles - no correlation with NSE/Nifty 50
     regime:
-      enabled: false  # Disable Nifty 50 regime filter for crypto
+      enabled: false  # No regime filter for crypto; crypto has independent cycles
+      # Use BTC-USD as potential crypto regime benchmark (if ever enabled in future)
+      index_symbol: "BTC-USD"  # Crypto-native benchmark, not Nifty 50
     # Consolidation breakout adapted for crypto volatility and intraday trading patterns
     strategy:
       # 21-day lookback for momentum participation (≈3 weeks in 24/7 markets)
