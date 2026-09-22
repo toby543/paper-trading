@@ -240,6 +240,15 @@ class Config:
         # Fallback to account.state_file for backward compatibility
         return _resolve(self.get("account", "state_file", default="data/state.db"))
 
+    def get_profile_config(self, profile_name: str | None = None) -> dict:
+        """Get the full profile configuration dict for a specific profile.
+        Returns {} if profile not found."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        profiles = self.get("profiles", default={})
+        return profiles.get(profile_name, {}) if profile_name else {}
+
     @property
     def state_file(self) -> str:
         # Use profile-specific state file if profiles are configured

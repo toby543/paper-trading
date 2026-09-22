@@ -182,16 +182,23 @@ class Backtester:
         # actually runs verbatim, silently testing the wrong strategy with
         # the wrong parameters. risk is profile-scoped too (a long-horizon
         # profile can run much wider stops than a swing one); regime/
-        # universe stay global, matching live trading.
+        # universe now also support profile-scoped overrides for crypto/other specialization.
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = cfg.get_profile_risk_config(self.profile_name)
-        self.regime_cfg = cfg.get("regime", default={})
+        # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
+        # Falls back to global regime config if profile doesn't override
+        profile_regime_cfg = cfg.get_profile_config(self.profile_name).get("regime")
+        self.regime_cfg = profile_regime_cfg if profile_regime_cfg else cfg.get("regime", default={})
         # Bounds every yfinance .history() call below -- without it, a
         # stalled connection on any one symbol hangs the whole fetch loop
         # indefinitely with no exception raised (the surrounding try/except
         # only helps once something actually raises).
         self._fetch_timeout = cfg.get("data_source", "request_timeout_seconds", default=15)
-        self.universe = load_universe(cfg.universe_file)
+        # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
+        # Falls back to global universe_file if profile doesn't override
+        profile_universe_file = cfg.get_profile_config(self.profile_name).get("universe_file")
+        universe_file = profile_universe_file if profile_universe_file else cfg.universe_file
+        self.universe = load_universe(universe_file)
 
         # Make sure the fetch window is wide enough that every lookback this
         # profile needs is already satisfied on the FIRST simulated day --

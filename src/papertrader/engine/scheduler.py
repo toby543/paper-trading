@@ -90,7 +90,11 @@ class TradingEngine:
             fallback=cfg.get("data_source", "fallback", default="yfinance"),
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
         )
-        self.universe = load_universe(cfg.universe_file)
+        # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
+        # Falls back to global universe_file if profile doesn't override
+        profile_universe_file = cfg.get_profile_config(self.profile_name).get("universe_file")
+        universe_file = profile_universe_file if profile_universe_file else cfg.universe_file
+        self.universe = load_universe(universe_file)
         # Profile-specific strategy parameters (mode + any overrides that
         # profile's own strategy: block sets) merged over the shared
         # base. Always a fresh dict -- safe even with several
@@ -98,7 +102,10 @@ class TradingEngine:
         # multi_profile_mode.
         self.strategy_cfg = cfg.get_profile_strategy_config(self.profile_name)
         self.risk_cfg = profile_risk_cfg
-        self.regime_cfg = cfg.get("regime", default={})
+        # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
+        # Falls back to global regime config if profile doesn't override
+        profile_regime_cfg = cfg.get_profile_config(self.profile_name).get("regime")
+        self.regime_cfg = profile_regime_cfg if profile_regime_cfg else cfg.get("regime", default={})
 
     def reload_profile(self) -> str:
         """Reload engine configuration from disk after profile has changed.
@@ -136,7 +143,9 @@ class TradingEngine:
 
             new_strategy_cfg = self.cfg.get_profile_strategy_config(new_profile)
             new_risk_cfg = self.cfg.get_profile_risk_config(new_profile)
-            new_regime_cfg = self.cfg.get("regime", default={})
+            # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
+            profile_regime_cfg = self.cfg.get_profile_config(new_profile).get("regime")
+            new_regime_cfg = profile_regime_cfg if profile_regime_cfg else self.cfg.get("regime", default={})
 
             with self._state_lock:
                 self.profile_name = new_profile

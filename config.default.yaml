@@ -225,6 +225,13 @@ profiles:
     state_file: data/state_crypto_momentum.db
     starting_capital: 100000.0
     strategy_mode: crypto_momentum
+    # Crypto-specific universe: only crypto symbols (BTC-USD, ETH-USD, etc.)
+    # Profiles can override the global universe setting
+    universe_file: data/universe_crypto.csv
+    # Crypto-specific regime filter: disable Nifty 50 check since crypto trades 24/7
+    # with independent market cycles. Crypto regime would require Bitcoin/Ethereum indices.
+    regime:
+      enabled: false  # Disable Nifty 50 regime filter for crypto
     # Crypto-specific strategy config: 24/7 markets, faster price discovery, higher volatility
     strategy:
       # Shorter lookback windows for crypto's faster pace vs equity markets
@@ -266,6 +273,11 @@ profiles:
     state_file: data/state_crypto_breakout.db
     starting_capital: 100000.0
     strategy_mode: consolidation_breakout
+    # Crypto-specific universe: only crypto symbols (BTC-USD, ETH-USD, etc.)
+    universe_file: data/universe_crypto.csv
+    # Crypto-specific regime filter: disable Nifty 50 check for same reason as crypto_momentum
+    regime:
+      enabled: false  # Disable Nifty 50 regime filter for crypto
     # Consolidation breakout adapted for crypto volatility and intraday trading patterns
     strategy:
       # 21-day lookback for momentum participation (≈3 weeks in 24/7 markets)
