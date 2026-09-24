@@ -389,7 +389,16 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         reads. risk.* became profile-scoped alongside strategy.* so a
         long-horizon profile can run much wider stops than a swing one
         without dragging every other profile's risk settings along with it."""
-        if logical_path and logical_path[0] in ("strategy", "risk"):
+        # execution and regime joined strategy/risk as profile-scoped:
+        # a crypto profile prices fills with a percentage exchange fee
+        # (execution) and disables the equity benchmark filter against
+        # its own crypto index (regime), so reading or writing the shared
+        # global block for them showed one profile another's settings --
+        # the panel displayed ₹20 flat brokerage and the Nifty 500 filter
+        # as ON for a profile that actually uses ₹0 + 0.1% and has the
+        # filter OFF, and saving would have written to a block its engine
+        # never reads.
+        if logical_path and logical_path[0] in ("strategy", "risk", "execution", "regime"):
             return ["profiles", active_profile, logical_path[0], *logical_path[1:]]
         if logical_path == ("account", "starting_capital"):
             return ["profiles", active_profile, "starting_capital"]
@@ -422,6 +431,12 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             **cfg.raw,
             "strategy": cfg.get_profile_strategy_config(active_profile),
             "risk": cfg.get_profile_risk_config(active_profile),
+            # Resolved per-profile for the same reason they are written
+            # per-profile (see _resolve_setting_write_path): otherwise
+            # this panel shows the shared global values while the
+            # engine runs on the profile's own overrides.
+            "execution": cfg.get_profile_execution_config(active_profile),
+            "regime": cfg.get_profile_regime_config(active_profile),
             "account": {**cfg.get("account", default={}), "starting_capital": cfg.get_profile_starting_capital(active_profile)},
         }
         fields = []

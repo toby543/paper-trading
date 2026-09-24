@@ -28,6 +28,11 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},
+    {"path": ("strategy", "min_rsi"), "type": "float", "min": 0, "max": 100,
+     "group": "Strategy — Entry", "label": "Min RSI", "unit": "(0-100)",
+     "desc": "RSI(14) a coin must be above to count as in a momentum phase. "
+             "50 is the neutral line, so above it means buyers are in control; "
+             "raising it demands stronger momentum and admits fewer coins."},
     {"path": ("strategy", "min_momentum_return_pct"), "type": "float", "min": -100, "max": 500,
      "group": "Strategy — Entry", "label": "Min momentum return", "unit": "%",
      "desc": "Minimum return required over the lookback window below."},
@@ -156,7 +161,15 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("execution", "slippage_bps"), "type": "float", "min": 0, "max": 1000,
      "group": "Execution realism", "label": "Slippage", "unit": "bps", "desc": ""},
     {"path": ("execution", "flat_charges_inr"), "type": "float", "min": 0, "max": 100000,
-     "group": "Execution realism", "label": "Flat charges", "unit": "₹/order", "desc": ""},
+     "group": "Execution realism", "label": "Flat charges", "unit": "₹/order",
+     "desc": "Fixed brokerage + STT charged per order, the way an Indian equity "
+             "broker prices. Crypto profiles set this to 0 and use the percentage "
+             "fee below instead."},
+    {"path": ("execution", "fee_pct"), "type": "float", "min": 0, "max": 5,
+     "group": "Execution realism", "label": "Exchange fee", "unit": "% of trade value",
+     "desc": "Percentage of the traded amount charged on every fill, the way a "
+             "crypto exchange prices (~0.1% taker). Scales with position size, "
+             "unlike the flat charge above. Equity profiles leave this at 0."},
 
     {"path": ("engine", "market_open"), "type": "time",
      "group": "Market hours & scheduling", "label": "Market open", "unit": "HH:MM", "desc": ""},
@@ -197,15 +210,53 @@ _STRATEGY_SUBSECTION_MODE = {
     "trend_pullback": "trend_pullback",
 }
 
+# Shared strategy.*/risk.* fields that only SOME strategies read, mapped
+# to the modes that actually read them.
+#
+# The shared "Strategy — Entry" block was assumed universal, but that is
+# only true of the 52-week-high strategy it grew out of. crypto_momentum,
+# for instance, reads none of the 52w-high proximity, relative-strength,
+# volume-confirmation or price-band fields, and has its own hardcoded
+# RSI/trend exits rather than the momentum-breakdown toggle -- so the
+# panel was presenting nine editable settings that did nothing for it,
+# indistinguishable from the ones that did. Anything absent from this map
+# is genuinely universal and always shown.
+_FIELD_MODES = {
+    ("strategy", "proximity_to_52w_high_pct"): {"52w_high"},
+    ("strategy", "min_relative_strength_pct"): {"52w_high"},
+    ("strategy", "volume_confirmation", "enabled"): {"52w_high"},
+    ("strategy", "volume_confirmation", "min_volume_multiple"): {"52w_high"},
+    ("strategy", "volume_confirmation", "recent_days"): {"52w_high"},
+    ("strategy", "volume_confirmation", "baseline_days"): {"52w_high"},
+    # Price bands are applied inside each strategy, and the two that
+    # don't consult them are the two crypto profiles run on.
+    ("strategy", "min_ltp_inr"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback",
+    },
+    ("strategy", "max_ltp_inr"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback",
+    },
+    ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout"},
+    # Only crypto_momentum has an RSI gate.
+    ("strategy", "min_rsi"): {"crypto_momentum"},
+}
+
 
 def applies_to_mode(path: tuple[str, ...], mode: str) -> bool:
-    """False for a field that belongs to a *different* strategy's own
-    subsection than the one currently active -- e.g. ATR period only
-    means anything for pivot_supertrend, so it has no business showing up
-    while viewing a 52w_high profile. Used to filter the Edit Settings
-    panel down to what the active profile's strategy actually reads."""
+    """False for a field the active strategy does not actually read --
+    either because it belongs to a *different* strategy's own subsection
+    (ATR period means nothing outside pivot_supertrend) or because it is
+    one of the shared fields only some strategies consult (see
+    _FIELD_MODES). Used to filter the Edit Settings panel down to what
+    the active profile's strategy genuinely governs, so every field shown
+    is one that changes its behaviour."""
     if len(path) >= 2 and path[0] == "strategy" and path[1] in _STRATEGY_SUBSECTION_MODE:
         return _STRATEGY_SUBSECTION_MODE[path[1]] == mode
+    modes = _FIELD_MODES.get(tuple(path))
+    if modes is not None:
+        return mode in modes
     return True
 
 

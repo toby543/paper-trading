@@ -117,12 +117,22 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
         return None
 
     # History sufficiency
-    if len(history) < 50:
+    # Enough bars for the slower of the two averages actually configured,
+    # not a fixed 50 -- otherwise raising slow_ma_days silently yields a
+    # None MA and every symbol gets rejected as insufficient_history.
+    if len(history) < int(config.get("slow_ma_days", 50)):
         reasons["insufficient_history"] = reasons.get("insufficient_history", 0) + 1
         return None
 
-    ma20 = _moving_average(history, 20)
-    ma50 = _moving_average(history, 50)
+    # Read from config rather than hardcoded 20/50. These were fixed
+    # constants while the Edit Settings panel displayed the inherited
+    # equity values (50/200) for them -- so the dashboard showed two
+    # numbers this strategy did not use and offered no way to change the
+    # two it did. Defaults preserve the documented 20/50 crypto windows.
+    fast_days = int(config.get("fast_ma_days", 20))
+    slow_days = int(config.get("slow_ma_days", 50))
+    ma20 = _moving_average(history, fast_days)
+    ma50 = _moving_average(history, slow_days)
     rsi14 = _rsi(history, 14)
     momentum_days = config.get("momentum_lookback_days", 30)
     momentum_pct = _momentum_return_pct(history, momentum_days)
@@ -215,9 +225,11 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
     if rsi14 is not None and rsi14 < 40:
         return True, "rsi_momentum_loss (RSI < 40)"
 
-    # Trend break: price closes below 20-day MA
-    ma20 = _moving_average(history, 20)
-    if ma20 is not None and quote.ltp < ma20:
-        return True, "trend_break (below 20-day MA)"
+    # Trend break: price closes below the fast MA (same window the entry
+    # uptrend check uses, so an exit can't disagree with its own entry).
+    fast_days = int(config.get("fast_ma_days", 20))
+    ma_fast = _moving_average(history, fast_days)
+    if ma_fast is not None and quote.ltp < ma_fast:
+        return True, f"trend_break (below {fast_days}-day MA)"
 
     return False, ""

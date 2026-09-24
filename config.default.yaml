@@ -466,6 +466,10 @@ execution:
   # Flat brokerage + STT/charges approximation per executed order (₹).
   flat_charges_inr: 20.0
 
+  # Percentage-of-notional exchange fee. 0 for equity profiles,
+  # which pay the flat brokerage above instead; crypto profiles
+  # override this with ~0.1% and set flat_charges_inr to 0.
+  fee_pct: 0
 engine:
   timezone: Asia/Kolkata
   market_open: "09:15"
