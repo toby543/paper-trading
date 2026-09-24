@@ -309,7 +309,12 @@ profiles:
       max_new_positions_per_scan: 3
       consolidation_breakout:
         consolidation_days: 7
-        max_consolidation_range_pct: 5.0
+        # 20%, not the equity default of 3-5%: crypto's baseline 7-day
+        # range is 3-4x an NSE stock's even in its calmest names -- BTC
+        # (the tightest of the universe) sits at ~14%, so 5% rejected
+        # every coin, every day, with no ceiling loose enough to ever
+        # admit a "genuinely quiet" base at crypto's actual volatility.
+        max_consolidation_range_pct: 20.0
         volume_multiple: 1.5
     risk:
       stop_loss_pct: 8.0
