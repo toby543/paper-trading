@@ -469,10 +469,28 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         if not cfg.path:
             return jsonify({"ok": False, "errors": ["No config file path is known for this running instance."]}), 500
 
+        # A profile-scoped write_path is ["profiles", <name>, ...] -- that
+        # now lands in that profile's own profiles/<name>.yaml file, not
+        # config.yaml, so it has to be split out and saved separately
+        # (with the leading ["profiles", <name>] stripped, since that
+        # prefix no longer exists once the profile has its own file).
+        # Everything else (universe, market hours, data source, ...)
+        # still goes to config.yaml as before.
+        global_updates = []
+        profile_updates: dict[str, list] = {}
+        for write_path, value in coerced:
+            if write_path[0] == "profiles":
+                profile_updates.setdefault(write_path[1], []).append((write_path[2:], value))
+            else:
+                global_updates.append((write_path, value))
+
         try:
-            update_config_file(cfg.path, coerced)
+            if global_updates:
+                update_config_file(cfg.path, global_updates)
+            for profile_name, updates in profile_updates.items():
+                update_config_file(cfg.profile_file_path(profile_name), updates)
         except Exception as exc:  # noqa: BLE001 - surface any write failure to the UI, don't 500 silently
-            return jsonify({"ok": False, "errors": [f"Failed to save config.yaml: {exc}"]}), 500
+            return jsonify({"ok": False, "errors": [f"Failed to save settings: {exc}"]}), 500
 
         # Reflect the change immediately in this process's in-memory config
         # so a page refresh shows the new values right away. The running

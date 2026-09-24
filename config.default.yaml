@@ -1,19 +1,29 @@
 # Configuration for the autonomous NSE momentum paper-trading system.
 #
 # THIS FILE IS THE TEMPLATE, NOT YOUR LIVE CONFIG.
-# The app actually reads config.yaml (a sibling of this file, gitignored --
-# see .gitignore), which `python main.py` creates automatically by copying
-# this file the first time it doesn't find one. From then on, config.yaml
-# is yours: dashboard edits, hand edits, anything you change there is
-# permanent and `git pull` will never touch, overwrite, or ask you to
-# discard it, because git no longer tracks that file at all.
+# The app actually reads two things, both gitignored (see .gitignore),
+# both created automatically the first time they don't exist:
+#   - config.yaml (a sibling of this file): the shared/global settings
+#     below (universe, market hours, data source, logging, ...) that
+#     aren't specific to any one profile.
+#   - profiles/<name>.yaml (one file per profile, in a `profiles/`
+#     directory next to this one): each profile's own display_name,
+#     category, state_file, starting_capital, strategy_mode,
+#     universe_file/regime overrides, and its own strategy:/risk: blocks
+#     -- split out of the `profiles:` section below, one file per entry.
+# From then on both are yours: dashboard edits, hand edits, anything you
+# change there is permanent and `git pull` will never touch, overwrite,
+# or ask you to discard it, because git no longer tracks either at all.
+# A profile's own file is completely independent of every other
+# profile's -- editing or even deleting one never touches another.
 #
 # When a `git pull` updates THIS file with something new (a new profile,
-# a new setting), run `python main.py sync-config` to safely merge just
-# the new keys into your live config.yaml -- it only ever ADDS a key
-# that's missing from your file; it never overwrites a value you already
-# have, customized or not. Run it any time after pulling; it's a no-op
-# if there's nothing new to add.
+# a new setting on an existing profile), run `python main.py sync-config`
+# to safely merge just the new keys into your live config.yaml and/or
+# profiles/*.yaml -- it only ever ADDS a key that's missing (or a whole
+# new profile file); it never overwrites a value you already have,
+# customized or not. Run it any time after pulling; it's a no-op if
+# there's nothing new to add.
 #
 # PROFILE SYSTEM:
 # Each profile maintains completely separate positions, cash, and trade history.

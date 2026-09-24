@@ -252,17 +252,29 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 def cmd_sync_config(args: argparse.Namespace) -> None:
     """Safely merge any settings config.default.yaml has picked up (since
-    this config.yaml was created or last synced) into the live file --
-    e.g. a new profile added by a `git pull`. Additive only: never
-    touches a key the live file already has, customized or not. See
-    config.default.yaml's own header comment and
-    config_editor.find_missing_keys's docstring for the exact guarantee.
+    this config.yaml was created or last synced) into the live files --
+    e.g. a new profile added by a `git pull`, or a new field added to an
+    existing profile's block. Additive only: never touches a key the live
+    file already has, customized or not. See config.default.yaml's own
+    header comment and config_editor.find_missing_keys's docstring for
+    the exact guarantee.
+
+    Each profile lives in its own profiles/<name>.yaml now (not an inline
+    `profiles:` block in config.yaml), so this runs the same additive
+    diff twice: once for config.yaml's global/shared settings (excluding
+    `profiles`, which never belongs there anymore and would otherwise get
+    re-added as a stray inline block), and once per profile, diffing
+    config.default.yaml's profiles.<name> against that profile's own
+    file -- creating the whole file for a profile that's new since this
+    config was created, or just missing fields for one that already
+    exists.
     """
     import yaml as _yaml
     from .config_editor import find_missing_keys, update_config_file
 
     live_path = args.config or os.path.join(REPO_ROOT, "config.yaml")
     default_path = args.default or os.path.join(os.path.dirname(live_path) or ".", "config.default.yaml")
+    profiles_dir = os.path.join(os.path.dirname(live_path) or ".", "profiles")
 
     if not os.path.exists(default_path):
         print(f"No template found at {default_path} -- nothing to sync against.", file=sys.stderr)
@@ -278,23 +290,56 @@ def cmd_sync_config(args: argparse.Namespace) -> None:
     with open(live_path, "r", encoding="utf-8") as fh:
         live = _yaml.safe_load(fh)
 
-    missing = find_missing_keys(default, live)
-    if not missing:
-        print(f"{live_path} is already up to date with {default_path} -- nothing to add.")
+    default_global = {k: v for k, v in default.items() if k != "profiles"}
+    live_global = {k: v for k, v in live.items() if k != "profiles"}
+    missing = find_missing_keys(default_global, live_global)
+
+    # Plan: (target_path, missing_pairs, is_new_file) per file that needs
+    # a write -- computed fully before anything is printed or applied, so
+    # --dry-run and the real run report/do exactly the same thing.
+    plan: list[tuple[str, list, bool]] = []
+    if missing:
+        plan.append((live_path, missing, False))
+
+    for name, default_profile in (default.get("profiles") or {}).items():
+        profile_path = os.path.join(profiles_dir, f"{name}.yaml")
+        if not os.path.exists(profile_path):
+            plan.append((profile_path, [([], default_profile)], True))
+            continue
+        with open(profile_path, "r", encoding="utf-8") as fh:
+            live_profile = _yaml.safe_load(fh) or {}
+        profile_missing = find_missing_keys(default_profile, live_profile)
+        if profile_missing:
+            plan.append((profile_path, profile_missing, False))
+
+    if not plan:
+        print(f"{live_path} and profiles/ are already up to date with {default_path} -- nothing to add.")
         return
 
-    print(f"{len(missing)} setting(s) in {default_path} are missing from {live_path}:")
-    for path, value in missing:
-        preview = repr(value)
-        if len(preview) > 90:
-            preview = preview[:90] + "..."
-        print(f"  + {'.'.join(path)} = {preview}")
+    total = sum(len(pairs) for _, pairs, _ in plan)
+    print(f"{total} setting(s) across {len(plan)} file(s) are missing:")
+    for target_path, pairs, is_new_file in plan:
+        if is_new_file:
+            print(f"  {target_path} (new profile file)")
+            continue
+        print(f"  {target_path}:")
+        for path, value in pairs:
+            preview = repr(value)
+            if len(preview) > 90:
+                preview = preview[:90] + "..."
+            print(f"    + {'.'.join(path)} = {preview}")
 
     if args.dry_run:
         print("\n(--dry-run: nothing written. Re-run without it to apply.)")
         return
 
-    update_config_file(live_path, missing)
+    for target_path, pairs, is_new_file in plan:
+        if is_new_file:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, "w", encoding="utf-8") as fh:
+                _yaml.safe_dump(pairs[0][1], fh, sort_keys=False)
+        else:
+            update_config_file(target_path, pairs)
     print(f"\nAdded {len(missing)} setting(s) to {live_path} (backed up to {live_path}.bak first). "
           f"Nothing you'd already customized was touched.")
 

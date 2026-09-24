@@ -17,4 +17,12 @@ data/auth_secrets.json
 config.yaml
 config.yaml.bak
 config.yaml.tmp
+# Each profile's own live settings -- one file per profile, split out of
+# the old inline config.yaml `profiles:` block so a profile's history/
+# blast radius is fully independent of every other profile's. Same
+# git-ignore rationale as config.yaml itself: bootstrapped automatically
+# on first run from config.default.yaml's profiles, then yours forever.
+profiles/
+profiles/*.bak
+profiles/*.tmp
 .env

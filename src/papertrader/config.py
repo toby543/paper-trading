@@ -46,6 +46,107 @@ def _bootstrap_from_default(path: str) -> None:
              "`git pull` will never touch it again.", path, default_path)
 
 
+def _profiles_dir_mtime(profiles_dir: str) -> float:
+    """Latest mtime across every file in profiles_dir, or 0.0 if the
+    directory doesn't exist -- folded into Config's own _last_modified so
+    reload()/has_changed() notice a profile file edited directly (or by
+    the dashboard's per-profile write) exactly like a config.yaml edit."""
+    if not os.path.isdir(profiles_dir):
+        return 0.0
+    latest = 0.0
+    for fname in os.listdir(profiles_dir):
+        if fname.endswith((".yaml", ".yml")):
+            latest = max(latest, os.path.getmtime(os.path.join(profiles_dir, fname)))
+    return latest
+
+
+def _load_profiles_dir(profiles_dir: str) -> dict[str, Any]:
+    """Every profiles_dir/<name>.yaml, keyed by filename stem -- shaped
+    exactly like the old inline `profiles:` dict so every existing
+    consumer (get_profile_strategy_config, the scheduler, the dashboard,
+    ...) keeps working unchanged against cfg.raw["profiles"]."""
+    profiles: dict[str, Any] = {}
+    if not os.path.isdir(profiles_dir):
+        return profiles
+    for fname in sorted(os.listdir(profiles_dir)):
+        if not fname.endswith((".yaml", ".yml")):
+            continue
+        name = os.path.splitext(fname)[0]
+        with open(os.path.join(profiles_dir, fname), "r", encoding="utf-8") as fh:
+            profiles[name] = yaml.safe_load(fh) or {}
+    return profiles
+
+
+def _ensure_profiles_dir(config_path: str, profiles_dir: str) -> None:
+    """Make sure profiles_dir exists and holds one file per profile,
+    migrating from wherever profile data currently lives:
+
+      1. If config_path still has an inline `profiles:` block -- either
+         the old single-file layout, or a config.yaml freshly
+         bootstrapped from config.default.yaml (which still has one) --
+         split it out into profiles_dir/<name>.yaml, preserving whatever
+         is actually there (a user's live, possibly customized values,
+         not just template defaults), then strip `profiles:` back out of
+         config_path. Uses ruamel's round-trip mode so config_path's own
+         comments and each new per-profile file's comments both survive.
+      2. Otherwise (config_path has no profiles: key and profiles_dir
+         doesn't exist -- e.g. it was deleted by hand), seed profiles_dir
+         from config.default.yaml's own `profiles:` block instead, the
+         same first-run convenience _bootstrap_from_default provides for
+         config.yaml itself.
+
+    A no-op once profiles_dir already exists -- never re-splits or
+    touches a file that's already there, so this is safe to call on
+    every Config.load()."""
+    if os.path.isdir(profiles_dir):
+        return
+
+    from ruamel.yaml import YAML
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True
+    yaml_rt.width = 4096
+
+    data = None
+    profiles = None
+    source_desc = ""
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as fh:
+            data = yaml_rt.load(fh)
+        if data and data.get("profiles"):
+            profiles = data["profiles"]
+            source_desc = config_path
+
+    if profiles is None:
+        default_path = os.path.join(os.path.dirname(config_path) or ".", "config.default.yaml")
+        if not os.path.exists(default_path):
+            return
+        with open(default_path, "r", encoding="utf-8") as fh:
+            default_data = yaml_rt.load(fh)
+        profiles = (default_data or {}).get("profiles") or {}
+        source_desc = default_path
+        data = None  # nothing to strip out of config_path in this branch
+
+    if not profiles:
+        return
+
+    os.makedirs(profiles_dir, exist_ok=True)
+    for name, profile_data in list(profiles.items()):
+        profile_path = os.path.join(profiles_dir, f"{name}.yaml")
+        with open(profile_path, "w", encoding="utf-8") as fh:
+            yaml_rt.dump(profile_data, fh)
+    log.info("Populated %s from %s's profiles (%d profile file(s) created).",
+              profiles_dir, source_desc, len(profiles))
+
+    if data is not None and "profiles" in data:
+        del data["profiles"]
+        tmp_path = config_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            yaml_rt.dump(data, fh)
+        os.replace(tmp_path, config_path)
+        log.info("Removed inline profiles: block from %s (now split into %s/*.yaml).",
+                  config_path, profiles_dir)
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     """New dict with `override` layered onto `base`: a nested dict value
     (e.g. volume_confirmation, cross_sectional) is merged key-by-key
@@ -65,6 +166,7 @@ class Config:
     raw: dict[str, Any] = field(repr=False)
     path: str = field(default="")
     _last_modified: float = field(default=0.0, init=False, repr=False)
+    _profiles_dir: str = field(default="", init=False, repr=False)
 
     def __post_init__(self):
         if self.path and os.path.exists(self.path):
@@ -74,35 +176,56 @@ class Config:
     def load(cls, path: str | None = None) -> "Config":
         path = path or os.path.join(REPO_ROOT, "config.yaml")
         _bootstrap_from_default(path)
+        # Each profile lives in its own profiles/<name>.yaml now, not an
+        # inline `profiles:` block in config.yaml -- see _ensure_profiles_dir's
+        # docstring. Merged into raw["profiles"] below so every existing
+        # consumer keeps working against the same shape as before.
+        profiles_dir = os.path.join(os.path.dirname(path) or ".", "profiles")
+        _ensure_profiles_dir(path, profiles_dir)
         with open(path, "r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
-        return cls(raw=raw, path=path)
+        raw["profiles"] = _load_profiles_dir(profiles_dir)
+        cfg = cls(raw=raw, path=path)
+        cfg._profiles_dir = profiles_dir
+        cfg._last_modified = max(cfg._last_modified, _profiles_dir_mtime(profiles_dir))
+        return cfg
+
+    def profile_file_path(self, profile_name: str) -> str:
+        """Path to profile_name's own config file under profiles/ -- where
+        Edit Settings' profile-scoped writes (strategy.*, risk.*,
+        starting_capital) actually land now, instead of inside config.yaml's
+        old inline profiles.<name>.* block."""
+        return os.path.join(self._profiles_dir, f"{profile_name}.yaml")
 
     def reload(self) -> bool:
-        """Reload config from file if it has changed. Returns True if reloaded."""
+        """Reload config from file (and every profiles/*.yaml) if either
+        has changed. Returns True if reloaded."""
         if not self.path or not os.path.exists(self.path):
             return False
 
-        current_mtime = os.path.getmtime(self.path)
+        current_mtime = max(os.path.getmtime(self.path), _profiles_dir_mtime(self._profiles_dir))
         if current_mtime <= self._last_modified:
             return False
 
         try:
             with open(self.path, "r", encoding="utf-8") as fh:
                 new_raw = yaml.safe_load(fh)
+            new_raw["profiles"] = _load_profiles_dir(self._profiles_dir)
             self.raw = new_raw
             self._last_modified = current_mtime
-            log.info("Configuration reloaded successfully from %s", self.path)
+            log.info("Configuration reloaded successfully from %s (+ %s/*.yaml)", self.path, self._profiles_dir)
             return True
         except Exception as e:
             log.error("Failed to reload configuration: %s", e)
             return False
 
     def has_changed(self) -> bool:
-        """Check if config file has been modified without reloading."""
+        """Check if config.yaml or any profiles/*.yaml file has been
+        modified without reloading."""
         if not self.path or not os.path.exists(self.path):
             return False
-        return os.path.getmtime(self.path) > self._last_modified
+        current_mtime = max(os.path.getmtime(self.path), _profiles_dir_mtime(self._profiles_dir))
+        return current_mtime > self._last_modified
 
     def __getitem__(self, key: str) -> Any:
         return self.raw[key]
