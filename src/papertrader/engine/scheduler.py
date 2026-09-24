@@ -96,6 +96,9 @@ class TradingEngine:
             preferred=cfg.get("data_source", "preferred", default="nse"),
             fallback=cfg.get("data_source", "fallback", default="yfinance"),
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
+            # Crypto pairs arrive quoted in USD; converted to this
+            # profile's own book currency at the data layer.
+            quote_currency=cfg.get_profile_quote_currency(self.profile_name),
         )
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
         self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))

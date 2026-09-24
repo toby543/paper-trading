@@ -428,6 +428,21 @@ class Config:
         profile_cfg = self.get_profile_config(profile_name)
         return profile_cfg.get("category") == "crypto"
 
+    def get_profile_quote_currency(self, profile_name: str | None = None) -> str:
+        """Currency this profile's book is denominated in.
+
+        Crypto pairs are quoted in USD by every exchange the data layer
+        reads, but the book itself can be kept in rupees -- in which case
+        MarketDataClient converts those quotes at the FX rate before
+        anything downstream sees them, so equity, P&L and position sizing
+        are all in one currency. Falls back to the global account
+        currency, which is INR."""
+        profile_cfg = self.get_profile_config(profile_name)
+        return str(
+            profile_cfg.get("quote_currency")
+            or self.get("account", "currency", default="INR")
+        ).upper()
+
     def get_profile_fractional_quantities(self, profile_name: str | None = None) -> bool:
         """True if this profile's instruments can be bought in fractions.
 

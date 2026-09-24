@@ -1134,8 +1134,12 @@ const PROFILE_CATEGORIES = {{ profile_categories | tojson }};
 const IS_CRYPTO_PROFILE = {{ is_crypto_profile | tojson }};
 // A crypto profile's book is quoted in USD, so it gets $ and plain
 // thousands grouping; an NSE profile keeps ₹ and lakh/crore grouping.
-const CCY = IS_CRYPTO_PROFILE ? "$" : "₹";
-const NUM_LOCALE = IS_CRYPTO_PROFILE ? "en-US" : "en-IN";
+// Book currency, not asset class: a crypto profile priced in rupees
+// shows ₹ and lakh/crore grouping, because the data layer has already
+// converted its USD exchange quotes at the live FX rate.
+const QUOTE_CURRENCY = {{ quote_currency | tojson }};
+const CCY = QUOTE_CURRENCY === "USD" ? "$" : "₹";
+const NUM_LOCALE = QUOTE_CURRENCY === "USD" ? "en-US" : "en-IN";
 // Venue badge shown beside every symbol. A crypto profile's pairs are
 // not NSE listings -- their quotes come from Binance/Kraken.
 const EXCH = IS_CRYPTO_PROFILE ? "CRYPTO" : "NSE";

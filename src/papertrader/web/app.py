@@ -244,6 +244,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         # its own overrides merged over the shared base) -- what actually
         # governs its live trading and what the Strategy Rules / All
         # Settings / Edit Settings panels display and edit.
+        quote_currency = cfg.get_profile_quote_currency(active_profile)
         strategy = cfg.get_profile_strategy_config(active_profile)
         risk = cfg.get_profile_risk_config(active_profile)
 
@@ -272,11 +273,15 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             # Settings panel needs this to stop describing those rows as
             # if they still governed a crypto profile's trading.
             is_crypto_profile=cfg.get_profile_trades_24_7(active_profile),
-            # Currency symbol for this profile's book: a crypto profile
-            # holds USD-quoted pairs, an NSE profile holds rupee-quoted
-            # equities. Used everywhere the template would otherwise
-            # hardcode ₹ (the JS half reads the CCY const, same value).
-            ccy="$" if cfg.get_profile_trades_24_7(active_profile) else "₹",
+            # Currency symbol for this profile's book, driven by the
+            # currency it is actually denominated in -- NOT by whether it
+            # is crypto. A crypto profile holds USD-quoted pairs but its
+            # book can be kept in rupees, in which case the data layer
+            # converts the quotes and every figure here is already INR.
+            # Used everywhere the template would otherwise hardcode ₹
+            # (the JS half reads the CCY const, same value).
+            quote_currency=quote_currency,
+            ccy="$" if quote_currency == "USD" else "₹",
             logging_cfg=cfg.get("logging", default={}),
             profiles=cfg.list_profiles(),
             profile_categories=cfg.list_profile_categories(),

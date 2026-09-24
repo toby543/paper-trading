@@ -100,10 +100,19 @@ class MarketDataClient:
     # stocks fail in the same run.
     _YFINANCE_MIN_INTERVAL_SECONDS = 0.2
 
-    def __init__(self, preferred: str = "nse", fallback: str = "yfinance", timeout: int = 10):
+    def __init__(self, preferred: str = "nse", fallback: str = "yfinance", timeout: int = 10,
+                 quote_currency: str = "INR"):
+        """quote_currency: the currency this client's caller keeps its book
+        in. Crypto pairs are quoted in USD by every exchange we read, so
+        for an INR book they are converted here, at the data layer, rather
+        than anywhere downstream -- that way strategy thresholds, position
+        sizing, the broker, the stored ledger and the dashboard all see
+        one currency and none of them need conversion logic. NSE equities
+        are already INR and are never touched."""
         self.preferred = preferred
         self.fallback = fallback
         self.timeout = timeout
+        self.quote_currency = (quote_currency or "INR").upper()
         self._nse = NSESession(timeout=timeout)
         self._binance = BinanceClient(timeout=timeout)
         self._kraken = KrakenClient(timeout=timeout)
@@ -115,6 +124,19 @@ class MarketDataClient:
         # minutes, so trip a circuit breaker and go straight to the
         # fallback for the remainder of this process's lifetime.
         self._nse_broken = False
+
+    def _crypto_fx_rate(self) -> float:
+        """Multiplier from a crypto pair's USD quote into this book's own
+        currency. 1.0 for a USD book, so the conversion below is a no-op
+        rather than a special case."""
+        from .fx import conversion_rate
+
+        try:
+            return conversion_rate("USD", self.quote_currency, timeout=self.timeout)
+        except ValueError:
+            log.warning("No USD->%s conversion available; leaving crypto prices in USD",
+                        self.quote_currency)
+            return 1.0
 
     def _throttle_yfinance(self) -> None:
         elapsed = time.time() - self._last_yfinance_call
@@ -143,6 +165,10 @@ class MarketDataClient:
             # crypto tickers -- a single exchange outage or an unlisted
             # pair on one exchange shouldn't drop straight to the weakest
             # (delayed, thin-coverage) source.
+            # Prices come back in the pair's USD quote currency; convert
+            # once, here, into whatever currency this book is kept in.
+            # Volume is a coin count, not a price, so it is never scaled.
+            fx = self._crypto_fx_rate()
             for client, source in ((self._binance, "binance"), (self._kraken, "kraken")):
                 if client.broken:
                     continue
@@ -150,10 +176,10 @@ class MarketDataClient:
                     cq = client.get_quote(symbol)
                     return Quote(
                         symbol=cq.symbol,
-                        ltp=cq.ltp,
-                        prev_close=cq.prev_close,
-                        week52_high=cq.week52_high,
-                        week52_low=cq.week52_low,
+                        ltp=cq.ltp * fx,
+                        prev_close=cq.prev_close * fx,
+                        week52_high=cq.week52_high * fx,
+                        week52_low=cq.week52_low * fx,
                         volume=cq.volume,
                         timestamp=cq.timestamp,
                         source=source,
@@ -161,9 +187,15 @@ class MarketDataClient:
                 except CryptoDataUnavailableError as exc:
                     log.warning("%s quote failed for %s (%s); trying next source", source, symbol, exc)
             try:
-                return self._quote_from_yfinance(symbol, is_crypto=True)
+                quote = self._quote_from_yfinance(symbol, is_crypto=True)
             except Exception as exc:  # noqa: BLE001
                 raise DataUnavailableError(f"No data source available for {symbol}: {exc}") from exc
+            if fx != 1.0:
+                quote.ltp *= fx
+                quote.prev_close *= fx
+                quote.week52_high *= fx
+                quote.week52_low *= fx
+            return quote
         if self.preferred == "nse" and not self._nse_broken:
             try:
                 return self._quote_from_nse(symbol)
@@ -226,11 +258,25 @@ class MarketDataClient:
     # ---- historical bars (for MAs / momentum returns) ----------------
     def get_history(self, symbol: str, period: str = "1y", ttl_seconds: int = 900) -> pd.DataFrame:
         if self._is_crypto_symbol(symbol):
+            fx = self._crypto_fx_rate()
             for client, source in ((self._binance, "binance"), (self._kraken, "kraken")):
                 if client.broken:
                     continue
                 try:
-                    return client.get_history(symbol, days=365, ttl_seconds=ttl_seconds)
+                    df = client.get_history(symbol, days=365, ttl_seconds=ttl_seconds)
+                    if fx == 1.0:
+                        return df
+                    # Copy before scaling: the client hands back its own
+                    # cached frame, and multiplying in place would corrupt
+                    # that cache (and compound on every later read).
+                    # Volume is a coin count, so only the OHLC prices
+                    # convert -- which also makes Close*Volume turnover
+                    # come out in the book's currency automatically.
+                    converted = df.copy()
+                    for col in ("Open", "High", "Low", "Close"):
+                        converted[col] = converted[col] * fx
+                    converted.attrs.update(df.attrs)
+                    return converted
                 except CryptoDataUnavailableError as exc:
                     log.warning("%s history failed for %s (%s); trying next source", source, symbol, exc)
         cache_key = f"{symbol}:{period}"
@@ -259,6 +305,15 @@ class MarketDataClient:
             raise DataUnavailableError(f"No history for {symbol}: {exc}") from exc
         if df.empty:
             raise DataUnavailableError(f"No history for {symbol}")
+        # Same USD->book-currency conversion the exchange path above does,
+        # for the case where both exchanges were unavailable and Yahoo's
+        # (also USD-quoted) crypto ticker served the history instead.
+        if self._is_crypto_symbol(symbol):
+            fx = self._crypto_fx_rate()
+            if fx != 1.0:
+                for col in ("Open", "High", "Low", "Close"):
+                    if col in df.columns:
+                        df[col] = df[col] * fx
         df.attrs["_fetched_at"] = now
         self._history_cache[cache_key] = df
         return df

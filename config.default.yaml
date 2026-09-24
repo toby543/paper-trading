@@ -262,12 +262,12 @@ profiles:
       momentum_lookback_days: 30
       min_momentum_return_pct: 5.0
       min_rsi: 50.0                      # RSI > 50 = in a momentum phase
-      # USD, not INR: crypto turnover is quoted in the pair's USD quote
-      # currency. $5M/day admits the major/mid-caps (LINK ~$32M, ARB
-      # ~$43M, MKR ~$7M) while excluding genuinely thin names like GMX
-      # (~$0.3M). An NSE rupee figure compared against USD here demanded
-      # $50M/day -- ~83x too strict -- and rejected 16 of 24 coins.
-      min_avg_daily_turnover_usd: 5000000
+      # In INR, like the rest of this book: crypto quotes arrive from
+      # the exchanges in USD and are converted at the live USD/INR rate
+      # in the data layer, so the turnover reaching this filter is
+      # already rupees. Rs 48cr/day (~$5M) admits the major/mid-caps
+      # (LINK, ARB, MKR) while excluding genuinely thin names like GMX.
+      min_avg_daily_turnover_inr: 480000000
       max_new_positions_per_scan: 3
     risk:
       stop_loss_pct: 10.0
@@ -304,8 +304,8 @@ profiles:
       # are compressed by continuous trading.
       fast_ma_days: 20
       slow_ma_days: 50
-      # USD threshold -- see the note under crypto_momentum above.
-      min_avg_daily_turnover_usd: 5000000
+      # Rs 48cr/day (~$5M) -- see the note under crypto_momentum above.
+      min_avg_daily_turnover_inr: 480000000
       max_new_positions_per_scan: 3
       consolidation_breakout:
         consolidation_days: 7

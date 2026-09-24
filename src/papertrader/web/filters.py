@@ -10,9 +10,9 @@ def indian_currency(ctx, value) -> str:
     100000 -> "1,00,000.00", matching the en-IN formatting the dashboard's
     client-side JS already uses everywhere else.
 
-    Context-aware (hence pass_context) so a crypto profile, whose book is
-    quoted in USD, gets plain thousands grouping instead -- 100000 ->
-    "100,000.00". Reading `is_crypto_profile` off the render context keeps
+    Context-aware (hence pass_context) so a book denominated in a
+    non-INR currency gets plain thousands grouping instead -- 100000 ->
+    "100,000.00". Reading `quote_currency` off the render context keeps
     every existing `{{ x|inr }}` call site unchanged; the JS half picks
     the matching locale via NUM_LOCALE."""
     try:
@@ -24,7 +24,7 @@ def indian_currency(ctx, value) -> str:
     value = abs(value)
     int_part, dec_part = f"{value:.2f}".split(".")
 
-    if ctx.get("is_crypto_profile"):
+    if str(ctx.get("quote_currency", "INR")).upper() != "INR":
         grouped = f"{int(int_part):,}"
     elif len(int_part) <= 3:
         grouped = int_part
