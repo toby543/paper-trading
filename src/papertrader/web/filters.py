@@ -1,11 +1,20 @@
 """Template filters for the dashboard."""
 from __future__ import annotations
 
+from jinja2 import pass_context
 
-def indian_currency(value) -> str:
+
+@pass_context
+def indian_currency(ctx, value) -> str:
     """Format a number with Indian digit grouping (lakhs/crores), e.g.
     100000 -> "1,00,000.00", matching the en-IN formatting the dashboard's
-    client-side JS already uses everywhere else."""
+    client-side JS already uses everywhere else.
+
+    Context-aware (hence pass_context) so a crypto profile, whose book is
+    quoted in USD, gets plain thousands grouping instead -- 100000 ->
+    "100,000.00". Reading `is_crypto_profile` off the render context keeps
+    every existing `{{ x|inr }}` call site unchanged; the JS half picks
+    the matching locale via NUM_LOCALE."""
     try:
         value = float(value)
     except (TypeError, ValueError):
@@ -15,7 +24,9 @@ def indian_currency(value) -> str:
     value = abs(value)
     int_part, dec_part = f"{value:.2f}".split(".")
 
-    if len(int_part) <= 3:
+    if ctx.get("is_crypto_profile"):
+        grouped = f"{int(int_part):,}"
+    elif len(int_part) <= 3:
         grouped = int_part
     else:
         last3 = int_part[-3:]

@@ -14,7 +14,12 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # type: bool | int | float | choice | time | str.
 EDITABLE_SETTINGS: list[dict] = [
     {"path": ("universe", "file"), "type": "choice",
-     "choices": ["data/universe.csv", "data/universe_nifty500.csv"],
+     # universe_crypto.csv is listed so the dropdown can represent what a
+     # crypto profile actually scans instead of showing only NSE lists.
+     # Note this key is the SHARED default; a crypto profile overrides it
+     # with its own profiles/<name>.yaml universe_file, which is why the
+     # Edit Settings panel flags this field as not applying to it.
+     "choices": ["data/universe.csv", "data/universe_nifty500.csv", "data/universe_crypto.csv"],
      "group": "Universe", "label": "Universe file", "unit": "",
      "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
              "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "

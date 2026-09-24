@@ -803,7 +803,7 @@
         <div class="rule"><span>Lookback</span><span class="mono">{{ cs.get('lookback_days', '—') }}d{% if cs.get('skip_recent_days') %}, skip last {{ cs.get('skip_recent_days') }}d{% endif %}</span></div>
         <div class="rule"><span>Absolute-return gate</span><span class="mono">own trailing return &gt; 0%</span></div>
         <div class="rule"><span>Trend</span><span class="mono">above {{ strategy.get('fast_ma_days', '—') }}&amp;{{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -813,11 +813,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -831,7 +831,7 @@
         {% if ps.get('min_pct_above_r1') %}
         <div class="rule"><span>Min above R1</span><span class="mono">&ge; {{ ps.get('min_pct_above_r1') }}%</span></div>
         {% endif %}
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -841,11 +841,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -856,7 +856,7 @@
         <div class="rule"><span>Consolidation period</span><span class="mono">{{ cb.get('consolidation_days', '—') }} days tight range (&lt;3% of price)</span></div>
         <div class="rule"><span>Breakout volume</span><span class="mono">&ge; {{ cb.get('volume_multiple', '—') }}&times; 20-day average</span></div>
         <div class="rule"><span>Momentum</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -866,11 +866,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -880,7 +880,7 @@
         <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; {{ strategy.get('fast_ma_days', '—') }}DMA &gt; {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
         <div class="rule"><span>Pullback depth</span><span class="mono">{{ tp.get('min_pullback_pct', '—') }}&ndash;{{ tp.get('max_pullback_pct', '—') }}% below {{ tp.get('pullback_lookback_days', '—') }}d high</span></div>
         <div class="rule"><span>Turn confirmation</span><span class="mono">today's close &gt; yesterday's close</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -890,11 +890,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -902,7 +902,7 @@
         <div class="rules-col-label">Entry — long term trend</div>
         <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; {{ strategy.get('fast_ma_days', '—') }}DMA &gt; {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
         <div class="rule"><span>Participation</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if regime.get('enabled') %}
         <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
         {% endif %}
@@ -912,11 +912,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -925,14 +925,14 @@
         <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; 20DMA &gt; 50DMA</span></div>
         <div class="rule"><span>RSI momentum</span><span class="mono">RSI(14) &gt; {{ strategy.get('min_rsi', '—') }}</span></div>
         <div class="rule"><span>Participation</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
         {% else %}
         <div class="rules-col-label">Entry — 52-week-high momentum, all must pass</div>
         <div class="rule"><span>Proximity to 52w high</span><span class="mono">&le; {{ strategy.get('proximity_to_52w_high_pct', '—') }}%</span></div>
         <div class="rule"><span>Momentum</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
         <div class="rule"><span>Trend</span><span class="mono">above {{ strategy.get('fast_ma_days', '—') }}&amp;{{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; ₹{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
+        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
         {% if strategy.get('min_relative_strength_pct') is not none %}
         <div class="rule"><span>Relative strength vs {{ regime.get('index_symbol', 'index') }}</span><span class="mono">&ge; +{{ strategy.get('min_relative_strength_pct') }}pp</span></div>
         {% endif %}
@@ -948,11 +948,11 @@
         {% if min_ltp or max_ltp %}
         <div class="rule"><span>Price range</span><span class="mono">
           {%- if min_ltp and max_ltp -%}
-            ₹{{ min_ltp|inr }} &ndash; ₹{{ max_ltp|inr }}
+            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
           {%- elif min_ltp -%}
-            &ge; ₹{{ min_ltp|inr }}
+            &ge; {{ ccy }}{{ min_ltp|inr }}
           {%- else -%}
-            &le; ₹{{ max_ltp|inr }}
+            &le; {{ ccy }}{{ max_ltp|inr }}
           {%- endif -%}
         </span></div>
         {% endif %}
@@ -999,7 +999,7 @@
       <div>
         <div class="settings-col-label">Account</div>
         <div class="setting">
-          <div class="setting-top"><span class="setting-label">Starting capital</span><span class="setting-value mono">₹{{ active_starting_capital|inr }}</span></div>
+          <div class="setting-top"><span class="setting-label">Starting capital</span><span class="setting-value mono">{{ ccy }}{{ active_starting_capital|inr }}</span></div>
           <div class="setting-desc">This profile's own virtual capital, seeded into its ledger the first time it's created — editing this later won't change an existing account's cash.</div>
         </div>
         <div class="setting">
@@ -1023,7 +1023,7 @@
           <div class="setting-desc">Simulated fills are nudged against you by this many basis points, so paper P&L isn't unrealistically better than a real fill would be.</div>
         </div>
         <div class="setting">
-          <div class="setting-top"><span class="setting-label">Flat charges</span><span class="setting-value mono">₹{{ execution.get('flat_charges_inr', 0)|inr }} / order</span></div>
+          <div class="setting-top"><span class="setting-label">Flat charges</span><span class="setting-value mono">{{ ccy }}{{ execution.get('flat_charges_inr', 0)|inr }} / order</span></div>
           <div class="setting-desc">Approximate brokerage + STT charged on every simulated buy and sell.</div>
         </div>
       </div>
@@ -1047,8 +1047,13 @@
           <div class="setting-desc">How often open positions are rechecked for stop-loss / trailing-stop / momentum-breakdown — kept more frequent than entry scans.</div>
         </div>
         <div class="setting">
+          {% if is_crypto_profile %}
+          <div class="setting-top"><span class="setting-label">Holiday calendar</span><span class="setting-value mono">none</span></div>
+          <div class="setting-desc">Crypto exchanges don't observe holidays or weekends, so this profile has no closed days at all. The NSE holiday list doesn't apply to it.</div>
+          {% else %}
           <div class="setting-top"><span class="setting-label">Holiday calendar</span><span class="setting-value mono">{{ engine_cfg.get('holidays_file', '—') }}</span></div>
           <div class="setting-desc">NSE trading holidays the engine treats as market-closed, in addition to weekends.</div>
+          {% endif %}
         </div>
 
         <div class="settings-col-label">Data source</div>
@@ -1098,7 +1103,7 @@
   </div>
 
   <div class="footer-note">
-    <span>Simulated fills · slippage {{ slippage_bps }}bps · ₹{{ flat_charges_inr|inr }} flat charge</span>
+    <span>Simulated fills · slippage {{ slippage_bps }}bps · {{ ccy }}{{ flat_charges_inr|inr }} flat charge</span>
     <span class="sep"></span>
     <span>{{ profiles.get(active_profile, active_profile) }} · {{ strategy.get('mode', active_profile) }} strategy</span>
     <span class="sep"></span>
@@ -1124,13 +1129,28 @@ async function authFetch(url, opts) {
   return res;
 }
 
-const fmt = (n) => Number(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtInt = (n) => Number(n ?? 0).toLocaleString("en-IN");
-const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
-const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
 const ACTIVE_PROFILE = {{ active_profile | tojson }};
 const PROFILE_CATEGORIES = {{ profile_categories | tojson }};
 const IS_CRYPTO_PROFILE = {{ is_crypto_profile | tojson }};
+// A crypto profile's book is quoted in USD, so it gets $ and plain
+// thousands grouping; an NSE profile keeps ₹ and lakh/crore grouping.
+const CCY = IS_CRYPTO_PROFILE ? "$" : "₹";
+const NUM_LOCALE = IS_CRYPTO_PROFILE ? "en-US" : "en-IN";
+// Venue badge shown beside every symbol. A crypto profile's pairs are
+// not NSE listings -- their quotes come from Binance/Kraken.
+const EXCH = IS_CRYPTO_PROFILE ? "CRYPTO" : "NSE";
+
+const fmt = (n) => Number(n ?? 0).toLocaleString(NUM_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInt = (n) => Number(n ?? 0).toLocaleString(NUM_LOCALE);
+// Quantities: whole shares for equities, but crypto sizes fractionally
+// (0.09523809 BTC), and rounding that to "0" in the holdings table would
+// misreport the position as empty. Show up to 8 decimals for crypto,
+// trimming trailing zeros so a whole number still reads as one.
+const fmtQty = (n) => Number(n ?? 0).toLocaleString(NUM_LOCALE, IS_CRYPTO_PROFILE
+  ? { minimumFractionDigits: 0, maximumFractionDigits: 8 }
+  : { maximumFractionDigits: 0 });
+const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
+const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour12: false });
 
@@ -1147,11 +1167,11 @@ function renderStats(s) {
   const unrealizedCostBasis = s.positions.reduce((sum, p) => sum + p.avg_price * p.quantity, 0);
   const unrealizedPct = unrealizedCostBasis ? (unrealized / unrealizedCostBasis * 100) : 0;
   const cards = [
-    { label: "Total Equity", value: "₹" + fmt(s.total_equity), sub: (s.total_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_pnl) + " (" + (s.total_pnl_pct >= 0 ? "+" : "") + s.total_pnl_pct + "%)", subCls: pnlClass(s.total_pnl), hero: true },
-    { label: "Cash", value: "₹" + fmt(s.cash), sub: "available to deploy" },
-    { label: "Positions Value", value: "₹" + fmt(s.positions_value), sub: s.open_positions + " holding" + (s.open_positions === 1 ? "" : "s") + ", marked live" },
-    { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + "₹" + fmt(unrealized), sub: "on open positions (" + (unrealizedPct >= 0 ? "+" : "") + unrealizedPct.toFixed(2) + "%)", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
-    { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + "₹" + fmt(s.total_realized_pnl), sub: "from closed sells (" + (s.total_realized_pnl_pct >= 0 ? "+" : "") + s.total_realized_pnl_pct + "%)", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
+    { label: "Total Equity", value: CCY + fmt(s.total_equity), sub: (s.total_pnl >= 0 ? "+" : "") + CCY + fmt(s.total_pnl) + " (" + (s.total_pnl_pct >= 0 ? "+" : "") + s.total_pnl_pct + "%)", subCls: pnlClass(s.total_pnl), hero: true },
+    { label: "Cash", value: CCY + fmt(s.cash), sub: "available to deploy" },
+    { label: "Positions Value", value: CCY + fmt(s.positions_value), sub: s.open_positions + " holding" + (s.open_positions === 1 ? "" : "s") + ", marked live" },
+    { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + CCY + fmt(unrealized), sub: "on open positions (" + (unrealizedPct >= 0 ? "+" : "") + unrealizedPct.toFixed(2) + "%)", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
+    { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + CCY + fmt(s.total_realized_pnl), sub: "from closed sells (" + (s.total_realized_pnl_pct >= 0 ? "+" : "") + s.total_realized_pnl_pct + "%)", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
     { label: "Universe Scanned", value: fmtInt(s.universe_size),
       sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
@@ -1194,11 +1214,11 @@ function renderPositions(s) {
       : (p.pct_from_52w_high <= 0.05 ? "At high" : `-${p.pct_from_52w_high.toFixed(1)}%`);
     return `
     <tr>
-      <td class="sym">${p.symbol}<span class="exch">NSE</span></td>
-      <td class="mono" data-label="Qty">${fmtInt(p.quantity)}</td>
+      <td class="sym">${p.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="Qty">${fmtQty(p.quantity)}</td>
       <td class="mono" data-label="Avg">${fmt(p.avg_price)}</td>
       <td class="mono" data-label="LTP">${fmt(p.ltp)}</td>
-      <td class="mono" data-label="From 52W High" title="${p.week52_high !== null && p.week52_high !== undefined ? "52w high: ₹" + fmt(p.week52_high) : ""}">${fromHigh}</td>
+      <td class="mono" data-label="From 52W High" title="${p.week52_high !== null && p.week52_high !== undefined ? "52w high: " + CCY + fmt(p.week52_high) : ""}">${fromHigh}</td>
       <td class="mono" data-label="Mkt Value">${fmt(p.market_value)}</td>
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
@@ -1221,8 +1241,8 @@ function renderTrades(trades) {
       </div>
       <div class="ticker-mid">
         <span class="ticker-sym">${t.symbol}</span>
-        <span class="ticker-detail mono">${fmtInt(t.quantity)} @ ₹${fmt(t.price)}</span>
-        ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}₹${fmt(t.realized_pnl)}</span>` : ""}
+        <span class="ticker-detail mono">${fmtQty(t.quantity)} @ ${CCY}${fmt(t.price)}</span>
+        ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}${CCY}${fmt(t.realized_pnl)}</span>` : ""}
       </div>
       <div class="ticker-reason">${t.reason}</div>
     </div>
@@ -1281,7 +1301,7 @@ function renderEquityChart(curve, opts) {
   const metaEl = document.getElementById(metaId);
   if (metaEl) metaEl.textContent = "since " + shortDate(curve[0].timestamp);
   document.getElementById(legendId).innerHTML =
-    `<span>Total equity — <b class="mono">₹${fmt(last)}</b></span><span>Peak — <b class="mono">₹${fmt(peak)}</b></span>` +
+    `<span>Total equity — <b class="mono">${CCY}${fmt(last)}</b></span><span>Peak — <b class="mono">${CCY}${fmt(peak)}</b></span>` +
     (opts.perfHtml || "");
 
   const padL = 4, padR = 4, padT = 10, padB = 18;
@@ -1379,9 +1399,9 @@ function renderEquityChart(curve, opts) {
 
   ctx.fillStyle = inkFaint;
   ctx.font = "10.5px 'IBM Plex Mono', monospace";
-  ctx.fillText("₹" + Math.round(min).toLocaleString("en-IN"), 4, cssH - 4);
+  ctx.fillText(CCY + Math.round(min).toLocaleString(NUM_LOCALE), 4, cssH - 4);
   ctx.textAlign = "right";
-  ctx.fillText("₹" + Math.round(max).toLocaleString("en-IN"), cssW - 4, padT + 9);
+  ctx.fillText(CCY + Math.round(max).toLocaleString(NUM_LOCALE), cssW - 4, padT + 9);
   ctx.textAlign = "left";
 }
 
@@ -1818,7 +1838,7 @@ function renderBacktestResult(result, profileDisplay) {
   }
   document.getElementById("btTotalReturn").textContent = (result.total_return_pct >= 0 ? "+" : "") + result.total_return_pct.toFixed(2) + "%";
   document.getElementById("btTotalReturn").className = "value mono " + pnlClass(result.total_return_pct);
-  document.getElementById("btEquity").textContent = "₹" + fmt(result.starting_capital) + " → ₹" + fmt(result.ending_equity);
+  document.getElementById("btEquity").textContent = CCY + fmt(result.starting_capital) + " → " + CCY + fmt(result.ending_equity);
   document.getElementById("btCagr").textContent = (result.cagr_pct >= 0 ? "+" : "") + result.cagr_pct.toFixed(2) + "%";
   document.getElementById("btDrawdown").textContent = "-" + result.max_drawdown_pct.toFixed(2) + "%";
   document.getElementById("btTrades").textContent = fmtInt(result.num_round_trips);
@@ -1858,7 +1878,7 @@ function renderBacktestResult(result, profileDisplay) {
         <td class="mono" data-label="Date">${t.date}</td>
         <td class="bt-side"><span class="badge-side ${t.side.toLowerCase()}">${t.side}</span></td>
         <td class="sym">${t.symbol}</td>
-        <td class="mono" data-label="Qty">${fmtInt(t.qty)}</td>
+        <td class="mono" data-label="Qty">${fmtQty(t.qty)}</td>
         <td class="mono" data-label="Price">${fmt(t.price)}</td>
         <td class="mono ${t.pnl === null ? "" : pnlClass(t.pnl)}" data-label="P&amp;L">${t.pnl === null ? "—" : (t.pnl >= 0 ? "+" : "") + fmt(t.pnl)}</td>
         <td class="bt-reason" data-label="Reason">${t.reason}</td>
@@ -2037,9 +2057,9 @@ const WATCHLIST_HEAD = {
 function watchlistRowHtml(mode, c) {
   if (mode === "consolidation_breakout") {
     return `
-      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="Breakout High">₹${fmt(c.consolidation_high)}</td>
+      <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
       <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
@@ -2047,20 +2067,20 @@ function watchlistRowHtml(mode, c) {
   }
   if (mode === "pivot_supertrend") {
     return `
-      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="R1">₹${fmt(c.r1)}</td>
+      <td class="mono" data-label="R1">${CCY}${fmt(c.r1)}</td>
       <td class="mono up" data-label="Above R1">+${c.pct_above_r1.toFixed(1)}%</td>
-      <td class="mono" data-label="SuperTrend">₹${fmt(c.supertrend_value)}</td>
+      <td class="mono" data-label="SuperTrend">${CCY}${fmt(c.supertrend_value)}</td>
       <td class="mono" data-label="ATR">${fmt(c.atr)}</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }
   if (mode === "trend_pullback") {
     return `
-      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="Recent High">₹${fmt(c.recent_high)}</td>
+      <td class="mono" data-label="Recent High">${CCY}${fmt(c.recent_high)}</td>
       <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
@@ -2068,10 +2088,10 @@ function watchlistRowHtml(mode, c) {
   }
   if (mode === "long_term_trend") {
     return `
-      <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
       <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-      <td class="mono" data-label="200DMA">₹${fmt(c.fast_ma)}</td>
-      <td class="mono" data-label="400DMA">₹${fmt(c.slow_ma)}</td>
+      <td class="mono" data-label="200DMA">${CCY}${fmt(c.fast_ma)}</td>
+      <td class="mono" data-label="400DMA">${CCY}${fmt(c.slow_ma)}</td>
       <td class="mono up" data-label="1Y Return">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
@@ -2089,9 +2109,9 @@ function watchlistRowHtml(mode, c) {
   }
   // 52w_high and cross_sectional_momentum share this shape.
   return `
-    <td class="sym">${c.symbol}<span class="exch">NSE</span></td>
+    <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
     <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
-    <td class="mono" data-label="From 52W High" title="52w high: ₹${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
+    <td class="mono" data-label="From 52W High" title="52w high: ${CCY}${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
     <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
     <td class="mono ${c.relative_strength_pct === null ? "" : (c.relative_strength_pct >= 0 ? "up" : "down")}" data-label="RS vs Index">${c.relative_strength_pct === null ? "—" : (c.relative_strength_pct >= 0 ? "+" : "") + c.relative_strength_pct.toFixed(1) + "pp"}</td>
     <td class="mono" data-label="Volume">${c.volume_multiple === null ? "—" : c.volume_multiple.toFixed(1) + "×"}</td>
@@ -2226,7 +2246,7 @@ function renderComparison(data) {
           </div>
         </td>
         <td class="mono" style="color: var(--ink-dim);">${r.strategy_mode}</td>
-        <td class="mono">₹${fmt(r.total_equity)}</td>
+        <td class="mono">${CCY}${fmt(r.total_equity)}</td>
         <td class="mono ${pnlClass(r.total_return_pct)}">${signed(r.total_return_pct)}%</td>
         <td class="mono ${pnlClass(r.realized_pnl)}">${signed(r.realized_pnl)}</td>
         <td class="mono">${r.win_rate_pct === null ? "—" : r.win_rate_pct + "%"}</td>
