@@ -497,16 +497,16 @@ engine:
 
 data_source:
   # "nse" tries the official NSE website API first and falls back to
-  # "yfinance" automatically if it is unreachable or blocked.
-  # NOTE: This data source is configured for Indian equities (NSE) and uses
-  # Yahoo Finance for fallback, which has limited crypto coverage and pricing delays.
-  # For proper CRYPTO trading (crypto_momentum, crypto_breakout strategies):
-  #   - Integrate a crypto exchange API (Binance, Kraken, CoinGecko) for real-time data
-  #   - Use 4-hour or 1-day candles for better momentum signals vs intraday equity noise
-  #   - Consider USD-based liquidity thresholds instead of INR
-  #   - Use crypto-native indices (not Nifty 50) for regime filter (Bitcoin, Ethereum, or Composite)
-  # Current setup: crypto_momentum and crypto_breakout will use YFinance crypto tickers
-  # (e.g., "BTC-USD", "ETH-USD") but with delays and limited technical analysis data.
+  # "yfinance" automatically if it is unreachable or blocked. This applies
+  # to equity profiles only.
+  # CRYPTO profiles (crypto_momentum, crypto_breakout) never go through NSE
+  # or this preferred/fallback pair -- MarketDataClient detects crypto
+  # symbols (universe entries containing "-", e.g. "BTC-USD") and routes
+  # them through a chain of exchanges: Binance first (live 24hr ticker +
+  # daily klines), then Kraken if Binance is unreachable or doesn't list
+  # the pair, then Yahoo Finance's crypto tickers as the last resort. All
+  # of these are public, unauthenticated market-data endpoints -- no API
+  # key required. See src/papertrader/data/crypto_client.py.
   preferred: nse
   fallback: yfinance
   request_timeout_seconds: 15

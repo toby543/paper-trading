@@ -21,6 +21,8 @@ import pandas as pd
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from .crypto_client import BinanceClient, KrakenClient, CryptoDataUnavailableError
+
 log = logging.getLogger(__name__)
 
 NSE_BASE = "https://www.nseindia.com"
@@ -103,6 +105,8 @@ class MarketDataClient:
         self.fallback = fallback
         self.timeout = timeout
         self._nse = NSESession(timeout=timeout)
+        self._binance = BinanceClient(timeout=timeout)
+        self._kraken = KrakenClient(timeout=timeout)
         self._history_cache: dict[str, pd.DataFrame] = {}
         self._last_yfinance_call = 0.0
         # Once NSE fails once, its anti-bot layer is almost always blocking
@@ -134,8 +138,28 @@ class MarketDataClient:
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:
         if self._is_crypto_symbol(symbol):
-            # Crypto has no NSE equivalent -- go straight to Yahoo Finance
-            # using the symbol as-is (no ".NS" suffix).
+            # Crypto has no NSE equivalent. Try two independent exchanges'
+            # live order-book data before falling back to Yahoo Finance's
+            # crypto tickers -- a single exchange outage or an unlisted
+            # pair on one exchange shouldn't drop straight to the weakest
+            # (delayed, thin-coverage) source.
+            for client, source in ((self._binance, "binance"), (self._kraken, "kraken")):
+                if client.broken:
+                    continue
+                try:
+                    cq = client.get_quote(symbol)
+                    return Quote(
+                        symbol=cq.symbol,
+                        ltp=cq.ltp,
+                        prev_close=cq.prev_close,
+                        week52_high=cq.week52_high,
+                        week52_low=cq.week52_low,
+                        volume=cq.volume,
+                        timestamp=cq.timestamp,
+                        source=source,
+                    )
+                except CryptoDataUnavailableError as exc:
+                    log.warning("%s quote failed for %s (%s); trying next source", source, symbol, exc)
             try:
                 return self._quote_from_yfinance(symbol, is_crypto=True)
             except Exception as exc:  # noqa: BLE001
@@ -201,6 +225,14 @@ class MarketDataClient:
 
     # ---- historical bars (for MAs / momentum returns) ----------------
     def get_history(self, symbol: str, period: str = "1y", ttl_seconds: int = 900) -> pd.DataFrame:
+        if self._is_crypto_symbol(symbol):
+            for client, source in ((self._binance, "binance"), (self._kraken, "kraken")):
+                if client.broken:
+                    continue
+                try:
+                    return client.get_history(symbol, days=365, ttl_seconds=ttl_seconds)
+                except CryptoDataUnavailableError as exc:
+                    log.warning("%s history failed for %s (%s); trying next source", source, symbol, exc)
         cache_key = f"{symbol}:{period}"
         cached = self._history_cache.get(cache_key)
         now = time.time()
