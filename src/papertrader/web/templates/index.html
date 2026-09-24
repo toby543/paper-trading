@@ -1130,6 +1130,7 @@ const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
 const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
 const ACTIVE_PROFILE = {{ active_profile | tojson }};
 const PROFILE_CATEGORIES = {{ profile_categories | tojson }};
+const IS_CRYPTO_PROFILE = {{ is_crypto_profile | tojson }};
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour12: false });
 
@@ -1508,8 +1509,22 @@ function renderEditGroups() {
     const groupLabel = isProfileScoped && editActiveProfileDisplay
       ? `${group} <span style="color: var(--accent); text-transform: none; letter-spacing: 0;">— ${editActiveProfileDisplay}</span>`
       : group;
+    // These three groups are all global/shared settings (see
+    // settings_schema.py's ("universe","file")/("data_source",...)/
+    // ("engine","market_open"|"market_close") entries -- none of them
+    // are profile_scoped). A crypto profile ignores every one of them:
+    // it has its own universe_file override, always trades 24/7, and
+    // its quotes route through Binance/Kraken in code, never through
+    // this NSE/Yahoo Finance preferred/fallback pair. Editing them here
+    // silently does nothing for the crypto profile you're viewing, so
+    // say that plainly instead of letting it look like a no-op bug.
+    const cryptoInertGroups = ["Universe", "Data source", "Market hours & scheduling", "Market regime"];
+    const showCryptoNote = IS_CRYPTO_PROFILE && cryptoInertGroups.includes(group);
     return `
     <div class="edit-group-label">${groupLabel}</div>
+    ${showCryptoNote ? `<div class="edit-row-desc" style="margin: -4px 0 10px; color: var(--warn, #d9a441);">
+      This is the shared setting other (non-crypto) profiles use. ${editActiveProfileDisplay || "This profile"} has its own crypto-specific override (own universe file, its own regime setting, 24/7 trading, Binance/Kraken data) and won't be affected by changes here.
+    </div>` : ""}
     ${fields.map(f => `
       <div class="edit-row">
         <div class="edit-row-text">
