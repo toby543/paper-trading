@@ -44,7 +44,12 @@ from .data_api import (
     build_trades,
 )
 from .filters import indian_currency
-from .settings_schema import EDITABLE_SETTINGS, applies_to_mode, coerce_and_validate, get_value
+from .settings_schema import (
+    EDITABLE_SETTINGS,
+    applies_to_profile,
+    coerce_and_validate,
+    get_value,
+)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 log = logging.getLogger(__name__)
@@ -440,8 +445,9 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             "account": {**cfg.get("account", default={}), "starting_capital": cfg.get_profile_starting_capital(active_profile)},
         }
         fields = []
+        is_crypto = cfg.get_profile_trades_24_7(active_profile)
         for spec in EDITABLE_SETTINGS:
-            if not applies_to_mode(spec["path"], active_mode):
+            if not applies_to_profile(spec["path"], active_mode, is_crypto):
                 continue
             fields.append({
                 **spec,
@@ -484,6 +490,16 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                 value = coerce_and_validate(logical_path, item.get("value"))
             except ValueError as exc:
                 errors.append(f"{'.'.join(logical_path)}: {exc}")
+                continue
+            if not applies_to_profile(
+                logical_path,
+                cfg.get_profile_strategy_mode(active_profile),
+                cfg.get_profile_trades_24_7(active_profile),
+            ):
+                errors.append(
+                    f"{'.'.join(logical_path)}: not a setting the "
+                    f"{active_profile} profile uses."
+                )
                 continue
             write_path = _resolve_setting_write_path(logical_path, active_profile)
             coerced.append((write_path, value))

@@ -244,6 +244,40 @@ _FIELD_MODES = {
 }
 
 
+# Global settings a crypto profile never reads, so the Edit Settings
+# panel must not offer them while one is being viewed.
+#
+# These are keyed off the profile being crypto rather than off its
+# strategy mode, because mode cannot distinguish them: crypto_breakout
+# and the NSE "Consolidation Breakout" profile run the SAME
+# consolidation_breakout mode, and these settings apply to one and not
+# the other. Each is genuinely dead for crypto rather than merely
+# unusual:
+#   - universe.file          crypto profiles set their own universe_file
+#   - engine.market_open/close  crypto trades 24/7; the NSE session gate
+#                               is skipped entirely (see trades_24_7)
+#   - data_source.preferred/fallback  crypto symbols route to
+#                               Binance/Kraken and never touch the
+#                               NSE/Yahoo pair
+# Everything else in those groups -- scan/exit intervals, the request
+# timeout, the log level -- does govern a crypto profile and stays.
+CRYPTO_INERT_PATHS = {
+    ("universe", "file"),
+    ("engine", "market_open"),
+    ("engine", "market_close"),
+    ("data_source", "preferred"),
+    ("data_source", "fallback"),
+}
+
+
+def applies_to_profile(path: tuple[str, ...], mode: str, is_crypto: bool) -> bool:
+    """Whether this field governs the profile currently being viewed --
+    applies_to_mode plus the crypto-inert globals above."""
+    if is_crypto and tuple(path) in CRYPTO_INERT_PATHS:
+        return False
+    return applies_to_mode(path, mode)
+
+
 def applies_to_mode(path: tuple[str, ...], mode: str) -> bool:
     """False for a field the active strategy does not actually read --
     either because it belongs to a *different* strategy's own subsection

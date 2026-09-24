@@ -72,6 +72,11 @@ class TradingEngine:
         # resolved against self.profile_name explicitly (not cfg.state_file,
         # which depends on the config's single global active_profile and
         # would give every engine the same ledger in multi_profile_mode).
+        # The currency this profile's book is kept in. Crypto pairs are
+        # quoted in USD by the exchanges but converted to this before
+        # anything here sees them, so it is the currency of every price,
+        # fill and P&L figure this engine handles.
+        self.quote_currency = cfg.get_profile_quote_currency(self.profile_name)
         starting_capital = cfg.get_profile_starting_capital(self.profile_name)
         self.storage = Storage(cfg.get_profile_state_file(self.profile_name), starting_capital)
         # Profile-scoped, not the bare global execution: block -- a
@@ -98,7 +103,7 @@ class TradingEngine:
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
             # Crypto pairs arrive quoted in USD; converted to this
             # profile's own book currency at the data layer.
-            quote_currency=cfg.get_profile_quote_currency(self.profile_name),
+            quote_currency=self.quote_currency,
         )
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
         self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))
@@ -639,10 +644,12 @@ class TradingEngine:
                     f"(skip last {cs_cfg.get('skip_recent_days', 21)}d)"
                 )
             elif mode == "consolidation_breakout":
-                # Currency symbol follows the profile: this same strategy
-                # runs the NSE "Consolidation Breakout" profile (rupees)
-                # and the "Crypto Breakout" profile (USD-quoted pairs).
-                ccy = "$" if self.trades_24_7 else "₹"
+                # Follows the book's currency, NOT its asset class: a
+                # crypto profile reads USD-quoted pairs but keeps its
+                # book in rupees (the data layer converts them), so
+                # keying this off trades_24_7 printed "$" against what
+                # is actually a rupee price.
+                ccy = "$" if self.quote_currency == "USD" else "₹"
                 reason = (
                     f"consolidation_breakout score={cand.score:.1f} "
                     f"breakout high {ccy}{cand.consolidation_high:.2f}, "

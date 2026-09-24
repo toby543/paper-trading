@@ -1542,18 +1542,8 @@ function renderEditGroups() {
     // this NSE/Yahoo Finance preferred/fallback pair. Editing them here
     // silently does nothing for the crypto profile you're viewing, so
     // say that plainly instead of letting it look like a no-op bug.
-    // "Market regime" and "Execution realism" are NOT listed: both became
-    // profile-scoped, so they now show and save this profile's own values
-    // (its disabled crypto regime filter, its percentage exchange fee)
-    // and warning about them would be wrong. These four remain genuinely
-    // shared across every profile.
-    const cryptoInertGroups = ["Universe", "Data source", "Market hours & scheduling"];
-    const showCryptoNote = IS_CRYPTO_PROFILE && cryptoInertGroups.includes(group);
-    return `
+return `
     <div class="edit-group-label">${groupLabel}</div>
-    ${showCryptoNote ? `<div class="edit-row-desc" style="margin: -4px 0 10px; color: var(--warn, #d9a441);">
-      This is the shared setting other (non-crypto) profiles use. ${editActiveProfileDisplay || "This profile"} has its own crypto-specific override (own universe file, its own regime setting, 24/7 trading, Binance/Kraken data) and won't be affected by changes here.
-    </div>` : ""}
     ${fields.map(f => `
       <div class="edit-row">
         <div class="edit-row-text">
