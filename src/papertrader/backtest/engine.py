@@ -211,16 +211,21 @@ class Backtester:
             max_open_positions=self.risk_cfg.get("max_open_positions", 10),
             position_size_pct_of_equity=self.risk_cfg.get("position_size_pct_of_equity", 8.0),
             max_cash_deployed_per_scan_pct=self.risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0),
+            fractional_quantities=cfg.get_profile_fractional_quantities(self.profile_name),
         )
         self.starting_capital = cfg.get_profile_starting_capital(self.profile_name)
 
         fd, self._tmp_db = tempfile.mkstemp(suffix=".db", prefix="papertrader-backtest-")
         os.close(fd)
         self.storage = Storage(self._tmp_db, self.starting_capital)
+        # Profile-scoped so a crypto backtest is costed with exchange
+        # percentage fees, not NSE flat brokerage -- matching live.
+        backtest_exec_cfg = cfg.get_profile_execution_config(self.profile_name)
         self.broker = PaperBroker(
             self.storage,
-            slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
-            flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
+            slippage_bps=backtest_exec_cfg.get("slippage_bps", 5.0),
+            flat_charges_inr=backtest_exec_cfg.get("flat_charges_inr", 20.0),
+            fee_pct=backtest_exec_cfg.get("fee_pct", 0.0),
         )
 
         self._history: dict[str, pd.DataFrame] = {}

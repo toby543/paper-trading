@@ -74,16 +74,23 @@ class TradingEngine:
         # would give every engine the same ledger in multi_profile_mode).
         starting_capital = cfg.get_profile_starting_capital(self.profile_name)
         self.storage = Storage(cfg.get_profile_state_file(self.profile_name), starting_capital)
+        # Profile-scoped, not the bare global execution: block -- a
+        # crypto profile prices fills with a percentage exchange fee,
+        # an equity profile with flat NSE brokerage. See
+        # Config.get_profile_execution_config.
+        exec_cfg = cfg.get_profile_execution_config(self.profile_name)
         self.broker = PaperBroker(
             self.storage,
-            slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
-            flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
+            slippage_bps=exec_cfg.get("slippage_bps", 5.0),
+            flat_charges_inr=exec_cfg.get("flat_charges_inr", 20.0),
+            fee_pct=exec_cfg.get("fee_pct", 0.0),
         )
         profile_risk_cfg = cfg.get_profile_risk_config(self.profile_name)
         self.risk = RiskManager(
             max_open_positions=profile_risk_cfg.get("max_open_positions", 10),
             position_size_pct_of_equity=profile_risk_cfg.get("position_size_pct_of_equity", 8.0),
             max_cash_deployed_per_scan_pct=profile_risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0),
+            fractional_quantities=cfg.get_profile_fractional_quantities(self.profile_name),
         )
         self.data = MarketDataClient(
             preferred=cfg.get("data_source", "preferred", default="nse"),
@@ -137,10 +144,12 @@ class TradingEngine:
                      new_profile, state_file, starting_capital)
 
             new_storage = Storage(state_file, starting_capital)
+            new_exec_cfg = self.cfg.get_profile_execution_config(new_profile)
             new_broker = PaperBroker(
                 new_storage,
-                slippage_bps=self.cfg.get("execution", "slippage_bps", default=5.0),
-                flat_charges_inr=self.cfg.get("execution", "flat_charges_inr", default=20.0),
+                slippage_bps=new_exec_cfg.get("slippage_bps", 5.0),
+                flat_charges_inr=new_exec_cfg.get("flat_charges_inr", 20.0),
+                fee_pct=new_exec_cfg.get("fee_pct", 0.0),
             )
 
             new_strategy_cfg = self.cfg.get_profile_strategy_config(new_profile)
@@ -627,21 +636,42 @@ class TradingEngine:
                     f"(skip last {cs_cfg.get('skip_recent_days', 21)}d)"
                 )
             elif mode == "consolidation_breakout":
+                # Currency symbol follows the profile: this same strategy
+                # runs the NSE "Consolidation Breakout" profile (rupees)
+                # and the "Crypto Breakout" profile (USD-quoted pairs).
+                ccy = "$" if self.trades_24_7 else "₹"
                 reason = (
                     f"consolidation_breakout score={cand.score:.1f} "
-                    f"breakout high ₹{cand.consolidation_high:.2f}, "
+                    f"breakout high {ccy}{cand.consolidation_high:.2f}, "
                     f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
                     f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline"
                 )
             else:
-                reason = (
-                    f"momentum_52w_high score={cand.score:.1f} "
-                    f"{cand.pct_from_52w_high:.1f}% off 52w-high, "
-                    f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
-                )
-                if cand.relative_strength_pct is not None:
+                # Built from whatever the candidate actually carries, via
+                # getattr -- NOT by naming 52w-high fields directly. Every
+                # strategy without its own branch above lands here, but
+                # only momentum_52w_high's Candidate has
+                # pct_from_52w_high/relative_strength_pct/volume_multiple.
+                # Reading them unconditionally raised AttributeError for
+                # crypto_momentum, pivot_supertrend, trend_pullback and
+                # long_term_trend alike -- after the buy had been sized
+                # and approved but before broker.buy() ran -- which
+                # run_forever()'s catch-all then swallowed. All four
+                # profiles therefore scanned forever, logged candidates,
+                # and could never actually open a position.
+                reason = f"{mode} score={cand.score:.1f}"
+                pct_off_high = getattr(cand, "pct_from_52w_high", None)
+                if pct_off_high is not None:
+                    reason += f", {pct_off_high:.1f}% off 52w-high"
+                momentum_pct = getattr(cand, "momentum_return_pct", None)
+                if momentum_pct is not None:
+                    reason += f", {momentum_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days')}d return"
+                rsi = getattr(cand, "rsi", None)
+                if rsi is not None:
+                    reason += f", RSI {rsi:.0f}"
+                if getattr(cand, "relative_strength_pct", None) is not None:
                     reason += f", RS {cand.relative_strength_pct:+.1f}pp vs index"
-                if cand.volume_multiple is not None:
+                if getattr(cand, "volume_multiple", None) is not None:
                     reason += f", volume {cand.volume_multiple:.1f}x baseline"
             try:
                 self.broker.buy(cand.symbol, qty, cand.ltp, reason=reason)

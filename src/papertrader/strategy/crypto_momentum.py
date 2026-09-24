@@ -7,10 +7,34 @@ Exit: RSI drops below 40 (momentum loss), price closes below 20-day MA (trend br
 """
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass
+
 import pandas as pd
 
 from papertrader.data.nse_client import Quote
 from papertrader.portfolio.models import Position
+
+
+@dataclass
+class Candidate:
+    """One qualifying coin from a scan.
+
+    Must be an object with .symbol/.ltp/.score attributes, NOT a plain
+    dict: the shared entry path in TradingEngine.scan_for_entries()
+    reads cand.ltp/cand.symbol off whatever rank_candidates() returns,
+    exactly as it does for every other strategy's Candidate. Returning
+    dicts here raised AttributeError on every scan that found anything,
+    which run_forever()'s catch-all then swallowed -- so this strategy
+    logged candidates every cycle but could never actually buy one.
+    """
+    symbol: str
+    ltp: float
+    ma20: float
+    ma50: float
+    rsi: float
+    momentum_return_pct: float
+    score: float
 
 
 def _moving_average(history: pd.DataFrame, days: int) -> float | None:
@@ -21,7 +45,18 @@ def _moving_average(history: pd.DataFrame, days: int) -> float | None:
 
 
 def _rsi(history: pd.DataFrame, period: int = 14) -> float | None:
-    """Calculate RSI(14). Returns None if insufficient data."""
+    """Calculate RSI(14). Returns None if it cannot be computed.
+
+    A completely flat window has zero average gain AND zero average
+    loss, so rs = 0/0 = NaN and the RSI comes out NaN. That must be
+    reported as None, not handed back as a float: every comparison
+    against NaN is False, so a NaN RSI would sail through the
+    `rsi14 < min_rsi` entry gate and a dead, non-moving coin would be
+    bought as though it had momentum. Callers already treat None as
+    "insufficient data" and reject, which is the correct outcome.
+    An all-gains window (zero losses) is a different case -- rs = inf
+    gives RSI 100, which is genuinely correct and must be preserved.
+    """
     if len(history) < period + 1:
         return None
     closes = history["Close"]
@@ -30,7 +65,10 @@ def _rsi(history: pd.DataFrame, period: int = 14) -> float | None:
     losses = (-deltas.where(deltas < 0, 0)).rolling(period).mean()
     rs = gains / losses
     rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
+    value = float(rsi.iloc[-1])
+    if math.isnan(value):
+        return None
+    return value
 
 
 def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | None:
@@ -46,7 +84,7 @@ def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | N
 
 
 def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_turnover_inr: float,
-                       config: dict, reasons: dict[str, int] | None = None) -> dict | None:
+                       config: dict, reasons: dict[str, int] | None = None) -> Candidate | None:
     """
     Evaluate a crypto candidate for entry.
 
@@ -65,7 +103,15 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
         reasons = {}
 
     # Liquidity check first
-    min_turnover = config.get("min_avg_daily_turnover_inr", 50_000_000)
+    # Crypto turnover comes back in the pair's quote currency (USD for
+    # every "<ASSET>-USD" symbol), so it must be compared against a USD
+    # threshold. min_avg_daily_turnover_inr is an NSE rupee figure --
+    # inheriting it here silently demanded $50M/day instead of the
+    # ~₹5cr ($600K) it means on the equity side, ~83x too strict, which
+    # rejected 16 of 24 coins (including LINK and ARB) as "illiquid".
+    min_turnover = config.get("min_avg_daily_turnover_usd")
+    if min_turnover is None:
+        min_turnover = config.get("min_avg_daily_turnover_inr", 5_000_000)
     if daily_turnover_inr < min_turnover:
         reasons["illiquid"] = reasons.get("illiquid", 0) + 1
         return None
@@ -82,8 +128,16 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
     momentum_pct = _momentum_return_pct(history, momentum_days)
 
     # Validate all required indicators
-    if ma20 is None or ma50 is None or rsi14 is None or momentum_pct is None:
+    if ma20 is None or ma50 is None or momentum_pct is None:
         reasons["insufficient_history"] = reasons.get("insufficient_history", 0) + 1
+        return None
+    # Reported separately from insufficient_history: there IS enough
+    # history here, the coin simply hasn't moved at all, so RSI is 0/0
+    # and undefined. Folding it into insufficient_history would make the
+    # dashboard's rejection breakdown claim a data-coverage problem for
+    # what is really a dead market.
+    if rsi14 is None:
+        reasons["no_price_movement"] = reasons.get("no_price_movement", 0) + 1
         return None
 
     # Uptrend check: price > MA20 > MA50
@@ -110,20 +164,20 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
 
     score = (ma_score * 0.4 + rsi_score * 0.4 + momentum_score * 0.2)
 
-    return {
-        "symbol": symbol,
-        "ltp": quote.ltp,
-        "ma20": ma20,
-        "ma50": ma50,
-        "rsi": rsi14,
-        "momentum_return_pct": momentum_pct,
-        "score": score,
-    }
+    return Candidate(
+        symbol=symbol,
+        ltp=quote.ltp,
+        ma20=ma20,
+        ma50=ma50,
+        rsi=rsi14,
+        momentum_return_pct=momentum_pct,
+        score=score,
+    )
 
 
-def rank_candidates(candidates: list[dict]) -> list[dict]:
+def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     """Rank candidates by score, highest first."""
-    return sorted(candidates, key=lambda c: c["score"], reverse=True)
+    return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
 def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:

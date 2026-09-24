@@ -11,6 +11,7 @@ from papertrader.strategy.crypto_momentum import (
     _rsi,
     check_exit,
     evaluate_candidate,
+    rank_candidates,
 )
 
 # Crypto-focused config with 30-day lookback and lower momentum threshold
@@ -45,10 +46,12 @@ def test_moving_average_needs_the_full_window():
 
 
 def test_rsi_needs_sufficient_data():
-    hist = _history_from_closes([100.0] * 14)
-    assert _rsi(hist, 14) is None
-    hist = _history_from_closes([100.0] * 15)
-    assert _rsi(hist, 14) is not None
+    # Non-flat closes, so this isolates the bar-count condition: a FLAT
+    # window is undefined (0/0) regardless of length and also returns
+    # None -- covered by test_flat_window_gives_undefined_rsi_not_nan.
+    rising = [100.0 + i for i in range(15)]
+    assert _rsi(_history_from_closes(rising[:14]), 14) is None
+    assert _rsi(_history_from_closes(rising), 14) is not None
 
 
 def test_momentum_return_pct_uses_the_lookback_window():
@@ -65,9 +68,9 @@ def test_uptrend_with_rsi_momentum_qualifies():
     hist = _history_from_closes(closes)
     cand = evaluate_candidate("BTCUSD", _quote(closes[-1]), hist, 100_000_000, CFG)
     assert cand is not None
-    assert cand["ma20"] > cand["ma50"]
-    assert cand["rsi"] > CFG["min_rsi"]
-    assert cand["momentum_return_pct"] >= CFG["min_momentum_return_pct"]
+    assert cand.ma20 > cand.ma50
+    assert cand.rsi > CFG["min_rsi"]
+    assert cand.momentum_return_pct >= CFG["min_momentum_return_pct"]
 
 
 def test_flat_price_action_rejected():
@@ -77,8 +80,10 @@ def test_flat_price_action_rejected():
     reasons: dict[str, int] = {}
     cand = evaluate_candidate("BTCUSD", _quote(100.0), hist, 100_000_000, CFG, reasons=reasons)
     assert cand is None
-    # Should fail on either not_in_uptrend or weak_momentum since RSI is neutral
-    assert "not_in_uptrend" in reasons or "weak_momentum" in reasons
+    # Flat closes make RSI undefined (0/0), which is its own reason --
+    # reported distinctly from insufficient_history so the dashboard
+    # doesn't blame data coverage for what is really a dead market.
+    assert "no_price_movement" in reasons
 
 
 def test_declining_trend_rejected():
@@ -149,21 +154,101 @@ def test_ordinary_pullback_within_stops():
 
 
 def test_rsi_momentum_loss_triggers_exit():
-    """RSI < 40 signals momentum loss and exit."""
+    """RSI < 40 signals momentum loss and exit.
+
+    Needs a genuinely DECLINING window, not a flat one: a flat window has
+    zero average gain and zero average loss, so RSI is undefined (NaN ->
+    None) rather than low, and the exit that fires is the 20-day-MA
+    trend break instead.
+    """
     pos = _position(avg_price=100.0, highest_close=100.0)
-    # Create flat/declining closes to push RSI below 40
-    closes = [100.0] * 30 + [99.0] * 20  # Recent decline
+    closes = [100.0] * 30 + [100.0 - i * 0.5 for i in range(1, 21)]
     hist = _history_from_closes(closes)
-    should_exit, reason = check_exit(pos, _quote(98.0), hist, RISK_CFG)
+    # Price held above the 20-day MA so only the RSI condition can fire.
+    ma20 = _moving_average(hist, 20)
+    should_exit, reason = check_exit(pos, _quote(ma20 + 1.0), hist, RISK_CFG)
     assert should_exit
     assert "rsi_momentum_loss" in reason
 
 
 def test_trend_break_below_20ma():
-    """Close below 20-day MA signals trend break."""
+    """Close below the 20-day MA signals a trend break.
+
+    RSI is evaluated before the trend break, so the window has to keep
+    RSI healthy (a rising trend) and then drop price below the MA --
+    otherwise the RSI condition fires first and this asserts nothing
+    about the trend break at all.
+    """
     pos = _position(avg_price=100.0, highest_close=110.0)
-    closes = [100.0] * 20 + [99.0]  # 20-day MA is ~100, now at 99
+    closes = [100.0 + i for i in range(30)]  # steady climb keeps RSI high
     hist = _history_from_closes(closes)
-    should_exit, reason = check_exit(pos, _quote(99.5), hist, RISK_CFG)
+    ma20 = _moving_average(hist, 20)
+    assert _rsi(hist, 14) >= 40, "setup must not trip the RSI exit"
+    should_exit, reason = check_exit(pos, _quote(ma20 - 1.0), hist, RISK_CFG)
     assert should_exit
     assert "trend_break" in reason
+
+
+def test_flat_window_gives_undefined_rsi_not_nan():
+    """A flat window has zero gains AND zero losses, so RSI is 0/0.
+
+    It must come back as None, never a NaN float: every comparison
+    against NaN is False, so a NaN would slip past the `rsi < min_rsi`
+    entry gate and a dead, non-moving coin would be bought as though it
+    had momentum.
+    """
+    hist = _history_from_closes([100.0] * 40)
+    assert _rsi(hist, 14) is None
+
+    reasons: dict[str, int] = {}
+    cand = evaluate_candidate("DEAD-USD", _quote(100.0), hist, 100_000_000, CFG, reasons=reasons)
+    assert cand is None, "a coin with no price movement must never qualify"
+
+
+def test_pure_uptrend_rsi_is_100_not_none():
+    """Zero losses is rs = inf -> RSI 100, which is correct and must be
+    preserved -- only the 0/0 flat case is undefined."""
+    closes = [100.0 * (1.01 ** i) for i in range(40)]
+    hist = _history_from_closes(closes)
+    assert _rsi(hist, 14) == 100.0
+
+
+def test_candidate_exposes_attributes_not_dict_keys():
+    """The shared entry path in TradingEngine.scan_for_entries() reads
+    cand.symbol/cand.ltp off whatever rank_candidates() returns. This
+    strategy originally returned plain dicts, so every scan that found a
+    candidate raised AttributeError -- swallowed by run_forever()'s
+    catch-all, which made the profile look idle while it was in fact
+    crashing every cycle and could never place a single trade. Assert the
+    attribute access the engine actually performs."""
+    closes = [100.0]
+    for _ in range(50):
+        closes.append(closes[-1] * 1.01)
+    hist = _history_from_closes(closes)
+    cand = evaluate_candidate("BTC-USD", _quote(closes[-1]), hist, 100_000_000, CFG)
+    assert cand is not None
+
+    ranked = rank_candidates([cand])
+    assert ranked, "a qualifying candidate must survive ranking"
+    # Exactly what the engine does -- not subscripting.
+    assert ranked[0].symbol == "BTC-USD"
+    assert ranked[0].ltp > 0
+    assert ranked[0].score is not None
+
+
+def test_usd_turnover_threshold_preferred_over_inr():
+    """Crypto turnover is quoted in the pair's USD quote currency, so a
+    crypto profile sets min_avg_daily_turnover_usd. It must take
+    precedence over the NSE rupee field, whose value compared against USD
+    was ~83x too strict and rejected most of the universe as illiquid."""
+    closes = [100.0]
+    for _ in range(50):
+        closes.append(closes[-1] * 1.01)
+    hist = _history_from_closes(closes)
+    cfg = {**CFG, "min_avg_daily_turnover_inr": 50_000_000,
+           "min_avg_daily_turnover_usd": 5_000_000}
+
+    # $10M/day clears the USD floor but would fail the stale INR one.
+    assert evaluate_candidate("LINK-USD", _quote(closes[-1]), hist, 10_000_000, cfg) is not None
+    # Genuinely thin -- rejected under the USD floor.
+    assert evaluate_candidate("GMX-USD", _quote(closes[-1]), hist, 300_000, cfg) is None

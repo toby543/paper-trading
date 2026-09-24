@@ -328,6 +328,27 @@ class Config:
         overrides = profile_cfg.get("risk") or {}
         return _deep_merge(base, overrides)
 
+    def get_profile_execution_config(self, profile_name: str | None = None) -> dict[str, Any]:
+        """Full execution-cost parameter set for a profile: the top-level
+        `execution:` section as a base, with that profile's own
+        `profiles.<name>.execution:` block layered on top -- same pattern
+        as get_profile_strategy_config/get_profile_risk_config.
+
+        Fee models differ by asset class, so this cannot be one global
+        value: an Indian equity broker charges a flat per-order
+        brokerage+STT (flat_charges_inr), while a crypto exchange charges
+        a percentage of notional (fee_pct, ~0.1% taker) and no flat fee
+        at all. Sharing one block across both meant crypto fills were
+        priced with NSE brokerage. Always returns a fresh dict."""
+        if profile_name is None:
+            profile_name = self.get("active_profile")
+
+        base = dict(self.get("execution", default={}))
+        profiles = self.get("profiles", default={})
+        profile_cfg = (profiles.get(profile_name) or {}) if profile_name else {}
+        overrides = profile_cfg.get("execution") or {}
+        return _deep_merge(base, overrides)
+
     def get_profile_regime_config(self, profile_name: str | None = None) -> dict[str, Any]:
         """Full regime-filter parameter set for a profile: the top-level
         `regime:` section as a base, with that profile's own
@@ -404,6 +425,22 @@ class Config:
         """True if this profile trades around the clock (crypto) and must
         never be gated by the NSE calendar's open/close hours, weekends, or
         holidays. Derived from the profile's `category` field."""
+        profile_cfg = self.get_profile_config(profile_name)
+        return profile_cfg.get("category") == "crypto"
+
+    def get_profile_fractional_quantities(self, profile_name: str | None = None) -> bool:
+        """True if this profile's instruments can be bought in fractions.
+
+        Crypto is divisible -- 0.05 BTC is an ordinary order size -- while
+        an NSE equity only trades in whole shares. Sizing a position with
+        whole-share rounding is therefore correct for equities and badly
+        wrong for crypto: at an 8%-of-100,000 budget, BTC-USD around
+        84,000 floors to a quantity of ZERO, so the single largest coin
+        in the universe is silently unbuyable and never trades, while
+        ETH-USD floors to 2 and leaves a third of the budget unused.
+        Derived from `category` like get_profile_trades_24_7, so a crypto
+        profile gets this automatically and every equity profile keeps
+        whole-share sizing unchanged."""
         profile_cfg = self.get_profile_config(profile_name)
         return profile_cfg.get("category") == "crypto"
 

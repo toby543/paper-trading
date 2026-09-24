@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS account (
 
 CREATE TABLE IF NOT EXISTS positions (
     symbol TEXT PRIMARY KEY,
-    quantity INTEGER NOT NULL,
+    -- REAL, not INTEGER: crypto positions are fractional (0.095 BTC).
+    -- Existing equity ledgers created under the old INTEGER declaration
+    -- keep working untouched -- SQLite applies type affinity per value,
+    -- and whole numbers still round-trip as whole numbers either way.
+    quantity REAL NOT NULL,
     avg_price REAL NOT NULL,
     entry_date TEXT NOT NULL,
     highest_close_since_entry REAL NOT NULL
@@ -27,7 +31,7 @@ CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL,
     side TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
+    quantity REAL NOT NULL,  -- fractional for crypto; see positions.quantity
     price REAL NOT NULL,
     charges REAL NOT NULL,
     reason TEXT NOT NULL,

@@ -206,7 +206,14 @@ def evaluate_candidate(
         return None
 
     # Liquidity check
-    if avg_daily_turnover < cfg.get("min_avg_daily_turnover_inr", 500000):
+    # A crypto profile sets min_avg_daily_turnover_usd, since its
+    # turnover is denominated in the pair's USD quote currency rather
+    # than rupees -- see the same fallback in crypto_momentum. An equity
+    # profile sets neither or only the _inr one and is unaffected.
+    _min_turnover = cfg.get("min_avg_daily_turnover_usd")
+    if _min_turnover is None:
+        _min_turnover = cfg.get("min_avg_daily_turnover_inr", 500000)
+    if avg_daily_turnover < _min_turnover:
         reject("illiquid")
         return None
 

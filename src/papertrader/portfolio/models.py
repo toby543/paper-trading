@@ -8,7 +8,10 @@ from datetime import datetime
 @dataclass
 class Position:
     symbol: str
-    quantity: int
+    # float, not int: crypto trades in fractions (0.095 BTC is an
+    # ordinary size). An equity profile still only ever puts whole
+    # numbers in here -- see RiskManager.fractional_quantities.
+    quantity: float
     avg_price: float
     entry_date: str
     highest_close_since_entry: float
@@ -34,7 +37,7 @@ class Trade:
     id: int | None
     symbol: str
     side: str  # BUY or SELL
-    quantity: int
+    quantity: float  # fractional for crypto -- see Position.quantity
     price: float
     charges: float
     reason: str

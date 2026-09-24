@@ -545,6 +545,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                     eng.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
                     eng.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
                     eng.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
+                    eng.risk.fractional_quantities = cfg.get_profile_fractional_quantities(eng.profile_name)
 
                     # Update data source timeout settings
                     eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
