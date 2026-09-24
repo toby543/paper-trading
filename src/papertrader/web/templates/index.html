@@ -508,7 +508,7 @@
 <div class="topbar">
   <div class="brand">
     <span class="mark"><em>Momentum</em> Desk</span>
-    <span class="tag">NSE Paper Book</span>
+    <span class="tag">{% if is_crypto_profile %}Crypto Paper Book{% else %}NSE Paper Book{% endif %}</span>
   </div>
   <div class="topbar-right">
     <span class="pill" id="regimePill" style="display:none;"><span class="dot"></span><span id="regimePillText">—</span></span>
@@ -1010,7 +1010,11 @@
         <div class="settings-col-label">Universe</div>
         <div class="setting">
           <div class="setting-top"><span class="setting-label">Symbol list</span><span class="setting-value mono">{{ universe_cfg.get('file', '—') }}</span></div>
+          {% if is_crypto_profile %}
+          <div class="setting-desc">CSV of crypto pairs (e.g. "BTC-USD") scanned every cycle. Edit this file to change which coins are considered — no code changes needed.</div>
+          {% else %}
           <div class="setting-desc">CSV of NSE symbols scanned every cycle. Edit this file to change which stocks are considered — no code changes needed.</div>
+          {% endif %}
         </div>
 
         <div class="settings-col-label">Execution realism</div>
@@ -1026,8 +1030,13 @@
       <div>
         <div class="settings-col-label">Market hours &amp; scheduling</div>
         <div class="setting">
+          {% if is_crypto_profile %}
+          <div class="setting-top"><span class="setting-label">Session</span><span class="setting-value mono">24/7</span></div>
+          <div class="setting-desc">Crypto exchanges never close, so this profile scans and trades around the clock — never gated by NSE hours or holidays.</div>
+          {% else %}
           <div class="setting-top"><span class="setting-label">Session</span><span class="setting-value mono">{{ engine_cfg.get('market_open', '—') }}–{{ engine_cfg.get('market_close', '—') }} {{ engine_cfg.get('timezone', '') }}</span></div>
           <div class="setting-desc">NSE trading window the engine treats as "market open" — it idles outside these hours and on holidays.</div>
+          {% endif %}
         </div>
         <div class="setting">
           <div class="setting-top"><span class="setting-label">Entry scan interval</span><span class="setting-value mono">every {{ engine_cfg.get('scan_interval_minutes', '—') }} min</span></div>
@@ -1044,8 +1053,13 @@
 
         <div class="settings-col-label">Data source</div>
         <div class="setting">
+          {% if is_crypto_profile %}
+          <div class="setting-top"><span class="setting-label">Preferred / fallback</span><span class="setting-value mono">BINANCE &rarr; KRAKEN &rarr; YFINANCE</span></div>
+          <div class="setting-desc">Binance's live exchange ticker is tried first; Kraken is a second independent exchange fallback; Yahoo Finance's (delayed) crypto tickers are the last resort.</div>
+          {% else %}
           <div class="setting-top"><span class="setting-label">Preferred / fallback</span><span class="setting-value mono">{{ data_source.get('preferred', '—')|upper }} &rarr; {{ data_source.get('fallback', '—')|upper }}</span></div>
           <div class="setting-desc">NSE's own site is tried first for genuinely live quotes; Yahoo Finance (delayed) is used automatically if NSE is unreachable or blocks the request.</div>
+          {% endif %}
         </div>
         <div class="setting">
           <div class="setting-top"><span class="setting-label">Request timeout / retries</span><span class="setting-value mono">{{ data_source.get('request_timeout_seconds', '—') }}s / {{ data_source.get('max_retries', '—') }}</span></div>
@@ -1086,9 +1100,13 @@
   <div class="footer-note">
     <span>Simulated fills · slippage {{ slippage_bps }}bps · ₹{{ flat_charges_inr|inr }} flat charge</span>
     <span class="sep"></span>
-    <span>Momentum · 52-week-high strategy</span>
+    <span>{{ profiles.get(active_profile, active_profile) }} · {{ strategy.get('mode', active_profile) }} strategy</span>
     <span class="sep"></span>
+    {% if is_crypto_profile %}
+    <span>Data: Binance (fallback Kraken, then Yahoo Finance)</span>
+    {% else %}
     <span>Data: NSE (fallback Yahoo Finance)</span>
+    {% endif %}
   </div>
 
 </div>

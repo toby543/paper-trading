@@ -266,6 +266,12 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             execution=cfg.get("execution", default={}),
             engine_cfg=cfg.get("engine", default={}),
             data_source=cfg.get("data_source", default={}),
+            # Crypto profiles bypass the NSE session/data_source settings
+            # entirely (see TradingEngine.trades_24_7 and
+            # MarketDataClient's Binance/Kraken routing) -- the All
+            # Settings panel needs this to stop describing those rows as
+            # if they still governed a crypto profile's trading.
+            is_crypto_profile=cfg.get_profile_trades_24_7(active_profile),
             logging_cfg=cfg.get("logging", default={}),
             profiles=cfg.list_profiles(),
             profile_categories=cfg.list_profile_categories(),
