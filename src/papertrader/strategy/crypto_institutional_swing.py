@@ -124,9 +124,18 @@ def evaluate_candidate(
         reject("insufficient_history")
         return None
 
-    # Calculate moving averages
-    ma20 = _moving_average(history, 20)
-    ma50 = _moving_average(history, 50)
+    # Calculate moving averages. fast/slow read from config (matching
+    # check_exit's own fast_ma_days lookup for its trend-break exit) so a
+    # user-configured window applies consistently to entry and exit --
+    # these used to be hardcoded literals here while check_exit already
+    # read fast_ma_days from config, so changing that setting would have
+    # silently made entry and exit disagree about what "the 20-day MA" is.
+    # 200-day stays fixed: it is this strategy's structural long-term
+    # trend filter, not a tunable window.
+    fast_days = int(config.get("fast_ma_days", 20))
+    slow_days = int(config.get("slow_ma_days", 50))
+    ma20 = _moving_average(history, fast_days)
+    ma50 = _moving_average(history, slow_days)
     ma200 = _moving_average(history, 200)
 
     if ma20 is None or ma50 is None or ma200 is None:

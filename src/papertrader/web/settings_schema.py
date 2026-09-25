@@ -257,27 +257,41 @@ _FIELD_MODES = {
         "pivot_supertrend", "trend_pullback",
     },
     ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout"},
-    # Momentum fields: used by most strategies but NOT the three crypto ones.
+    # Momentum fields: all three crypto strategies read these too
+    # (crypto_momentum/crypto_breakout/crypto_institutional_swing all call
+    # config.get("min_momentum_return_pct", ...) and
+    # config.get("momentum_lookback_days", ...)) -- excluding them here
+    # hid a parameter each one actually consults from Edit Settings.
     ("strategy", "min_momentum_return_pct"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
         "pivot_supertrend", "trend_pullback",
+        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     ("strategy", "momentum_lookback_days"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
         "pivot_supertrend", "trend_pullback",
+        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
-    # Fast/slow MAs: used by most but NOT crypto_breakout or crypto_institutional_swing
-    # (they use hardcoded 20/50; crypto_momentum reads them from config).
+    # Fast/slow MAs: crypto_breakout also reads config.get("fast_ma_days")/
+    # ("slow_ma_days") for both its entry uptrend check and its exit trend
+    # break -- it was never actually hardcoded, unlike the comment here used
+    # to claim. crypto_institutional_swing's check_exit also reads
+    # fast_ma_days (for its own trend-break exit), even though its entry
+    # still hardcodes 20/50/200 -- see the note in crypto_institutional_swing.py.
     ("strategy", "fast_ma_days"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback", "crypto_momentum",
+        "pivot_supertrend", "trend_pullback",
+        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     ("strategy", "slow_ma_days"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback", "crypto_momentum",
+        "pivot_supertrend", "trend_pullback",
+        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
-    # Only crypto_momentum has an RSI gate (minimum).
-    ("strategy", "min_rsi"): {"crypto_momentum"},
+    # RSI gate: crypto_momentum uses it as a floor (momentum phase),
+    # crypto_institutional_swing uses it as the lower edge of its 35-50
+    # bounce band (config.get("min_rsi", 35.0)) -- both actually read it.
+    ("strategy", "min_rsi"): {"crypto_momentum", "crypto_institutional_swing"},
     # Only crypto_institutional_swing has an RSI ceiling (maximum for bounce entry).
     ("strategy", "max_rsi"): {"crypto_institutional_swing"},
     # Pullback and volume settings specific to crypto_institutional_swing.
