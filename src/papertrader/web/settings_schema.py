@@ -246,8 +246,8 @@ _FIELD_MODES = {
     ("strategy", "volume_confirmation", "min_volume_multiple"): {"52w_high"},
     ("strategy", "volume_confirmation", "recent_days"): {"52w_high"},
     ("strategy", "volume_confirmation", "baseline_days"): {"52w_high"},
-    # Price bands are applied inside each strategy, and the two that
-    # don't consult them are the two crypto profiles run on.
+    # Price bands are applied inside each strategy, and the crypto strategies
+    # don't consult them (crypto_momentum, crypto_breakout, crypto_institutional_swing).
     ("strategy", "min_ltp_inr"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
         "pivot_supertrend", "trend_pullback",
@@ -257,6 +257,25 @@ _FIELD_MODES = {
         "pivot_supertrend", "trend_pullback",
     },
     ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout"},
+    # Momentum fields: used by most strategies but NOT the three crypto ones.
+    ("strategy", "min_momentum_return_pct"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback",
+    },
+    ("strategy", "momentum_lookback_days"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback",
+    },
+    # Fast/slow MAs: used by most but NOT crypto_breakout or crypto_institutional_swing
+    # (they use hardcoded 20/50; crypto_momentum reads them from config).
+    ("strategy", "fast_ma_days"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback", "crypto_momentum",
+    },
+    ("strategy", "slow_ma_days"): {
+        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "pivot_supertrend", "trend_pullback", "crypto_momentum",
+    },
     # Only crypto_momentum has an RSI gate (minimum).
     ("strategy", "min_rsi"): {"crypto_momentum"},
     # Only crypto_institutional_swing has an RSI ceiling (maximum for bounce entry).
