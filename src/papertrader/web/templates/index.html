@@ -2050,6 +2050,12 @@ const WATCHLIST_HEAD = {
   trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
   long_term_trend: `<th>Symbol</th><th>LTP</th><th>200DMA</th><th>400DMA</th><th>1Y Return</th><th>Score</th>`,
   crypto_momentum: `<th>Symbol</th><th>LTP</th><th>20DMA</th><th>50DMA</th><th>RSI</th><th>30D Return</th><th>Score</th>`,
+  crypto_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
+  crypto_institutional_swing: `<th>Symbol</th><th>LTP</th><th>20DMA</th><th>50DMA</th><th>200DMA</th><th>Volume</th><th>Momentum</th><th>Score</th>`,
+  crypto_mean_reversion: `<th>Symbol</th><th>LTP</th><th>Mean MA</th><th>Below Mean</th><th>RSI</th><th>Score</th>`,
+  crypto_trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
+  crypto_breakout_retest: `<th>Symbol</th><th>LTP</th><th>Breakout Level</th><th>From Level</th><th>Turn</th><th>Score</th>`,
+  crypto_pairs_trading: `<th>Symbol</th><th>LTP</th><th>Ratio vs BTC</th><th>Ratio Mean</th><th>Z-Score</th><th>Score</th>`,
   default: `<th>Symbol</th><th>LTP</th><th>From 52W High</th><th>Momentum</th><th>RS vs Index</th><th>Volume</th><th>Score</th>`,
 };
 
@@ -2103,6 +2109,68 @@ function watchlistRowHtml(mode, c) {
       <td class="mono" data-label="50DMA">${fmt(c.ma50)}</td>
       <td class="mono" data-label="RSI">${c.rsi.toFixed(1)}</td>
       <td class="mono up" data-label="30D Return">+${c.momentum_return_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_breakout") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
+      <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_institutional_swing") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="20DMA">${fmt(c.ma20)}</td>
+      <td class="mono" data-label="50DMA">${fmt(c.ma50)}</td>
+      <td class="mono" data-label="200DMA">${fmt(c.ma200)}</td>
+      <td class="mono" data-label="Volume">${c.volume_multiple.toFixed(1)}×</td>
+      <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_mean_reversion") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Mean MA">${CCY}${fmt(c.mean_ma)}</td>
+      <td class="mono down" data-label="Below Mean">-${c.deviation_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="RSI">${c.rsi.toFixed(1)}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_trend_pullback") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Recent High">${CCY}${fmt(c.recent_high)}</td>
+      <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
+      <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_breakout_retest") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Breakout Level">${CCY}${fmt(c.breakout_level)}</td>
+      <td class="mono" data-label="From Level">${c.pct_from_level.toFixed(1)}%</td>
+      <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "crypto_pairs_trading") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="Ratio vs BTC">${c.ratio.toPrecision(4)}</td>
+      <td class="mono" data-label="Ratio Mean">${c.ratio_mean.toPrecision(4)}</td>
+      <td class="mono down" data-label="Z-Score">${c.z_score.toFixed(2)}</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }
