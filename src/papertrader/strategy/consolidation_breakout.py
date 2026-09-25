@@ -41,10 +41,10 @@ class Candidate:
     in_index: bool | None = None
 
 
-def _moving_average(history: pd.DataFrame, window: int) -> float | None:
-    if len(history) < window:
+def _moving_average(history: pd.DataFrame, days: int) -> float | None:
+    if len(history) < days:
         return None
-    return float(history["Close"].tail(window).mean())
+    return float(history["Close"].tail(days).mean())
 
 
 def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | None:
@@ -58,27 +58,27 @@ def _momentum_return_pct(history: pd.DataFrame, lookback_days: int) -> float | N
     return (now - past) / past * 100.0
 
 
-def _avg_volume(history: pd.DataFrame, window: int) -> float | None:
-    if len(history) < window:
+def _avg_volume(history: pd.DataFrame, days: int) -> float | None:
+    if len(history) < days:
         return None
     try:
-        return float(history["Volume"].tail(window).mean())
+        return float(history["Volume"].tail(days).mean())
     except (KeyError, TypeError):
         return None
 
 
-def _calculate_beta(history: pd.DataFrame, market_history: pd.DataFrame, window: int = 252) -> float | None:
+def _calculate_beta(history: pd.DataFrame, market_history: pd.DataFrame, days: int = 252) -> float | None:
     """Calculate stock beta relative to market index (e.g., Nifty 50).
-    
+
     Beta = covariance(stock returns, market returns) / variance(market returns)
     """
-    if len(history) < window or len(market_history) < window:
+    if len(history) < days or len(market_history) < days:
         return None
-    
+
     try:
         # Calculate daily returns
-        stock_closes = history["Close"].tail(window)
-        market_closes = market_history["Close"].tail(window)
+        stock_closes = history["Close"].tail(days)
+        market_closes = market_history["Close"].tail(days)
         
         if len(stock_closes) < 2 or len(market_closes) < 2:
             return None
@@ -173,8 +173,8 @@ def evaluate_candidate(
     symbol: str,
     quote: Quote,
     history: pd.DataFrame,
-    avg_daily_turnover: float,
-    cfg: dict,
+    daily_turnover_inr: float,
+    config: dict,
     index_history: pd.DataFrame | None = None,
     market_cap_cr: float | None = None,
     in_nifty_index: bool | None = None,
@@ -195,8 +195,8 @@ def evaluate_candidate(
             reasons[reason] = reasons.get(reason, 0) + 1
 
     # Uptrend check: price > 50 DMA > 200 DMA
-    fast_ma = _moving_average(history, cfg.get("fast_ma_days", 50))
-    slow_ma = _moving_average(history, cfg.get("slow_ma_days", 200))
+    fast_ma = _moving_average(history, config.get("fast_ma_days", 50))
+    slow_ma = _moving_average(history, config.get("slow_ma_days", 200))
 
     if fast_ma is None or slow_ma is None:
         reject("insufficient_history")
@@ -210,10 +210,10 @@ def evaluate_candidate(
     # (nse_client.py), so turnover = Close (INR) * Volume (coins) arrives
     # in INR. Prefer min_avg_daily_turnover_usd if set (for legacy/explicit
     # USD thresholds), else fall back to the INR figure in config.
-    _min_turnover = cfg.get("min_avg_daily_turnover_usd")
+    _min_turnover = config.get("min_avg_daily_turnover_usd")
     if _min_turnover is None:
-        _min_turnover = cfg.get("min_avg_daily_turnover_inr", 500000)
-    if avg_daily_turnover < _min_turnover:
+        _min_turnover = config.get("min_avg_daily_turnover_inr", 500000)
+    if daily_turnover_inr < _min_turnover:
         reject("illiquid")
         return None
 
@@ -221,11 +221,11 @@ def evaluate_candidate(
     # in config.yaml, same as the Phase 2 fields below -- read them from the
     # same nested sub-dict rather than the top level, where they'd silently
     # always fall back to the hardcoded default no matter what's configured.
-    cb_cfg = cfg.get("consolidation_breakout") or {}
+    cb_config = config.get("consolidation_breakout") or {}
 
     # Detect consolidation
-    consolidation_days = cb_cfg.get("consolidation_days", 10)
-    max_range_pct = cb_cfg.get("max_consolidation_range_pct", 3.0)
+    consolidation_days = cb_config.get("consolidation_days", 10)
+    max_range_pct = cb_config.get("max_consolidation_range_pct", 3.0)
     consolidation = _detect_consolidation(history, consolidation_days, max_range_pct)
 
     if consolidation is None:
@@ -238,26 +238,26 @@ def evaluate_candidate(
         return None
 
     # Detect breakout
-    volume_multiple = cb_cfg.get("volume_multiple", 2.0)
+    volume_multiple = cb_config.get("volume_multiple", 2.0)
     if not _detect_breakout(history, consolidation_high, volume_multiple):
         reject("no_breakout")
         return None
 
     # Momentum check
-    momentum = _momentum_return_pct(history, cfg.get("momentum_lookback_days", 21))
-    if momentum is None or momentum < cfg.get("min_momentum_return_pct", 5.0):
+    momentum = _momentum_return_pct(history, config.get("momentum_lookback_days", 21))
+    if momentum is None or momentum < config.get("min_momentum_return_pct", 5.0):
         reject("weak_momentum")
         return None
 
     # Phase 2: Market cap filter
-    market_cap_min = cb_cfg.get("market_cap_min_cr")
+    market_cap_min = cb_config.get("market_cap_min_cr")
     if market_cap_min and market_cap_cr and market_cap_cr < market_cap_min:
         reject("market_cap_too_small")
         return None
 
     # Phase 2: Beta filter
     beta = None
-    beta_max = cb_cfg.get("beta_max")
+    beta_max = cb_config.get("beta_max")
     if index_history is not None and beta_max:
         beta = _calculate_beta(history, index_history)
         if beta is not None and beta > beta_max:
@@ -265,7 +265,7 @@ def evaluate_candidate(
             return None
 
     # Phase 2: Index membership filter
-    index_list = cb_cfg.get("index_list")
+    index_list = cb_config.get("index_list")
     if index_list and in_nifty_index is False:
         reject("not_in_index")
         return None
@@ -302,32 +302,32 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
-def check_exit(position: Position, quote: Quote, history: pd.DataFrame, cfg: dict) -> tuple[bool, str]:
+def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:
     """Return (should_exit, reason)."""
-    
+
     # Hard stop-loss (below consolidation low or fixed percentage)
-    stop_loss_pct = cfg.get("stop_loss_pct", 4.0)
+    stop_loss_pct = config.get("stop_loss_pct", 4.0)
     stop_loss_price = position.avg_price * (1 - stop_loss_pct / 100.0)
     if quote.ltp <= stop_loss_price:
         return True, f"stop_loss ({stop_loss_pct}% below entry {position.avg_price:.2f})"
-    
+
     # Trailing stop
-    trailing_stop_pct = cfg.get("trailing_stop_pct", 8.0)
+    trailing_stop_pct = config.get("trailing_stop_pct", 8.0)
     trailing_stop_price = position.highest_close_since_entry * (1 - trailing_stop_pct / 100.0)
     if quote.ltp <= trailing_stop_price:
         return True, f"trailing_stop ({trailing_stop_pct}% below peak {position.highest_close_since_entry:.2f})"
-    
+
     # Take profit (optional)
-    take_profit_pct = cfg.get("take_profit_pct")
+    take_profit_pct = config.get("take_profit_pct")
     if take_profit_pct:
         take_profit_price = position.avg_price * (1 + take_profit_pct / 100.0)
         if quote.ltp >= take_profit_price:
             return True, f"take_profit (+{take_profit_pct}% above entry {position.avg_price:.2f})"
-    
+
     # Momentum breakdown (close below fast MA)
-    if cfg.get("exit_below_fast_ma", True):
-        fast_ma = _moving_average(history, cfg.get("fast_ma_days", 50))
+    if config.get("exit_below_fast_ma", True):
+        fast_ma = _moving_average(history, config.get("fast_ma_days", 50))
         if fast_ma is not None and quote.ltp < fast_ma:
-            return True, f"momentum_breakdown (close below {cfg.get('fast_ma_days', 50)}DMA {fast_ma:.2f})"
-    
+            return True, f"momentum_breakdown (close below {config.get('fast_ma_days', 50)}DMA {fast_ma:.2f})"
+
     return False, ""
