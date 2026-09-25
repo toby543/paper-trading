@@ -573,6 +573,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                 strategy_cfg = cfg.get_profile_strategy_config(eng.profile_name)
                 risk_cfg = cfg.get_profile_risk_config(eng.profile_name)
                 regime_cfg = cfg.get_profile_regime_config(eng.profile_name)
+                exec_cfg = cfg.get_profile_execution_config(eng.profile_name)
                 # Under the engine's own lock so this can't interleave with
                 # its background run_forever() loop or a reload_profile().
                 with eng._state_lock:
@@ -587,6 +588,18 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                     eng.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
                     eng.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
                     eng.risk.fractional_quantities = cfg.get_profile_fractional_quantities(eng.profile_name)
+
+                    # Update the broker's own execution-cost settings (fee_pct,
+                    # flat_charges_inr, slippage_bps) -- these are editable via
+                    # Edit Settings, and its hint text promises they apply here
+                    # "instantly without restarting". Nothing did that: this
+                    # loop updated strategy/risk config and RiskManager but
+                    # never touched eng.broker, so a changed crypto fee_pct (or
+                    # an equity flat_charges_inr) kept silently charging the
+                    # OLD rate on every fill until the whole process restarted.
+                    eng.broker.fee_pct = exec_cfg.get("fee_pct", 0.0)
+                    eng.broker.flat_charges_inr = exec_cfg.get("flat_charges_inr", 20.0)
+                    eng.broker.slippage_bps = exec_cfg.get("slippage_bps", 5.0)
 
                     # Update data source timeout settings
                     eng.data.timeout = cfg.get("data_source", "request_timeout_seconds", default=10)
