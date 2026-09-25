@@ -103,12 +103,10 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
         reasons = {}
 
     # Liquidity check first
-    # Crypto turnover comes back in the pair's quote currency (USD for
-    # every "<ASSET>-USD" symbol), so it must be compared against a USD
-    # threshold. min_avg_daily_turnover_inr is an NSE rupee figure --
-    # inheriting it here silently demanded $50M/day instead of the
-    # ~₹5cr ($600K) it means on the equity side, ~83x too strict, which
-    # rejected 16 of 24 coins (including LINK and ARB) as "illiquid".
+    # Crypto quotes are converted from USD to INR at the data layer
+    # (nse_client.py), so turnover = Close (INR) * Volume (coins) arrives
+    # in INR. Prefer min_avg_daily_turnover_usd if set (for legacy/explicit
+    # USD thresholds), else fall back to the INR figure in config.
     min_turnover = config.get("min_avg_daily_turnover_usd")
     if min_turnover is None:
         min_turnover = config.get("min_avg_daily_turnover_inr", 5_000_000)
