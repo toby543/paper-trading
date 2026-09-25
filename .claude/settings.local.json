@@ -6,7 +6,8 @@
       "Bash(git push *)",
       "Bash(git commit -m 'Standardize naming conventions between crypto_momentum and crypto_breakout *)",
       "Bash(git commit -m 'Create dedicated crypto_breakout strategy \\(separate from equity consolidation_breakout\\) *)",
-      "Bash(git commit -m 'Add crypto_institutional_swing strategy for 2026 bull markets *)"
+      "Bash(git commit -m 'Add crypto_institutional_swing strategy for 2026 bull markets *)",
+      "Bash(git commit -m 'Register crypto_institutional_swing in settings schema *)"
     ]
   }
 }

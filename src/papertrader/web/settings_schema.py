@@ -88,6 +88,22 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
 
+    {"path": ("strategy", "max_rsi"), "type": "float", "min": 0, "max": 100,
+     "group": "Institutional Swing", "label": "Max RSI", "unit": "(0-100)",
+     "desc": "RSI(14) a coin must be below to qualify as a bounce-in-progress. 50 is neutral; above means too hot. Only applies when strategy mode is crypto_institutional_swing."},
+    {"path": ("strategy", "pullback_tolerance_pct"), "type": "float", "min": 0, "max": 20,
+     "group": "Institutional Swing", "label": "Pullback tolerance", "unit": "%",
+     "desc": "How close to the 20-day MA the price must be to count as a pullback entry point. Only applies when strategy mode is crypto_institutional_swing."},
+    {"path": ("strategy", "min_volume_multiple"), "type": "float", "min": 1.0, "max": 5.0,
+     "group": "Institutional Swing", "label": "Min volume multiple", "unit": "× baseline",
+     "desc": "Current volume must be at least this multiple of the 20-day average to confirm institutional buying. Only applies when strategy mode is crypto_institutional_swing."},
+    {"path": ("strategy", "time_stop_days"), "type": "int", "min": 1, "max": 30,
+     "group": "Institutional Swing", "label": "Time stop", "unit": "days",
+     "desc": "Exit swing position if held longer than this (don't hold through regime change). Only applies when strategy mode is crypto_institutional_swing."},
+    {"path": ("strategy", "profit_target_pct"), "type": "float", "min": 5, "max": 100,
+     "group": "Institutional Swing", "label": "Profit target", "unit": "%",
+     "desc": "Exit swing position when this profit target is hit. Only applies when strategy mode is crypto_institutional_swing."},
+
     {"path": ("strategy", "pivot_supertrend", "atr_period"), "type": "int", "min": 2, "max": 50,
      "group": "Pivot point + SuperTrend", "label": "ATR period", "unit": "days",
      "desc": "Wilder-smoothed ATR window the SuperTrend bands are built on. Only applies when strategy mode is pivot_supertrend."},
@@ -206,6 +222,8 @@ _BY_PATH = {tuple(entry["path"]): entry for entry in EDITABLE_SETTINGS}
 _STRATEGY_SUBSECTION_MODE = {
     "cross_sectional": "cross_sectional_momentum",
     "consolidation_breakout": "consolidation_breakout",
+    "crypto_breakout": "crypto_breakout",
+    "crypto_institutional_swing": "crypto_institutional_swing",
     "pivot_supertrend": "pivot_supertrend",
     "trend_pullback": "trend_pullback",
 }
@@ -239,8 +257,15 @@ _FIELD_MODES = {
         "pivot_supertrend", "trend_pullback",
     },
     ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout"},
-    # Only crypto_momentum has an RSI gate.
+    # Only crypto_momentum has an RSI gate (minimum).
     ("strategy", "min_rsi"): {"crypto_momentum"},
+    # Only crypto_institutional_swing has an RSI ceiling (maximum for bounce entry).
+    ("strategy", "max_rsi"): {"crypto_institutional_swing"},
+    # Pullback and volume settings specific to crypto_institutional_swing.
+    ("strategy", "pullback_tolerance_pct"): {"crypto_institutional_swing"},
+    ("strategy", "min_volume_multiple"): {"crypto_institutional_swing"},
+    ("strategy", "time_stop_days"): {"crypto_institutional_swing"},
+    ("strategy", "profit_target_pct"): {"crypto_institutional_swing"},
 }
 
 
