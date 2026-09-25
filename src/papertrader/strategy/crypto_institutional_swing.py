@@ -213,7 +213,12 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
     """
     profit_target_pct = config.get("profit_target_pct", 22.0)
     time_stop_days = config.get("time_stop_days", 7)
-    hard_stop_pct = config.get("hard_stop_pct", 8.0)
+    # "stop_loss_pct", not "hard_stop_pct": that's the shared risk-section
+    # key Settings actually writes to (see settings_schema.py). The old
+    # "hard_stop_pct" name matched nothing in risk_cfg/strategy_cfg, so
+    # this always silently fell back to the 8.0 default no matter what
+    # the user set the stop-loss to in Edit Settings.
+    hard_stop_pct = config.get("stop_loss_pct", 8.0)
     trailing_stop_pct = config.get("trailing_stop_pct", 6.0)
 
     # Profit target: +22% gain (swing objective)
@@ -227,7 +232,10 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
         return True, f"hard_stop (-{hard_stop_pct}% at {quote.ltp:.2f})"
 
     # Time stop: Exit after 7 days (don't hold through regime change)
-    days_held = (pd.Timestamp.now() - position.entry_time).days if hasattr(position, 'entry_time') else 0
+    # Position has no "entry_time" attribute -- only "entry_date" (an ISO
+    # string). hasattr(position, 'entry_time') was always False, so
+    # days_held was always 0 and this exit could never fire.
+    days_held = (pd.Timestamp.now() - pd.Timestamp(position.entry_date)).days
     if days_held >= time_stop_days:
         return True, f"time_stop ({days_held} days, current {quote.ltp:.2f})"
 
