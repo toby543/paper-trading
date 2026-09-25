@@ -1747,7 +1747,7 @@ function selectTab(tab) {
   }
   activeTab = tab;
   applyTabFilter();
-  renderComparison(lastComparisonData);
+  renderComparison(lastComparisonData, lastLiveSummary);
 }
 
 document.querySelectorAll(".trading-tab").forEach(btn => {
@@ -2278,12 +2278,38 @@ function renderInsights(summary) {
 // Cached so selectTab() can re-render instantly on tab switch (a pure
 // view filter) without waiting for the next refreshComparison() poll.
 let lastComparisonData = { profiles: [] };
+let lastLiveSummary = null;
 
-function renderComparison(data) {
+function renderComparison(data, liveSummary) {
   const tbody = document.getElementById("compareBody2");
   if (!tbody) return;  // panel only rendered when more than one profile exists
   lastComparisonData = data || { profiles: [] };
-  const allRows = (data && data.profiles) || [];
+  let allRows = (data && data.profiles) || [];
+  // /api/strategy-comparison is deliberately cheap: it reads each
+  // profile's last mark-to-market (only refreshed once per exit-check
+  // cycle, up to several minutes stale), never live quotes. /api/summary
+  // (the stat cards above) fetches live quotes for whichever profile is
+  // currently being viewed on every single poll -- so without this, the
+  // SAME profile's equity/return/P&L could visibly disagree between the
+  // two panels on the same page, which reads as a bug even though both
+  // numbers were "correct" for their own staleness. liveSummary is
+  // already-fetched data from this same refresh tick, so patching it in
+  // here costs nothing extra.
+  if (liveSummary && liveSummary.positions) {
+    const unrealized = liveSummary.positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+    allRows = allRows.map(r => r.profile === ACTIVE_PROFILE ? {
+      ...r,
+      total_equity: liveSummary.total_equity,
+      total_return_pct: liveSummary.total_pnl_pct,
+      realized_pnl: liveSummary.total_realized_pnl,
+      unrealized_pnl: unrealized,
+    } : r);
+    // Re-sort, not just re-value: the server sorted this list by
+    // total_return_pct before the patch above, so leaving the order
+    // untouched could show the active row's live number out of rank
+    // order against the other (still-cached) rows' stale ones.
+    allRows = allRows.slice().sort((a, b) => b.total_return_pct - a.total_return_pct);
+  }
   // Only compare profiles within the tab currently being viewed -- a
   // long-term profile's return over years isn't a meaningful comparison
   // against a swing profile's return over weeks anyway.
@@ -2325,11 +2351,12 @@ function renderComparison(data) {
   }).join("");
 }
 
-async function refreshComparison() {
+async function refreshComparison(liveSummary) {
   if (!document.getElementById("comparePanel")) return;
   try {
+    lastLiveSummary = liveSummary || lastLiveSummary;
     const data = await authFetch("/api/strategy-comparison").then(r => r.json());
-    renderComparison(data);
+    renderComparison(data, lastLiveSummary);
   } catch (e) {
     console.error("Strategy comparison refresh failed", e);
   }
@@ -2374,7 +2401,7 @@ async function refresh() {
     renderTrades(trades);
     renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf), trades: chartTradesCache });
     refreshIndices();
-    refreshComparison();
+    refreshComparison(summary);
   } catch (e) {
     console.error("Dashboard refresh failed", e);
   }
