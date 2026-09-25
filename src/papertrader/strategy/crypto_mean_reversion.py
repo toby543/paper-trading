@@ -151,7 +151,14 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
         return True, f"stop_loss ({stop_loss_pct}% below entry {position.avg_price:.2f})"
 
     # Reversion target: back at (or above) the mean this trade bet on.
-    mean_ma_days = int(config.get("mean_ma_days", 20))
+    # Read from the crypto_mean_reversion subsection, matching
+    # evaluate_candidate's own lookup -- config.get("mean_ma_days") directly
+    # (not through the subsection) would never find this key, since it only
+    # ever lives nested under strategy.crypto_mean_reversion.mean_ma_days,
+    # silently pinning the exit to the hardcoded default forever regardless
+    # of what a user sets "Mean MA" to in Edit Settings.
+    mr_cfg = config.get("crypto_mean_reversion") or {}
+    mean_ma_days = int(mr_cfg.get("mean_ma_days", 20))
     mean_ma = _moving_average(history, mean_ma_days)
     if mean_ma is not None and quote.ltp >= mean_ma:
         return True, f"reverted_to_mean ({mean_ma_days}DMA {mean_ma:.2f})"
