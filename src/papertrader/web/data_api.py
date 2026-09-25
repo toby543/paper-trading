@@ -373,6 +373,16 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
             closed = [t for t in trades if t.side == "SELL" and t.realized_pnl is not None]
             wins = [t for t in closed if t.realized_pnl > 0]
             total_return_pct = ((total_equity - starting_capital) / starting_capital * 100.0) if starting_capital else 0.0
+            # positions_value at the same mark total_equity was built from
+            # (the last live mark-to-market, or the cost-basis fallback when
+            # none has run yet -- in which case unrealized is correctly 0,
+            # not an approximation) minus what was actually paid for those
+            # positions. Already in INR: a crypto profile's cash/cost_basis
+            # are converted from USD at the data layer before they ever
+            # reach storage, same as every other figure on this row.
+            positions_value = total_equity - cash
+            cost_basis = sum(p.cost_basis for p in positions.values())
+            unrealized_pnl = positions_value - cost_basis
 
             rows.append({
                 "profile": profile_name,
@@ -383,6 +393,7 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
                 "total_equity": round(total_equity, 2),
                 "total_return_pct": round(total_return_pct, 2),
                 "realized_pnl": round(engine.storage.get_total_realized_pnl(), 2),
+                "unrealized_pnl": round(unrealized_pnl, 2),
                 "cash": round(cash, 2),
                 "open_positions": len(positions),
                 "total_trades": len(trades),

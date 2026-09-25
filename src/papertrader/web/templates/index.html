@@ -602,7 +602,7 @@
           <thead>
             <tr>
               <th>Profile</th><th>Strategy</th><th>Equity</th><th>Return</th>
-              <th>Realized P&amp;L</th><th>Win rate</th><th>Trades</th><th>Open</th>
+              <th>Realized P&amp;L</th><th>Unrealized P&amp;L</th><th>Win rate</th><th>Trades</th><th>Open</th>
             </tr>
           </thead>
           <tbody id="compareBody2"></tbody>
@@ -2292,8 +2292,8 @@ function renderComparison(data) {
 
   if (!rows.length) {
     tbody.innerHTML = allRows.length
-      ? `<tr class="empty-row"><td colspan="8">No profiles running in this tab yet.</td></tr>`
-      : `<tr class="empty-row"><td colspan="8">No profile data yet.</td></tr>`;
+      ? `<tr class="empty-row"><td colspan="9">No profiles running in this tab yet.</td></tr>`
+      : `<tr class="empty-row"><td colspan="9">No profile data yet.</td></tr>`;
     return;
   }
   if (meta) {
@@ -2315,7 +2315,8 @@ function renderComparison(data) {
         <td class="mono" style="color: var(--ink-dim);">${r.strategy_mode}</td>
         <td class="mono">${CCY}${fmt(r.total_equity)}</td>
         <td class="mono ${pnlClass(r.total_return_pct)}">${signed(r.total_return_pct)}%</td>
-        <td class="mono ${pnlClass(r.realized_pnl)}">${signed(r.realized_pnl)}</td>
+        <td class="mono ${pnlClass(r.realized_pnl)}">${CCY}${signed(r.realized_pnl)}</td>
+        <td class="mono ${pnlClass(r.unrealized_pnl)}">${CCY}${signed(r.unrealized_pnl)}</td>
         <td class="mono">${r.win_rate_pct === null ? "—" : r.win_rate_pct + "%"}</td>
         <td class="mono">${r.closed_trades}/${r.total_trades}</td>
         <td class="mono">${r.open_positions}</td>
