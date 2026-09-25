@@ -117,7 +117,7 @@ def test_genuine_breakout_qualifies():
     Before the fix it returned None, as did every other input."""
     hist = _breakout_history()
     cand = evaluate_candidate("TEST", _quote(BREAKOUT_CLOSE), hist,
-                              avg_daily_turnover=100_000_000, cfg=CFG)
+                              daily_turnover_inr=100_000_000, config=CFG)
     assert cand is not None
     assert cand.symbol == "TEST"
     assert cand.consolidation_high < BREAKOUT_CLOSE
@@ -129,7 +129,7 @@ def test_rejection_reason_is_recorded():
     reasons: dict[str, int] = {}
     hist = _breakout_history(breakout_volume=1_200_000)
     cand = evaluate_candidate("TEST", _quote(BREAKOUT_CLOSE), hist,
-                              avg_daily_turnover=100_000_000, cfg=CFG, reasons=reasons)
+                              daily_turnover_inr=100_000_000, config=CFG, reasons=reasons)
     assert cand is None
     assert reasons == {"no_breakout": 1}
 
@@ -137,7 +137,7 @@ def test_rejection_reason_is_recorded():
 def test_illiquid_symbol_rejected():
     reasons: dict[str, int] = {}
     cand = evaluate_candidate("TEST", _quote(BREAKOUT_CLOSE), _breakout_history(),
-                              avg_daily_turnover=1_000.0, cfg=CFG, reasons=reasons)
+                              daily_turnover_inr=1_000.0, config=CFG, reasons=reasons)
     assert cand is None
     assert reasons == {"illiquid": 1}
 
@@ -147,6 +147,6 @@ def test_downtrend_rejected():
     hist = _breakout_history()
     # Quote below both moving averages -- no longer an uptrend.
     cand = evaluate_candidate("TEST", _quote(50.0), hist,
-                              avg_daily_turnover=100_000_000, cfg=CFG, reasons=reasons)
+                              daily_turnover_inr=100_000_000, config=CFG, reasons=reasons)
     assert cand is None
     assert reasons == {"not_in_uptrend": 1}

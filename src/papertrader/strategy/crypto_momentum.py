@@ -109,7 +109,12 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
     # USD thresholds), else fall back to the INR figure in config.
     min_turnover = config.get("min_avg_daily_turnover_usd")
     if min_turnover is None:
-        min_turnover = config.get("min_avg_daily_turnover_inr", 5_000_000)
+        # 480,000,000 (~Rs 48cr/day, ~$5M), matching every other crypto
+        # strategy's fallback -- this used to be 5,000,000 here (~96x
+        # lower), silently admitting far more illiquid coins than any
+        # sibling strategy the moment this key was ever missing from
+        # config instead of the profile's explicit override.
+        min_turnover = config.get("min_avg_daily_turnover_inr", 480000000)
     if daily_turnover_inr < min_turnover:
         reasons["illiquid"] = reasons.get("illiquid", 0) + 1
         return None
