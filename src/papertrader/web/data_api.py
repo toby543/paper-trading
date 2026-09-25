@@ -247,7 +247,12 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
 def build_summary(engine) -> dict:
     positions = engine.broker.positions()
     cash = engine.broker.cash()
-    starting_capital = engine.cfg.get_profile_starting_capital(engine.profile_name)
+    # From the ledger, not Config.get_profile_starting_capital(): that
+    # re-reads config.yaml fresh every call, so editing "Starting capital"
+    # for a profile that has already traded would silently recompute its
+    # entire PnL% against a baseline it never actually started from. See
+    # Storage.get_starting_capital's docstring.
+    starting_capital = engine.storage.get_starting_capital()
 
     position_rows = []
     positions_value = 0.0
@@ -347,7 +352,11 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
 
     for profile_name, engine in engines.items():
         try:
-            starting_capital = cfg.get_profile_starting_capital(profile_name)
+            # From the ledger, not config -- see build_summary's identical
+            # comment / Storage.get_starting_capital's docstring. This is
+            # the scoreboard every profile's total_return_pct feeds, so a
+            # drifted baseline here is the most visible place it would show up.
+            starting_capital = engine.storage.get_starting_capital()
             curve = engine.storage.get_equity_curve(limit=1)
             cash = engine.storage.get_cash()
             positions = engine.storage.get_positions()

@@ -12,7 +12,11 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     cash REAL NOT NULL,
-    last_scan_at TEXT
+    last_scan_at TEXT,
+    -- The capital this account was actually seeded with, persisted once
+    -- and never touched again -- see _init_db's migration/backfill logic
+    -- for why this can't just be read fresh from config every time.
+    starting_capital REAL
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -69,7 +73,10 @@ class Storage:
             conn.executescript(SCHEMA)
             row = conn.execute("SELECT cash FROM account WHERE id = 1").fetchone()
             if row is None:
-                conn.execute("INSERT INTO account (id, cash) VALUES (1, ?)", (starting_capital,))
+                conn.execute(
+                    "INSERT INTO account (id, cash, starting_capital) VALUES (1, ?, ?)",
+                    (starting_capital, starting_capital),
+                )
             existing_cols = {r["name"] for r in conn.execute("PRAGMA table_info(trades)").fetchall()}
             if "realized_pnl" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
@@ -77,6 +84,18 @@ class Storage:
             account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
             if "last_scan_at" not in account_cols:
                 conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")
+            if "starting_capital" not in account_cols:
+                conn.execute("ALTER TABLE account ADD COLUMN starting_capital REAL")
+            # A pre-existing ledger (created before this column existed, or
+            # whose row predates it) has NULL here -- backfill once from
+            # whatever `starting_capital` this Storage was constructed
+            # with (the same value every %-return calculation already used
+            # as its source of truth), so behavior is unchanged today and
+            # locked in place against any config edit from this point on.
+            conn.execute(
+                "UPDATE account SET starting_capital = ? WHERE id = 1 AND starting_capital IS NULL",
+                (starting_capital,),
+            )
 
     def _backfill_realized_pnl(self, conn) -> None:
         """Fill in realized_pnl for SELL trades recorded before that column
@@ -109,6 +128,19 @@ class Storage:
     def set_cash(self, cash: float) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE account SET cash = ? WHERE id = 1", (cash,))
+
+    def get_starting_capital(self) -> float:
+        """The capital this specific ledger was actually seeded with --
+        fixed at account creation and never touched again, unlike
+        Config.get_profile_starting_capital() which re-reads config.yaml
+        fresh every call and drifts the moment someone edits that setting
+        for a profile that has already started trading. Every %-return/PnL%
+        calculation must use this, not the config value, or an unrelated
+        settings edit silently recomputes the profile's entire trading
+        history against a different baseline than it actually started from."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT starting_capital FROM account WHERE id = 1").fetchone()
+            return float(row["starting_capital"])
 
     def get_last_scan_at(self) -> str | None:
         with self._conn() as conn:
