@@ -30,7 +30,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 
 from . import auth
 from ..config import Config
-from ..config_editor import update_config_file
+from ..config_editor import update_config_file, update_config_files
 from ..data.universe import load_universe
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
@@ -525,11 +525,16 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             else:
                 global_updates.append((write_path, value))
 
+        # One save can touch config.yaml and a profile's own file at once
+        # (the panel shows global and profile-scoped fields together) --
+        # update_config_files() prepares every file before committing any
+        # of them, so a failure on one doesn't leave the other silently
+        # already saved while the response reports total failure.
+        path_updates = {cfg.path: global_updates} if global_updates else {}
+        for profile_name, updates in profile_updates.items():
+            path_updates[cfg.profile_file_path(profile_name)] = updates
         try:
-            if global_updates:
-                update_config_file(cfg.path, global_updates)
-            for profile_name, updates in profile_updates.items():
-                update_config_file(cfg.profile_file_path(profile_name), updates)
+            update_config_files(path_updates)
         except Exception as exc:  # noqa: BLE001 - surface any write failure to the UI, don't 500 silently
             return jsonify({"ok": False, "errors": [f"Failed to save settings: {exc}"]}), 500
 

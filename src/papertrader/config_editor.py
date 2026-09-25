@@ -68,6 +68,86 @@ def update_config_file(path: str, updates: list[tuple[list[str], object]]) -> No
             raise
 
 
+def update_config_files(path_updates: dict[str, list[tuple[list[str], object]]]) -> None:
+    """Like update_config_file, but for several files in one all-or-nothing
+    operation.
+
+    A single "Save Settings" action routinely touches two files at once --
+    the Edit Settings panel shows global fields (data_source.*, engine.*)
+    and profile-scoped fields (strategy.*, risk.*, execution.*, regime.*)
+    together on one screen, and the latter write to profiles/<name>.yaml
+    while the former write to config.yaml. Calling update_config_file()
+    once per file let a failure on the SECOND file (a malformed
+    profiles/<name>.yaml, a permissions error, disk full) leave the FIRST
+    file's write already committed -- the save reports total failure while
+    part of it silently succeeded.
+
+    Every file's new content is fully read, updated and dumped to its own
+    temp file BEFORE any file is actually replaced, so a failure during
+    that (parsing, validation, serialization -- where a real-world failure
+    is actually likely to occur) leaves every target file completely
+    untouched. Only once every file has been prepared does this commit
+    them: backup-then-atomic-replace per file, same as update_config_file.
+    That commit phase is just local filesystem renames, about as close to
+    zero-failure as this gets without a real transactional store -- it is
+    the one part of this that still isn't atomic ACROSS files, since a
+    plain filesystem has no multi-file transaction to fall back on.
+    """
+    path_updates = {path: updates for path, updates in path_updates.items() if updates}
+    if not path_updates:
+        return
+
+    import logging
+    log = logging.getLogger(__name__)
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096
+
+    with _lock:
+        prepared: list[tuple[str, str]] = []  # (path, tmp_path), in commit order
+        try:
+            # Phase 1: read + apply + dump every file to its own .tmp.
+            # Nothing here touches the real files, so any failure aborts
+            # with every one of them untouched.
+            for path, updates in path_updates.items():
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = yaml.load(fh)
+                log.info("Loaded config from %s", path)
+
+                for key_path, value in updates:
+                    node = data
+                    for key in key_path[:-1]:
+                        node = node.setdefault(key, {})
+                    old_value = node.get(key_path[-1])
+                    node[key_path[-1]] = value
+                    log.info("Updated %s (%s): %s -> %s", ".".join(key_path), path, old_value, value)
+
+                tmp_path = path + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as fh:
+                    yaml.dump(data, fh)
+                log.info("Wrote temp file: %s", tmp_path)
+                prepared.append((path, tmp_path))
+
+            # Phase 2: every file prepared successfully -- commit all of them.
+            for path, tmp_path in prepared:
+                shutil.copyfile(path, path + ".bak")
+                log.info("Created backup: %s.bak", path)
+                os.replace(tmp_path, path)
+                log.info("Replaced config file: %s", path)
+        except Exception as e:
+            log.error("Failed to update config files: %s", e)
+            # Drop any .tmp files phase 1 created but phase 2 never
+            # replaced, so a failed save doesn't leave litter behind.
+            for _, tmp_path in prepared:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
+
+
 def find_missing_keys(
     default: dict, live: dict, _prefix: list[str] | None = None,
 ) -> list[tuple[list[str], object]]:
