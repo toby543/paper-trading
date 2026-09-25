@@ -228,6 +228,11 @@ class Backtester:
         self._fetch_timeout = cfg.get("data_source", "request_timeout_seconds", default=15)
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
         self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))
+        # The currency this profile's book is kept in -- crypto pairs are
+        # quoted in USD by yfinance, so for an INR book they must be
+        # converted here exactly as MarketDataClient does for live trading.
+        # See _crypto_fx_rate below for what goes wrong without this.
+        self.quote_currency = cfg.get_profile_quote_currency(self.profile_name)
 
         # Make sure the fetch window is wide enough that every lookback this
         # profile needs is already satisfied on the FIRST simulated day --
@@ -301,12 +306,22 @@ class Backtester:
         log.info("Fetching %d symbols from %s to %s (includes lookback buffer for MAs/momentum)...",
                   len(self.universe), fetch_start.date(), self.end.date())
 
+        # Applied to crypto symbols only, after the cache read: the cache
+        # stores raw source (USD) data, so converting on the way out keeps
+        # it reusable regardless of which book currency reads it.
+        fx = self._crypto_fx_rate()
+        if fx != 1.0:
+            log.info("Converting crypto prices USD->%s at %.4f for this backtest",
+                     self.quote_currency, fx)
+
         last_call = 0.0
         cache_hits = 0
         for i, symbol in enumerate(self.universe):
+            is_crypto = "-" in symbol
             cached = None if self.refresh_cache else price_cache.load(symbol)
             if price_cache.covers(cached, fetch_start, fetch_end):
-                self._history[symbol] = price_cache.slice_range(cached, fetch_start, fetch_end)
+                sliced = price_cache.slice_range(cached, fetch_start, fetch_end)
+                self._history[symbol] = self._to_book_currency(sliced, fx) if is_crypto else sliced
                 cache_hits += 1
             else:
                 elapsed = _time.time() - last_call
@@ -326,7 +341,8 @@ class Backtester:
                     if not df.empty:
                         df.index = df.index.tz_localize(None)
                         merged = price_cache.save(symbol, df, existing=cached)
-                        self._history[symbol] = price_cache.slice_range(merged, fetch_start, fetch_end)
+                        sliced = price_cache.slice_range(merged, fetch_start, fetch_end)
+                        self._history[symbol] = self._to_book_currency(sliced, fx) if is_crypto else sliced
                 except Exception as exc:  # noqa: BLE001 - one bad symbol must not abort the whole backtest
                     log.debug("Skipping %s: %s", symbol, exc)
             self._on_progress("fetch", i + 1, len(self.universe))
@@ -420,6 +436,55 @@ class Backtester:
         if index_upto is None or len(index_upto) < 2:
             return True  # fail open, matching live behavior when index data is unavailable
         return is_market_in_uptrend(index_upto, self.regime_cfg.get("ma_days", 200))
+
+    def _crypto_fx_rate(self) -> float:
+        """Multiplier from a crypto pair's USD quote into this book's own
+        currency; 1.0 for a USD book, so the conversion is a no-op.
+
+        Without this the backtest was dimensionally inconsistent for every
+        crypto profile: yfinance serves crypto in USD, but the profile's
+        capital and every absolute threshold in its config are INR. The
+        liquidity filter was the visible casualty -- a USD turnover was
+        compared against min_avg_daily_turnover_inr (480,000,000), i.e. a
+        bar ~96x too high, silently rejecting roughly half the universe
+        every day as illiquid when the live engine trades those same coins
+        happily (ATOM-USD: $71.8M rejected here, Rs 6.89bn passed live).
+
+        Mirrors MarketDataClient._crypto_fx_rate, including applying one
+        current rate across the whole window rather than a historical FX
+        series -- the same simplification the live data layer makes, so
+        backtest and live agree with each other.
+        """
+        if not any("-" in symbol for symbol in self.universe):
+            return 1.0  # equity-only universe, nothing to convert
+        from ..data.fx import conversion_rate
+
+        try:
+            return conversion_rate("USD", self.quote_currency, timeout=self._fetch_timeout)
+        except ValueError:
+            log.warning("No USD->%s conversion available; leaving crypto prices in USD",
+                        self.quote_currency)
+            return 1.0
+
+    @staticmethod
+    def _to_book_currency(df: pd.DataFrame, fx: float) -> pd.DataFrame:
+        """Scale OHLC into the book's currency, leaving Volume alone.
+
+        Volume is a coin count, not a price, so scaling it would corrupt
+        both the volume-confirmation filters and Close*Volume turnover
+        (which comes out in the book's currency automatically once only
+        the prices are converted). Copies first: the frame comes from the
+        price cache, and multiplying in place would corrupt that cache for
+        every later read in the same run.
+        """
+        if fx == 1.0:
+            return df
+        converted = df.copy()
+        for column in ("Open", "High", "Low", "Close"):
+            if column in converted.columns:
+                converted[column] = converted[column] * fx
+        converted.attrs.update(df.attrs)
+        return converted
 
     def _pairs_benchmark_history(self, day: pd.Timestamp) -> pd.DataFrame | None:
         """crypto_pairs_trading's benchmark history as of `day`, or None if
