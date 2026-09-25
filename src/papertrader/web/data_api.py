@@ -401,7 +401,9 @@ def build_candidates(engine, limit: int = 20) -> dict:
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
     consolidation_breakout.Candidate, pivot_supertrend.Candidate,
     trend_pullback.Candidate, long_term_trend.Candidate, crypto_momentum.Candidate,
-    crypto_breakout.Candidate, and crypto_institutional_swing.Candidate are all
+    crypto_breakout.Candidate, crypto_institutional_swing.Candidate,
+    crypto_mean_reversion.Candidate, crypto_trend_pullback.Candidate,
+    crypto_breakout_retest.Candidate, and crypto_pairs_trading.Candidate are all
     separate dataclasses with none of that shape's fields (no week52_high, pct_from_52w_high,
     relative_strength_pct, volume_multiple). Building one hardcoded row
     shape for every mode previously raised AttributeError the moment one
@@ -495,6 +497,42 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "ma200": round(cand.ma200, 2),
                 "volume_multiple": round(cand.volume_multiple, 2),
                 "momentum_return_pct": round(cand.momentum_return_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "crypto_mean_reversion":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "mean_ma": round(cand.mean_ma, 2),
+                "deviation_pct": round(cand.deviation_pct, 2),
+                "rsi": round(cand.rsi, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "crypto_trend_pullback":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "recent_high": round(cand.recent_high, 2),
+                "pct_from_high": round(cand.pct_from_high, 2),
+                "day_change_pct": round(cand.day_change_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "crypto_breakout_retest":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "breakout_level": round(cand.breakout_level, 2),
+                "pct_from_level": round(cand.pct_from_level, 2),
+                "day_change_pct": round(cand.day_change_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "crypto_pairs_trading":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": round(cand.ltp, 2),
+                "ratio": cand.ratio,
+                "ratio_mean": cand.ratio_mean,
+                "z_score": round(cand.z_score, 2),
                 "score": round(cand.score, 2),
             })
         else:

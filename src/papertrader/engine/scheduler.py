@@ -23,7 +23,11 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
-from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum, crypto_breakout, crypto_institutional_swing
+from ..strategy import (
+    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback,
+    crypto_momentum, crypto_breakout, crypto_institutional_swing,
+    crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
+)
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -215,6 +219,20 @@ class TradingEngine:
     def check_exits(self) -> None:
         positions = self.broker.positions()
         mode = self.strategy_cfg.get("mode", "52w_high")
+        # Fetched once per call, not once per position -- same "fetch the
+        # benchmark once" pattern find_candidates() uses for this mode and
+        # for 52w_high's relative-strength filter. A fetch failure here
+        # degrades gracefully: check_exit() falls through to the
+        # stop-loss/time-stop safety net when benchmark_history is None.
+        pairs_benchmark_history = None
+        if mode == "crypto_pairs_trading":
+            try:
+                pairs_benchmark_history = self.data.get_history(
+                    self.strategy_cfg.get("crypto_pairs_trading", {}).get("benchmark_symbol", crypto_pairs_trading.BENCHMARK_SYMBOL_DEFAULT),
+                    period="1y",
+                )
+            except DataUnavailableError as exc:
+                log.warning("Could not fetch pairs-trading benchmark history (%s); exits fall back to stop-loss/time-stop only this cycle", exc)
         for symbol, pos in positions.items():
             try:
                 quote = self.data.get_quote(symbol)
@@ -239,6 +257,14 @@ class TradingEngine:
                 should_exit, reason = crypto_breakout.check_exit(pos, quote, history, cfg)
             elif mode == "crypto_institutional_swing":
                 should_exit, reason = crypto_institutional_swing.check_exit(pos, quote, history, cfg)
+            elif mode == "crypto_mean_reversion":
+                should_exit, reason = crypto_mean_reversion.check_exit(pos, quote, history, cfg)
+            elif mode == "crypto_trend_pullback":
+                should_exit, reason = crypto_trend_pullback.check_exit(pos, quote, history, cfg)
+            elif mode == "crypto_breakout_retest":
+                should_exit, reason = crypto_breakout_retest.check_exit(pos, quote, history, cfg)
+            elif mode == "crypto_pairs_trading":
+                should_exit, reason = crypto_pairs_trading.check_exit(pos, quote, history, cfg, benchmark_history=pairs_benchmark_history)
             else:
                 should_exit, reason = exit_52w(pos, quote, history, cfg)
             if should_exit:
@@ -607,6 +633,167 @@ class TradingEngine:
                                           candidates=len(candidates), reasons=reasons)
             return crypto_institutional_swing.rank_candidates(candidates)
 
+        if mode == "crypto_mean_reversion":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = crypto_mean_reversion.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("crypto_mean_reversion: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "crypto_mean_reversion scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return crypto_mean_reversion.rank_candidates(candidates)
+
+        if mode == "crypto_trend_pullback":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = crypto_trend_pullback.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("crypto_trend_pullback: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "crypto_trend_pullback scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return crypto_trend_pullback.rank_candidates(candidates)
+
+        if mode == "crypto_breakout_retest":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = crypto_breakout_retest.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("crypto_breakout_retest: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "crypto_breakout_retest scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return crypto_breakout_retest.rank_candidates(candidates)
+
+        if mode == "crypto_pairs_trading":
+            # Benchmark fetched once per scan, not once per candidate coin --
+            # same pattern as 52w_high's relative-strength index fetch above.
+            pt_cfg = self.strategy_cfg.get("crypto_pairs_trading") or {}
+            benchmark_symbol = pt_cfg.get("benchmark_symbol", crypto_pairs_trading.BENCHMARK_SYMBOL_DEFAULT)
+            benchmark_history = None
+            try:
+                benchmark_history = self.data.get_history(benchmark_symbol, period="1y")
+            except DataUnavailableError as exc:
+                log.warning("Could not fetch pairs-trading benchmark history (%s); skipping this scan", exc)
+                self._record_scan_diagnostics(mode, "scan_failed")
+                return []
+
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols or symbol == benchmark_symbol:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = crypto_pairs_trading.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg,
+                        benchmark_history=benchmark_history, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("crypto_pairs_trading: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "crypto_pairs_trading scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return crypto_pairs_trading.rank_candidates(candidates)
+
         # Default: 52w_high strategy
         # Fetch the benchmark index once per scan (cached) so every
         # candidate's relative strength is judged against the same frame,
@@ -750,6 +937,32 @@ class TradingEngine:
                     f"MA20 {ccy}{cand.ma20:.2f} > MA50 {ccy}{cand.ma50:.2f} > MA200 {ccy}{cand.ma200:.2f}, "
                     f"{cand.momentum_return_pct:.1f}% momentum, "
                     f"volume {cand.volume_multiple:.1f}x"
+                )
+            elif mode == "crypto_mean_reversion":
+                ccy = "₹"  # Crypto book is always in INR (converted at data layer)
+                reason = (
+                    f"mean_reversion score={cand.score:.1f} "
+                    f"{cand.deviation_pct:.1f}% below {ccy}{cand.mean_ma:.2f} mean, RSI {cand.rsi:.0f}"
+                )
+            elif mode == "crypto_trend_pullback":
+                ccy = "₹"  # Crypto book is always in INR (converted at data layer)
+                reason = (
+                    f"crypto_trend_pullback score={cand.score:.1f} "
+                    f"{cand.pct_from_high:.1f}% pullback from {ccy}{cand.recent_high:.2f} recent high, "
+                    f"turning up {cand.day_change_pct:+.1f}% today"
+                )
+            elif mode == "crypto_breakout_retest":
+                ccy = "₹"  # Crypto book is always in INR (converted at data layer)
+                reason = (
+                    f"crypto_breakout_retest score={cand.score:.1f} "
+                    f"retesting {ccy}{cand.breakout_level:.2f} breakout level "
+                    f"({cand.pct_from_level:.1f}% away), turning up {cand.day_change_pct:+.1f}% today"
+                )
+            elif mode == "crypto_pairs_trading":
+                reason = (
+                    f"crypto_pairs_trading score={cand.score:.1f} "
+                    f"z={cand.z_score:.2f} vs its own {self.strategy_cfg.get('crypto_pairs_trading', {}).get('pairs_lookback_days', 30)}d mean "
+                    f"(ratio {cand.ratio:.6f} vs mean {cand.ratio_mean:.6f})"
                 )
             else:
                 # Built from whatever the candidate actually carries, via
