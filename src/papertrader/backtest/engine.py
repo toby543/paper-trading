@@ -39,21 +39,32 @@ from ..strategy.momentum_52w_high import (
     is_market_in_uptrend,
     rank_candidates as rank_52w,
 )
-from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum
+from ..strategy import (
+    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback,
+    crypto_momentum, crypto_breakout, crypto_institutional_swing,
+    crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
+)
 from .metrics import avg_value, cagr_pct, max_drawdown_pct, win_rate_pct
 
 log = logging.getLogger(__name__)
 
-
-class _CandidateAdapter:
-    """Wraps dict-based candidates (from crypto_momentum) to support dot notation access."""
-    def __init__(self, data: dict):
-        self._data = data
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            return super().__getattribute__(name)
-        return self._data.get(name)
+# Every crypto strategy that takes the same
+# evaluate_candidate(symbol, quote, history, turnover, config, reasons=)
+# signature and needs nothing but its own symbol's history. Driven off one
+# shared loop below rather than six near-identical if/elif blocks, so a
+# future signature change can't silently desync some copies and not others
+# -- crypto_momentum's old dict-vs-dataclass return already caused exactly
+# that kind of drift between this engine and the live scheduler.
+# crypto_pairs_trading is deliberately absent: it needs a second symbol's
+# history (its benchmark) and is handled separately.
+_SIMPLE_CRYPTO_STRATEGIES = {
+    "crypto_momentum": crypto_momentum,
+    "crypto_breakout": crypto_breakout,
+    "crypto_institutional_swing": crypto_institutional_swing,
+    "crypto_mean_reversion": crypto_mean_reversion,
+    "crypto_trend_pullback": crypto_trend_pullback,
+    "crypto_breakout_retest": crypto_breakout_retest,
+}
 
 
 # Trading-day approximation of "52 weeks", matching how a ~1y lookback
@@ -100,6 +111,29 @@ def _required_trading_days(strategy_cfg: dict) -> int:
     if mode == "consolidation_breakout":
         cb_cfg = strategy_cfg.get("consolidation_breakout") or {}
         needed = max(needed, int(cb_cfg.get("consolidation_days", 10)) + 1)
+    elif mode == "crypto_breakout":
+        cb_cfg = strategy_cfg.get("crypto_breakout") or {}
+        needed = max(needed, int(cb_cfg.get("consolidation_days", 7)) + 1)
+    elif mode == "crypto_institutional_swing":
+        # Hard-coded 250-bar floor in its own evaluate_candidate (it needs a
+        # 200-day MA plus buffer); under-fetching rejects every symbol as
+        # insufficient_history for the whole backtest.
+        needed = max(needed, 250)
+    elif mode == "crypto_mean_reversion":
+        mr_cfg = strategy_cfg.get("crypto_mean_reversion") or {}
+        needed = max(needed, int(mr_cfg.get("long_ma_days", 100)),
+                     int(mr_cfg.get("mean_ma_days", 20)))
+    elif mode == "crypto_trend_pullback":
+        tp_cfg = strategy_cfg.get("crypto_trend_pullback") or {}
+        needed = max(needed, int(tp_cfg.get("pullback_lookback_days", 20)))
+    elif mode == "crypto_breakout_retest":
+        br_cfg = strategy_cfg.get("crypto_breakout_retest") or {}
+        needed = max(needed, int(br_cfg.get("base_lookback_days", 20))
+                     + int(br_cfg.get("retest_window_days", 10)) + 1)
+    elif mode == "crypto_pairs_trading":
+        pt_cfg = strategy_cfg.get("crypto_pairs_trading") or {}
+        needed = max(needed, int(pt_cfg.get("trend_ma_days", 100)),
+                     int(pt_cfg.get("pairs_lookback_days", 30)))
     return needed
 
 
@@ -387,6 +421,18 @@ class Backtester:
             return True  # fail open, matching live behavior when index data is unavailable
         return is_market_in_uptrend(index_upto, self.regime_cfg.get("ma_days", 200))
 
+    def _pairs_benchmark_history(self, day: pd.Timestamp) -> pd.DataFrame | None:
+        """crypto_pairs_trading's benchmark history as of `day`, or None if
+        that symbol isn't in the fetched universe. The strategy treats None
+        as "no benchmark data" and rejects/falls back rather than failing,
+        matching the live scheduler's behavior when the fetch errors."""
+        benchmark_symbol = (self.strategy_cfg.get("crypto_pairs_trading") or {}).get(
+            "benchmark_symbol", crypto_pairs_trading.BENCHMARK_SYMBOL_DEFAULT)
+        hist = self._history.get(benchmark_symbol)
+        if hist is None:
+            return None
+        return hist.loc[:day]
+
     # ------------------------------------------------------------------
     def _run_exits(self, day: pd.Timestamp, trade_pnls: list[float], trade_log: list[dict]) -> None:
         mode = self.strategy_cfg.get("mode", "52w_high")
@@ -409,8 +455,13 @@ class Backtester:
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history_upto, cfg)
             elif mode == "long_term_trend":
                 should_exit, reason = long_term_trend.check_exit(pos, quote, history_upto, cfg)
-            elif mode == "crypto_momentum":
-                should_exit, reason = crypto_momentum.check_exit(pos, quote, history_upto, cfg)
+            elif mode in _SIMPLE_CRYPTO_STRATEGIES:
+                should_exit, reason = _SIMPLE_CRYPTO_STRATEGIES[mode].check_exit(pos, quote, history_upto, cfg)
+            elif mode == "crypto_pairs_trading":
+                should_exit, reason = crypto_pairs_trading.check_exit(
+                    pos, quote, history_upto, cfg,
+                    benchmark_history=self._pairs_benchmark_history(day),
+                )
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
             if not should_exit:
@@ -544,7 +595,8 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = long_term_trend.rank_candidates(candidates)
-        elif mode == "crypto_momentum":
+        elif mode in _SIMPLE_CRYPTO_STRATEGIES:
+            strategy = _SIMPLE_CRYPTO_STRATEGIES[mode]
             candidates = []
             for symbol in self.universe:
                 if symbol in positions or symbol in cooldown_blocked:
@@ -557,13 +609,42 @@ class Backtester:
                 if quote is None:
                     continue
                 turnover = _avg_daily_turnover(history_upto)
-                cand = crypto_momentum.evaluate_candidate(
+                cand = strategy.evaluate_candidate(
                     symbol, quote, history_upto, turnover, self.strategy_cfg,
                     reasons=self._entry_rejections,
                 )
                 if cand:
                     candidates.append(cand)
-            ranked = [_CandidateAdapter(c) for c in crypto_momentum.rank_candidates(candidates)]
+            # Used directly, NOT wrapped in an adapter: every strategy's
+            # evaluate_candidate returns a Candidate dataclass. The adapter
+            # that used to sit here assumed crypto_momentum still returned
+            # plain dicts and called .get() on the result, which raised
+            # AttributeError on every field access once that changed.
+            ranked = strategy.rank_candidates(candidates)
+        elif mode == "crypto_pairs_trading":
+            benchmark_history = self._pairs_benchmark_history(day)
+            benchmark_symbol = (self.strategy_cfg.get("crypto_pairs_trading") or {}).get(
+                "benchmark_symbol", crypto_pairs_trading.BENCHMARK_SYMBOL_DEFAULT)
+            candidates = []
+            if benchmark_history is not None:
+                for symbol in self.universe:
+                    if symbol in positions or symbol in cooldown_blocked or symbol == benchmark_symbol:
+                        continue
+                    hist = self._history.get(symbol)
+                    if hist is None:
+                        continue
+                    history_upto = hist.loc[:day]
+                    quote = self._quote_for(symbol, history_upto)
+                    if quote is None:
+                        continue
+                    turnover = _avg_daily_turnover(history_upto)
+                    cand = crypto_pairs_trading.evaluate_candidate(
+                        symbol, quote, history_upto, turnover, self.strategy_cfg,
+                        benchmark_history=benchmark_history, reasons=self._entry_rejections,
+                    )
+                    if cand:
+                        candidates.append(cand)
+            ranked = crypto_pairs_trading.rank_candidates(candidates)
         else:
             candidates: list[Candidate52w] = []
             for symbol in self.universe:
