@@ -48,6 +48,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from ..data.nse_client import Quote
@@ -90,7 +91,13 @@ def _ratio_series(coin_history: pd.DataFrame, benchmark_history: pd.DataFrame) -
         return None
     coin = coin.loc[common]
     bench = bench.loc[common]
-    bench = bench.replace(0, pd.NA)
+    # np.nan, not pd.NA: replacing with pd.NA on a float64 Series silently
+    # upcasts it (and the ratio computed from it) to object dtype -- still
+    # numerically correct here since pandas coerces object-dtype floats back
+    # for .mean()/.std(), but fragile and undocumented behavior to depend on
+    # for something that only ever fires if a benchmark bar's close is
+    # exactly 0. np.nan keeps this float64 throughout.
+    bench = bench.replace(0, np.nan)
     ratio = (coin / bench).dropna()
     return ratio if len(ratio) >= 20 else None
 
