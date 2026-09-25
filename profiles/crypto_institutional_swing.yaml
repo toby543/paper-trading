@@ -3,8 +3,11 @@ category: crypto
 state_file: data/state_crypto_institutional_swing.db
 starting_capital: 100000.0
 strategy_mode: crypto_institutional_swing
-# Crypto-only universe for swing trading.
-universe_file: data/universe_crypto.csv
+# Majors only, not the full crypto list: an institutional swing entry
+# leans on liquidity and a real 200-day trend -- a memecoin's trend can
+# evaporate in an hour, which this strategy's slower exits aren't built
+# to react to in time.
+universe_file: data/universe_crypto_majors.csv
 # Crypto trades 24/7, no NSE session gate. Benchmark is BTC-USD.
 regime:
   enabled: false

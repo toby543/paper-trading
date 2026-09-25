@@ -3,8 +3,11 @@ category: crypto
 state_file: data/state_crypto_mean_reversion.db
 starting_capital: 100000.0
 strategy_mode: crypto_mean_reversion
-# Crypto-only universe.
-universe_file: data/universe_crypto.csv
+# Majors only, not the full crypto list: mean reversion bets on a
+# snap-back, which relies on the coin actually having a stable long-run
+# tendency to revert -- a low-cap/memecoin dip is just as likely to be
+# the start of it going to zero as it is a buyable dip.
+universe_file: data/universe_crypto_majors.csv
 # Crypto trades 24/7, no NSE session gate. No trend regime filter --
 # this strategy is explicitly counter-trend by design.
 regime:

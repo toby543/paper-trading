@@ -3,10 +3,13 @@ category: crypto
 state_file: data/state_crypto_pairs_trading.db
 starting_capital: 100000.0
 strategy_mode: crypto_pairs_trading
-# Crypto-only universe. BTC-USD (the benchmark every other coin is
-# "paired" against) is automatically excluded from candidacy by the
-# scheduler -- it can't be traded against itself.
-universe_file: data/universe_crypto.csv
+# Majors only, not the full crypto list: a low-cap/memecoin's price ratio
+# to BTC is dominated by its own idiosyncratic pumps and dumps, not a
+# genuine, reliably-reverting relative-value relationship with BTC -- the
+# whole premise this strategy trades on. BTC-USD (the benchmark every
+# other coin is "paired" against) is automatically excluded from
+# candidacy by the scheduler -- it can't be traded against itself.
+universe_file: data/universe_crypto_majors.csv
 regime:
   enabled: false
   index_symbol: "BTC-USD"
