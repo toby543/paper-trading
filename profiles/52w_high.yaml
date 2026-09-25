@@ -1,0 +1,25 @@
+display_name: "52-Week High Momentum"
+    # Existing trades stay here - if you have data/state.db, it will be used as the base
+state_file: data/state_52w_high.db
+starting_capital: 100000.0
+    # Strategy mode for this profile
+strategy_mode: 52w_high
+    # This is your PRIMARY profile where existing trades and positions continue
+strategy:
+  proximity_to_52w_high_pct: 4.0
+  momentum_lookback_days: 252
+  min_momentum_return_pct: 18.0
+  fast_ma_days: 50
+  slow_ma_days: 200
+  min_avg_daily_turnover_inr: 50000000
+  min_relative_strength_pct: 8.0
+  volume_confirmation:
+    enabled: true
+    recent_days: 10
+    baseline_days: 50
+    min_volume_multiple: 1.5
+  max_new_positions_per_scan: 3
+  min_ltp_inr: 0
+  max_ltp_inr: 0
+
+category: swing

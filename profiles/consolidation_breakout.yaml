@@ -1,0 +1,31 @@
+display_name: "Consolidation Breakout"
+    # Fresh ledger independent from 52w_high
+state_file: data/state_consolidation.db
+starting_capital: 100000.0
+strategy_mode: consolidation_breakout
+    # This profile starts fresh with new capital
+strategy:
+      # Shorter, looser momentum check than 52w_high's -- appropriate for
+      # a breakout-off-a-base setup rather than a sustained 52-week trend.
+  momentum_lookback_days: 21
+  min_momentum_return_pct: 5.0
+  fast_ma_days: 50
+  slow_ma_days: 200
+  min_avg_daily_turnover_inr: 50000000
+  max_new_positions_per_scan: 3
+  min_ltp_inr: 0
+  max_ltp_inr: 0
+  consolidation_breakout:
+        # How many bars form the base. The base is the N bars BEFORE the
+        # latest one; the latest bar is the one that has to break out of it.
+    consolidation_days: 10
+        # The base counts as "tight" when its high-to-low range is under
+        # this percentage of its own average close. 3% is strict for NSE
+        # names -- raise it to 4-5% if scans keep reporting base_not_tight
+        # for nearly the whole universe.
+    max_consolidation_range_pct: 3.0
+        # Breakout bar's volume must be at least this multiple of the
+        # 20-day average volume of the bars before it.
+    volume_multiple: 2.0
+
+category: swing

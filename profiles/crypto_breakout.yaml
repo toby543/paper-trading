@@ -1,0 +1,44 @@
+display_name: Crypto Breakout
+category: crypto
+state_file: data/state_crypto_breakout.db
+starting_capital: 100000.0
+strategy_mode: crypto_breakout
+# Crypto-only universe. Nothing here touches the NSE equity lists.
+universe_file: data/universe_crypto.csv
+# No equity regime filter -- see crypto_momentum.yaml.
+regime:
+  enabled: false
+  index_symbol: "BTC-USD"
+strategy:
+  momentum_lookback_days: 21
+  min_momentum_return_pct: 3.0
+  # 20/50 for crypto: price must be above both MAs with fast above slow.
+  fast_ma_days: 20
+  slow_ma_days: 50
+  # Rs 48cr/day (~$5M) -- see the note in crypto_momentum.yaml.
+  min_avg_daily_turnover_inr: 480000000
+  max_new_positions_per_scan: 3
+  crypto_breakout:
+    consolidation_days: 7
+    # 20%, not the equity default of 3-5%: crypto's baseline 7-day range
+    # is 3-4x an NSE stock's even in its calmest names -- BTC (the
+    # tightest of the whole universe) sits at ~14%, so 5% rejected every
+    # coin, every day, with no ceiling loose enough to ever admit a
+    # "genuinely quiet" base at crypto's actual volatility. 20% still
+    # excludes the wildest movers (NEAR ~56%, BCH ~53% at the same
+    # measurement) while admitting BTC/ETH/BNB-range consolidations.
+    max_consolidation_range_pct: 20.0
+    volume_multiple: 1.5
+risk:
+  stop_loss_pct: 8.0
+  trailing_stop_pct: 12.0
+  take_profit_pct: 20.0
+  position_size_pct_of_equity: 6.0
+  max_open_positions: 12
+  max_cash_deployed_per_scan_pct: 60.0
+  reentry_cooldown_days: 1
+# Percentage exchange fee, not NSE flat brokerage -- see crypto_momentum.yaml.
+execution:
+  fee_pct: 0.1
+  flat_charges_inr: 0
+  slippage_bps: 5.0

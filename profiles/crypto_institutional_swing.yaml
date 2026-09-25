@@ -1,0 +1,52 @@
+display_name: Crypto Institutional Swing
+category: crypto
+state_file: data/state_crypto_institutional_swing.db
+starting_capital: 100000.0
+strategy_mode: crypto_institutional_swing
+# Crypto-only universe for swing trading.
+universe_file: data/universe_crypto.csv
+# Crypto trades 24/7, no NSE session gate. Benchmark is BTC-USD.
+regime:
+  enabled: false
+  index_symbol: "BTC-USD"
+strategy:
+  # Swing trading timeframe: 5-10 days typically
+  # Entry: Pullback to 20-day MA during strong uptrend (200 > 50 > 20 > price)
+  momentum_lookback_days: 30
+  min_momentum_return_pct: 3.0
+  # RSI 35-50 range: bouncing from dip, not crashed (< 30) or too hot (> 50)
+  min_rsi: 35.0
+  max_rsi: 50.0
+  # Pullback tolerance: price within 5% of 20-day MA (at support level)
+  pullback_tolerance_pct: 5.0
+  # Volume confirmation: require 1.5x baseline volume (institutional flow)
+  min_volume_multiple: 1.5
+  # Moving average windows for swing identification
+  fast_ma_days: 20
+  slow_ma_days: 50
+  # In INR, like the rest of this book. Rs 48cr/day (~$5M) liquidity filter.
+  min_avg_daily_turnover_inr: 480000000
+  max_new_positions_per_scan: 2
+  # Time stop: don't hold swings longer than 7 days (market regime may change).
+  # Lives under strategy (not risk) to match the Settings field path and
+  # check_exit's own config.get("time_stop_days") lookup.
+  time_stop_days: 7
+  # Swing profit target: exit at +22%. Under strategy (not risk.take_profit_pct)
+  # to match the Settings field path and check_exit's own
+  # config.get("profit_target_pct") lookup -- the old risk.take_profit_pct
+  # name was never actually read by this strategy's exit logic.
+  profit_target_pct: 22.0
+risk:
+  # Swing trading parameters: tighter stops, quicker exits
+  stop_loss_pct: 8.0      # Hard stop: exit before bigger loss
+  trailing_stop_pct: 6.0   # Trailing stop: lock in gains
+  position_size_pct_of_equity: 6.0
+  max_open_positions: 8
+  max_cash_deployed_per_scan_pct: 40.0
+  # 24h cooldown (crypto trades continuously)
+  reentry_cooldown_days: 1
+# Percentage exchange fee for crypto: 0.1% taker on most major exchanges
+execution:
+  fee_pct: 0.1
+  flat_charges_inr: 0
+  slippage_bps: 5.0

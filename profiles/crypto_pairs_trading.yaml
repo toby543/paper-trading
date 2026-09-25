@@ -1,0 +1,43 @@
+display_name: Crypto Pairs Trading
+category: crypto
+state_file: data/state_crypto_pairs_trading.db
+starting_capital: 100000.0
+strategy_mode: crypto_pairs_trading
+# Crypto-only universe. BTC-USD (the benchmark every other coin is
+# "paired" against) is automatically excluded from candidacy by the
+# scheduler -- it can't be traded against itself.
+universe_file: data/universe_crypto.csv
+regime:
+  enabled: false
+  index_symbol: "BTC-USD"
+strategy:
+  min_avg_daily_turnover_inr: 480000000
+  max_new_positions_per_scan: 2
+  # Time stop: a ratio that hasn't reverted within 10 days has likely
+  # shifted structurally rather than just temporarily diverged.
+  time_stop_days: 10
+  crypto_pairs_trading:
+    benchmark_symbol: "BTC-USD"
+    # Neither leg may be below its own 100-day MA -- otherwise "cheap
+    # versus BTC" can just mean "crashing alongside BTC".
+    trend_ma_days: 100
+    pairs_lookback_days: 30
+    # 2 standard deviations below the ratio's own recent mean to enter.
+    entry_z_threshold: 2.0
+    # Back to (or above) the mean to exit on reversion.
+    exit_z_threshold: 0.0
+risk:
+  # Wider than the trend-following strategies -- a relative-value setup
+  # can take longer to resolve, and this book bets on ratio reversion,
+  # not directional price alone.
+  stop_loss_pct: 10.0
+  trailing_stop_pct: 15.0
+  take_profit_pct: 0
+  position_size_pct_of_equity: 5.0
+  max_open_positions: 6
+  max_cash_deployed_per_scan_pct: 30.0
+  reentry_cooldown_days: 1
+execution:
+  fee_pct: 0.1
+  flat_charges_inr: 0
+  slippage_bps: 5.0

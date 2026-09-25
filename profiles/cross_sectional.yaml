@@ -1,0 +1,19 @@
+display_name: "Cross-Sectional Momentum"
+    # Fresh ledger independent from 52w_high
+state_file: data/state_cross_sectional.db
+starting_capital: 100000.0
+strategy_mode: cross_sectional_momentum
+    # This profile starts fresh with new capital
+strategy:
+  fast_ma_days: 50
+  slow_ma_days: 200
+  min_avg_daily_turnover_inr: 50000000
+  max_new_positions_per_scan: 3
+  min_ltp_inr: 0
+  max_ltp_inr: 0
+  cross_sectional:
+    lookback_days: 252
+    skip_recent_days: 21
+    top_pct: 10.0
+
+category: swing

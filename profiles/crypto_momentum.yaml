@@ -1,0 +1,47 @@
+display_name: Crypto Momentum
+category: crypto
+state_file: data/state_crypto_momentum.db
+starting_capital: 100000.0
+strategy_mode: crypto_momentum
+# Crypto-only universe. Nothing here touches the NSE equity lists.
+universe_file: data/universe_crypto.csv
+# Crypto has its own market cycles with no reliable Nifty correlation,
+# so the equity regime filter is off entirely. BTC-USD is kept as the
+# crypto-native benchmark used for the dashboard's comparison line.
+regime:
+  enabled: false
+  index_symbol: "BTC-USD"
+strategy:
+  # 30 days in a 24/7 market ~= 6 weeks of equity sessions.
+  momentum_lookback_days: 30
+  min_momentum_return_pct: 5.0
+  # RSI > 50 = in a momentum phase.
+  min_rsi: 50.0
+  # The windows this strategy actually trades: price must be above the
+  # 20-day MA and the 20-day must be above the 50-day. Set explicitly so
+  # the dashboard shows the real numbers instead of inheriting the
+  # equity 50/200 it never used.
+  fast_ma_days: 20
+  slow_ma_days: 50
+  # In INR, like the rest of this book: crypto quotes arrive in USD
+  # and are converted at the live USD/INR rate in the data layer, so
+  # turnover reaching this filter is already rupees. Rs 48cr/day
+  # (~$5M) admits the major/mid-caps while excluding thin names.
+  min_avg_daily_turnover_inr: 480000000
+  max_new_positions_per_scan: 3
+risk:
+  stop_loss_pct: 10.0
+  trailing_stop_pct: 15.0
+  take_profit_pct: 25.0
+  position_size_pct_of_equity: 8.0
+  max_open_positions: 10
+  max_cash_deployed_per_scan_pct: 50.0
+  # 24h, because crypto trades continuously -- not the 3-7 days an
+  # equity profile uses.
+  reentry_cooldown_days: 1
+# Crypto exchanges charge a percentage of notional (~0.1% taker), not
+# the flat per-order brokerage+STT an Indian equity broker charges.
+execution:
+  fee_pct: 0.1
+  flat_charges_inr: 0
+  slippage_bps: 5.0

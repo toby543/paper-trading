@@ -17,12 +17,14 @@ data/auth_secrets.json
 config.yaml
 config.yaml.bak
 config.yaml.tmp
-# Each profile's own live settings -- one file per profile, split out of
-# the old inline config.yaml `profiles:` block so a profile's history/
-# blast radius is fully independent of every other profile's. Same
-# git-ignore rationale as config.yaml itself: bootstrapped automatically
-# on first run from config.default.yaml's profiles, then yours forever.
-profiles/
+# Each profile's own strategy/risk definition -- tracked, unlike
+# config.yaml above: these are treated as versioned strategy logic (so a
+# new machine/Pi gets new strategies via `git pull` instead of a manual
+# copy), not per-machine account config. The tradeoff: an Edit Settings
+# change on one machine can now show as a tracked diff or conflict with a
+# `git pull` bringing in a change to the same profile, the same as any
+# other tracked file -- config.yaml itself stays gitignored specifically
+# to avoid that.
 profiles/*.bak
 profiles/*.tmp
 .env

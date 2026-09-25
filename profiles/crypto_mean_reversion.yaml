@@ -1,0 +1,45 @@
+display_name: Crypto Mean Reversion
+category: crypto
+state_file: data/state_crypto_mean_reversion.db
+starting_capital: 100000.0
+strategy_mode: crypto_mean_reversion
+# Crypto-only universe.
+universe_file: data/universe_crypto.csv
+# Crypto trades 24/7, no NSE session gate. No trend regime filter --
+# this strategy is explicitly counter-trend by design.
+regime:
+  enabled: false
+  index_symbol: "BTC-USD"
+strategy:
+  # In INR, like the rest of this book. Rs 48cr/day (~$5M) liquidity filter.
+  min_avg_daily_turnover_inr: 480000000
+  max_new_positions_per_scan: 3
+  # Time stop: a dip that hasn't bounced back within 5 days isn't a
+  # short-term mean-reversion trade anymore.
+  time_stop_days: 5
+  crypto_mean_reversion:
+    # Coin must stay above its own 100-day MA -- keeps this strategy
+    # from buying a coin that's simply in freefall, not dipping.
+    long_ma_days: 100
+    # The "mean" this strategy reverts to.
+    mean_ma_days: 20
+    # Must be at least 6% below the 20-day MA to count as oversold.
+    min_deviation_pct: 6.0
+    # RSI(14) must be at or below 35 to confirm the dip is real.
+    max_rsi: 35.0
+risk:
+  # Tighter stop than the trend-following strategies -- a mean-reversion
+  # trade that keeps falling instead of reverting is wrong, not just early.
+  stop_loss_pct: 8.0
+  trailing_stop_pct: 10.0
+  take_profit_pct: 0
+  position_size_pct_of_equity: 5.0
+  max_open_positions: 8
+  max_cash_deployed_per_scan_pct: 30.0
+  # 24h cooldown (crypto trades continuously)
+  reentry_cooldown_days: 1
+# Percentage exchange fee for crypto: 0.1% taker on most major exchanges
+execution:
+  fee_pct: 0.1
+  flat_charges_inr: 0
+  slippage_bps: 5.0
