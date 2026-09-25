@@ -1022,28 +1022,68 @@ class TradingEngine:
         log.info("Autonomous trading engine started. Universe size=%d", len(self.universe))
         while True:
             try:
-                # Hot-reload config if it has changed (e.g., via dashboard).
-                # Held under the lock alongside reload_profile()'s own swap so
-                # the two can't interleave and leave stale values in place.
-                if self.cfg.reload():
-                    strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
-                    risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
-                    # Profile-specific regime override (e.g. crypto disables
-                    # the Nifty 50 filter) -- must be re-derived the same way
-                    # __init__ does it, NOT reset to the bare global `regime:`
-                    # block, or a crypto profile's disabled-regime override
-                    # gets silently clobbered back to the Nifty 50 filter on
-                    # every hot config reload.
-                    regime_cfg = self.cfg.get_profile_regime_config(self.profile_name)
-                    with self._state_lock:
-                        self.strategy_cfg = strategy_cfg
-                        self.risk_cfg = risk_cfg
-                        self.regime_cfg = regime_cfg
-                        self.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
-                        self.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
-                        self.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
-                        self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
-                    log.info("Configuration hot-reloaded during run. New strategy/risk settings active.")
+                # self.cfg is ONE object shared by every profile's engine
+                # (see how `engines` is built in cli.py/app.py) -- its
+                # reload() tracks "have I re-read the file since it last
+                # changed" as a single piece of state on that shared
+                # object, not per caller. Gating this block on THIS call's
+                # True/False return, as it used to, meant only whichever
+                # engine happened to poll first after an edit actually saw
+                # True and refreshed itself; the other N-1 engines' calls
+                # all returned False (someone else already reloaded it)
+                # and silently kept running on stale settings indefinitely
+                # -- which one "won" was effectively random, depending on
+                # each engine's own sleep timing.
+                #
+                # So: call reload() unconditionally for its cheap side
+                # effect (an mtime check; it updates the shared cfg.raw
+                # only if the file actually changed since ANY engine last
+                # saw it), then unconditionally re-derive THIS engine's own
+                # local state from self.cfg every iteration regardless of
+                # what reload() returned this call -- cfg.raw already
+                # reflects the latest file contents one way or another, and
+                # a handful of dict lookups every exit_interval is free.
+                self.cfg.reload()
+                strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
+                risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
+                # Profile-specific regime override (e.g. crypto disables
+                # the Nifty 50 filter) -- must be re-derived the same way
+                # __init__ does it, NOT reset to the bare global `regime:`
+                # block, or a crypto profile's disabled-regime override
+                # gets silently clobbered back to the Nifty 50 filter on
+                # every hot config reload.
+                regime_cfg = self.cfg.get_profile_regime_config(self.profile_name)
+                exec_cfg = self.cfg.get_profile_execution_config(self.profile_name)
+                with self._state_lock:
+                    self.strategy_cfg = strategy_cfg
+                    self.risk_cfg = risk_cfg
+                    self.regime_cfg = regime_cfg
+                    self.risk.max_open_positions = risk_cfg.get("max_open_positions", 10)
+                    self.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
+                    self.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
+                    self.risk.fractional_quantities = self.cfg.get_profile_fractional_quantities(self.profile_name)
+                    # Broker's own execution-cost settings -- fee_pct etc.
+                    # are editable via Edit Settings, and nothing here used
+                    # to apply a changed value to the running broker, so it
+                    # kept silently charging the OLD rate on every fill
+                    # regardless of what was saved (the same gap
+                    # /api/reload-config's handler had).
+                    self.broker.fee_pct = exec_cfg.get("fee_pct", 0.0)
+                    self.broker.flat_charges_inr = exec_cfg.get("flat_charges_inr", 20.0)
+                    self.broker.slippage_bps = exec_cfg.get("slippage_bps", 5.0)
+                    self.universe = load_universe(self.cfg.get_profile_universe_file(self.profile_name))
+                    self.trades_24_7 = self.cfg.get_profile_trades_24_7(self.profile_name)
+                    self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
+                    # scan_interval/exit_interval are local to this loop,
+                    # read once before it started -- without re-reading them
+                    # here, engine.scan_interval_minutes/
+                    # exit_check_interval_minutes could be edited and saved
+                    # all day and an already-running engine would never
+                    # notice, contrary to what the Edit Settings panel's own
+                    # hint text promises ("apply most settings instantly
+                    # without restarting").
+                    scan_interval = self.cfg.get("engine", "scan_interval_minutes", default=15) * 60
+                    exit_interval = self.cfg.get("engine", "exit_check_interval_minutes", default=5) * 60
 
                 # Crypto profiles trade 24/7 and must never be gated by the
                 # NSE calendar (see self.trades_24_7's definition above) --
