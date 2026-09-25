@@ -88,6 +88,21 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
 
+    # crypto_breakout is its own strategy_mode (see crypto_breakout.py), not
+    # consolidation_breakout, so it needs its own subsection here -- without
+    # these, none of a Crypto Breakout profile's own tunables (base length,
+    # tightness, volume confirmation) were reachable from Edit Settings at
+    # all, only hand-editable in the profile YAML.
+    {"path": ("strategy", "crypto_breakout", "consolidation_days"), "type": "int", "min": 2, "max": 50,
+     "group": "Crypto Breakout", "label": "Consolidation period", "unit": "days",
+     "desc": "How many days the coin must hold a base before breaking out. Only applies when strategy mode is crypto_breakout."},
+    {"path": ("strategy", "crypto_breakout", "max_consolidation_range_pct"), "type": "float", "min": 1.0, "max": 100.0,
+     "group": "Crypto Breakout", "label": "Max base range", "unit": "%",
+     "desc": "How wide (high-to-low as % of average close) the base is allowed to be and still count as a tight consolidation. Only applies when strategy mode is crypto_breakout."},
+    {"path": ("strategy", "crypto_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
+     "group": "Crypto Breakout", "label": "Breakout volume", "unit": "× baseline",
+     "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is crypto_breakout."},
+
     {"path": ("strategy", "max_rsi"), "type": "float", "min": 0, "max": 100,
      "group": "Institutional Swing", "label": "Max RSI", "unit": "(0-100)",
      "desc": "RSI(14) a coin must be below to qualify as a bounce-in-progress. 50 is neutral; above means too hot. Only applies when strategy mode is crypto_institutional_swing."},
