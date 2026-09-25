@@ -23,7 +23,7 @@ from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
-from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum
+from ..strategy import consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, crypto_momentum, crypto_breakout
 from .market_hours import MarketCalendar
 
 log = logging.getLogger(__name__)
@@ -235,6 +235,8 @@ class TradingEngine:
                 should_exit, reason = long_term_trend.check_exit(pos, quote, history, cfg)
             elif mode == "crypto_momentum":
                 should_exit, reason = crypto_momentum.check_exit(pos, quote, history, cfg)
+            elif mode == "crypto_breakout":
+                should_exit, reason = crypto_breakout.check_exit(pos, quote, history, cfg)
             else:
                 should_exit, reason = exit_52w(pos, quote, history, cfg)
             if should_exit:
@@ -529,6 +531,43 @@ class TradingEngine:
                                           candidates=len(candidates), reasons=reasons)
             return crypto_momentum.rank_candidates(candidates)
 
+        if mode == "crypto_breakout":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    history = self.data.get_history(symbol, period="1y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = crypto_breakout.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("crypto_breakout: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "crypto_breakout scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return crypto_breakout.rank_candidates(candidates)
+
         # Default: 52w_high strategy
         # Fetch the benchmark index once per scan (cached) so every
         # candidate's relative strength is judged against the same frame,
@@ -652,6 +691,14 @@ class TradingEngine:
                 ccy = "$" if self.quote_currency == "USD" else "₹"
                 reason = (
                     f"consolidation_breakout score={cand.score:.1f} "
+                    f"breakout high {ccy}{cand.consolidation_high:.2f}, "
+                    f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
+                    f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline"
+                )
+            elif mode == "crypto_breakout":
+                ccy = "₹"  # Crypto book is always in INR (converted at data layer)
+                reason = (
+                    f"crypto_breakout score={cand.score:.1f} "
                     f"breakout high {ccy}{cand.consolidation_high:.2f}, "
                     f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
                     f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline"
