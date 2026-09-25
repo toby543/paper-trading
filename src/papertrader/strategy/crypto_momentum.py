@@ -166,9 +166,9 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
         return None
 
     # Score based on how far above MAs and RSI strength
-    ma_score = ((quote.ltp - ma50) / ma50) * 100  # How far above 50-day MA
-    rsi_score = (rsi14 - min_rsi) / (100 - min_rsi) * 100  # RSI strength
-    momentum_score = min(momentum_pct / min_momentum * 100, 100)  # Cap momentum contribution
+    ma_score = ((quote.ltp - ma50) / ma50) * 100 if ma50 > 0 else 0
+    rsi_score = (rsi14 - min_rsi) / (100 - min_rsi) * 100 if (100 - min_rsi) > 0 else 0
+    momentum_score = min(momentum_pct / min_momentum * 100, 100) if min_momentum > 0 else 0
 
     score = (ma_score * 0.4 + rsi_score * 0.4 + momentum_score * 0.2)
 
@@ -204,18 +204,18 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
 
     # Stop-loss
     stop_price = position.avg_price * (1 - stop_loss_pct / 100)
-    if quote.ltp < stop_price:
+    if quote.ltp <= stop_price:
         return True, f"stop_loss ({stop_loss_pct}%)"
 
     # Trailing-stop
     trail_price = position.highest_close_since_entry * (1 - trailing_stop_pct / 100)
-    if quote.ltp < trail_price:
+    if quote.ltp <= trail_price:
         return True, f"trailing_stop ({trailing_stop_pct}%)"
 
     # Take-profit (only if configured > 0)
     if take_profit_pct > 0:
         target_price = position.avg_price * (1 + take_profit_pct / 100)
-        if quote.ltp > target_price:
+        if quote.ltp >= target_price:
             return True, f"take_profit ({take_profit_pct}%)"
 
     # RSI momentum loss

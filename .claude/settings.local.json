@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(git commit -m 'Fix misleading comments about crypto turnover currency *)"
+      "Bash(git commit -m 'Fix misleading comments about crypto turnover currency *)",
+      "Bash(git push *)"
     ]
   }
 }

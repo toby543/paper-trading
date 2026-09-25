@@ -272,11 +272,13 @@ def evaluate_candidate(
 
     # Score: higher momentum and closer to breakout level score higher
     distance_from_breakout = max(0, consolidation_high - quote.ltp)
-    score = momentum - (distance_from_breakout / consolidation_high) * 10.0
+    score = momentum
+    if consolidation_high > 0:
+        score -= (distance_from_breakout / consolidation_high) * 10.0
 
     # Bonus for large-cap, low-beta stocks. Guard on market_cap_min: it is
     # unset by default, and `float > None` is a TypeError, not False.
-    if market_cap_min and market_cap_cr and market_cap_cr > market_cap_min:
+    if market_cap_min and market_cap_min > 0 and market_cap_cr and market_cap_cr > market_cap_min:
         score += min(2.0, (market_cap_cr - market_cap_min) / market_cap_min)
     if beta is not None and beta < 1.0:
         score += 1.0
