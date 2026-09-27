@@ -67,28 +67,45 @@ _SIMPLE_CRYPTO_STRATEGIES = {
 }
 
 
-# Trading-day approximation of "52 weeks", matching how a ~1y lookback
-# behaves elsewhere in this codebase (e.g. yfinance's period="1y").
+# Trading-day approximation of "52 weeks" for NSE equities, matching how a
+# ~1y lookback behaves elsewhere in this codebase (e.g. yfinance's
+# period="1y"). Crypto trades every calendar day, so its window is a true
+# 365 rows rather than this NSE trading-day count -- see WEEK52_WINDOW_DAYS.
 _WEEK52_TRADING_DAYS = 252
 
 # NSE trades roughly 250 days a year, so N trading days span appreciably
 # more than N calendar days. Conflating the two silently under-fetches.
+# Crypto has no such gap -- every day is a trading day -- so its ratio is 1.0.
 _CALENDAR_DAYS_PER_TRADING_DAY = 365.0 / 250.0
 
 
-def _calendar_days_for(trading_days: int) -> int:
+def _calendar_days_for(trading_days: int, trades_24_7: bool = False) -> int:
     """Calendar-day span that reliably contains `trading_days` sessions,
-    with a margin for holiday clusters (Diwali/Holi weeks, etc)."""
+    with a margin for holiday clusters (Diwali/Holi weeks, etc). Crypto
+    (trades_24_7) needs no NSE-session/calendar-day conversion or holiday
+    margin since every calendar day is already a trading day."""
+    if trades_24_7:
+        return trading_days
     return int(math.ceil(trading_days * _CALENDAR_DAYS_PER_TRADING_DAY)) + 30
 
 
-def _required_trading_days(strategy_cfg: dict) -> int:
+def _week52_window_days(trades_24_7: bool) -> int:
+    """Row-count span of history that spans a genuine 52 weeks. NSE data is
+    one row per trading day (~252/year), so 252 rows ~= 52 weeks; crypto
+    data is one row per calendar day (365/year), so it takes 365 rows to
+    span the same 52 weeks -- using the NSE constant for crypto would slice
+    a window ~8.3 months wide and call it "52-week high", disagreeing with
+    the live crypto quotes computed over real calendar days."""
+    return 365 if trades_24_7 else _WEEK52_TRADING_DAYS
+
+
+def _required_trading_days(strategy_cfg: dict, trades_24_7: bool = False) -> int:
     """Longest lookback any filter in this strategy config needs before it
     can return a value at all."""
     needed = max(
         int(strategy_cfg.get("slow_ma_days", 200) or 0),
         int(strategy_cfg.get("fast_ma_days", 50) or 0),
-        _WEEK52_TRADING_DAYS,  # _quote_for's 52-week high/low window
+        _week52_window_days(trades_24_7),  # _quote_for's 52-week high/low window
     )
     mode = strategy_cfg.get("mode", "52w_high")
     if mode == "cross_sectional_momentum":
@@ -233,6 +250,10 @@ class Backtester:
         # converted here exactly as MarketDataClient does for live trading.
         # See _crypto_fx_rate below for what goes wrong without this.
         self.quote_currency = cfg.get_profile_quote_currency(self.profile_name)
+        # Whether this profile trades around the clock (crypto) -- gates the
+        # NSE-trading-day/calendar-day conversions below and the 52-week
+        # window in _quote_for, exactly like the live engine/scheduler.
+        self.trades_24_7 = cfg.get_profile_trades_24_7(self.profile_name)
 
         # Make sure the fetch window is wide enough that every lookback this
         # profile needs is already satisfied on the FIRST simulated day --
@@ -243,7 +264,10 @@ class Backtester:
         # calendar days, so they have to be converted, not compared directly.
         self.lookback_buffer_days = max(
             self.lookback_buffer_days,
-            _calendar_days_for(_required_trading_days(self.strategy_cfg)),
+            _calendar_days_for(
+                _required_trading_days(self.strategy_cfg, self.trades_24_7),
+                self.trades_24_7,
+            ),
         )
 
         self.risk = RiskManager(
@@ -398,7 +422,7 @@ class Backtester:
         # trading) rather than letting it through as a real quote.
         if pd.isna(last["Close"]) or pd.isna(prev["Close"]):
             return None
-        window = history_upto.tail(_WEEK52_TRADING_DAYS)
+        window = history_upto.tail(_week52_window_days(self.trades_24_7))
         return Quote(
             symbol=symbol,
             ltp=float(last["Close"]),
