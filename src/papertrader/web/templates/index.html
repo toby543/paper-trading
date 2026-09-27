@@ -2296,8 +2296,14 @@ function renderComparison(data, liveSummary) {
   // already-fetched data from this same refresh tick, so patching it in
   // here costs nothing extra.
   if (liveSummary && liveSummary.positions) {
+    // Keyed on liveSummary.profile (the profile the server actually built
+    // this summary for), not the ACTIVE_PROFILE constant baked in at page
+    // load: after switching profiles, ACTIVE_PROFILE stays stale until the
+    // page reloads, while /api/summary already reflects the new profile --
+    // merging on the stale constant would attribute the new profile's live
+    // numbers to the old profile's comparison row.
     const unrealized = liveSummary.positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
-    allRows = allRows.map(r => r.profile === ACTIVE_PROFILE ? {
+    allRows = allRows.map(r => r.profile === liveSummary.profile ? {
       ...r,
       total_equity: liveSummary.total_equity,
       total_return_pct: liveSummary.total_pnl_pct,

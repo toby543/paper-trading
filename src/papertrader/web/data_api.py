@@ -299,6 +299,7 @@ def build_summary(engine) -> dict:
 
     return {
         "as_of": datetime.now().isoformat(timespec="seconds"),
+        "profile": engine.profile_name,
         "market_open": market_open,
         "regime": _market_regime(engine),
         "insights": insights,
