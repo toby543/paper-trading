@@ -43,6 +43,22 @@ class DataUnavailableError(RuntimeError):
     """Raised when neither NSE nor the fallback source could serve a quote."""
 
 
+# Quote currencies that mark a symbol as a crypto pair in Yahoo Finance's
+# "<ASSET>-<QUOTE>" convention. Matched as a whole suffix so that NSE codes
+# which legitimately contain a hyphen (BAJAJ-AUTO) are not mistaken for
+# crypto -- see NSEClient._is_crypto_symbol for what that misread costs.
+_CRYPTO_QUOTE_CURRENCIES = frozenset({"USD", "USDT", "USDC", "INR", "EUR", "GBP", "BTC", "ETH"})
+
+
+def is_crypto_symbol(symbol: str) -> bool:
+    """True for a Yahoo-style crypto pair ("BTC-USD"), false for an NSE
+    equity code -- including the hyphenated ones. See
+    NSEClient._is_crypto_symbol for the full rationale; this is the single
+    definition, shared with the backtester so the two can't drift apart."""
+    _asset, sep, quote = symbol.rpartition("-")
+    return bool(sep) and quote in _CRYPTO_QUOTE_CURRENCIES
+
+
 @dataclass
 class Quote:
     symbol: str
@@ -152,10 +168,18 @@ class MarketDataClient:
         valid Yahoo Finance tickers. Without this check, a crypto symbol
         would get mangled into "BTC-USD.NS" (not a real ticker, always
         fails) and would also get sent through the NSE equity-quote API,
-        which has no concept of crypto pairs. Yahoo Finance's crypto
-        ticker convention is always "<ASSET>-<FIAT>", so a literal "-" is
-        a reliable signal -- no bare NSE symbol contains one."""
-        return "-" in symbol
+        which has no concept of crypto pairs.
+
+        Match the QUOTE CURRENCY, not a bare "-". NSE codes do contain
+        hyphens -- BAJAJ-AUTO is in both data/universe.csv and
+        data/universe_nifty500.csv -- and treating one as crypto is not a
+        harmless misroute: the Binance lookup for "BAJAJUSDT" fails, which
+        trips CryptoDataClient's process-wide `broken` circuit breaker, so
+        a single hyphenated equity silently downgrades EVERY real crypto
+        symbol to the slower fallbacks for the rest of the run. (The stock
+        itself then also disappears from every scan, since the crypto path
+        never appends ".NS".)"""
+        return is_crypto_symbol(symbol)
 
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:

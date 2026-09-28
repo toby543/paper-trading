@@ -383,7 +383,10 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
             # reach storage, same as every other figure on this row.
             positions_value = total_equity - cash
             cost_basis = sum(p.cost_basis for p in positions.values())
-            unrealized_pnl = positions_value - cost_basis
+            # Net of entry charges, matching Position.unrealized_pnl, so
+            # this column agrees with the per-position P&L on the same page.
+            entry_charges = sum(p.entry_charges for p in positions.values())
+            unrealized_pnl = positions_value - cost_basis - entry_charges
 
             rows.append({
                 "profile": profile_name,

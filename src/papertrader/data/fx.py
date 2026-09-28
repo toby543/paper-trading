@@ -13,6 +13,7 @@ consistent currency and needs no conversion logic of its own.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 
@@ -34,6 +35,25 @@ _TTL_SECONDS = 3600
 # catastrophic loss rather than like the data problem it actually is.
 _FALLBACK_USD_INR = 90.0
 
+# A fetched rate outside this band is treated as bad data, not as a rate.
+# `rate > 0` alone lets through the two ways this feed actually fails:
+# an inverted quote (~0.011, INR/USD) and a unit quote (1.0), either of
+# which silently prices the entire crypto book at a ~90th of its value --
+# exactly what _FALLBACK_USD_INR exists to avoid. The band is deliberately
+# wide: it is a sanity check on a broken feed, not a forecast.
+_MIN_PLAUSIBLE_USD_INR = 40.0
+_MAX_PLAUSIBLE_USD_INR = 250.0
+
+# How long a cached rate may keep standing in for a failed refresh. Past
+# this, serving it is no longer "slightly stale but the right order of
+# magnitude" -- a rate from days ago is its own silent mispricing, so fall
+# back to the known-plausible constant and say so loudly instead.
+_MAX_STALE_SECONDS = 24 * 3600
+
+
+def _implausible(rate: float) -> bool:
+    return not (_MIN_PLAUSIBLE_USD_INR <= rate <= _MAX_PLAUSIBLE_USD_INR)
+
 
 class _RateCache:
     def __init__(self) -> None:
@@ -53,19 +73,26 @@ class _RateCache:
                 if hist.empty:
                     raise ValueError("no USD/INR history returned")
                 rate = float(hist["Close"].iloc[-1])
-                if not (rate > 0):
+                if not math.isfinite(rate) or _implausible(rate):
                     raise ValueError(f"implausible USD/INR rate {rate}")
                 self._rate = rate
                 self._fetched_at = now
                 log.info("USD/INR rate refreshed: %.4f", rate)
                 return rate
             except Exception as exc:  # noqa: BLE001 - never let FX break a scan
-                if self._rate is not None:
-                    # A stale rate is far better than no rate: it keeps the
-                    # book in the right order of magnitude while the fetch
-                    # recovers on a later cycle.
-                    log.warning("USD/INR refresh failed (%s); reusing cached %.4f", exc, self._rate)
+                staleness = now - self._fetched_at
+                if self._rate is not None and staleness < _MAX_STALE_SECONDS:
+                    # A slightly stale rate is far better than no rate: it
+                    # keeps the book in the right order of magnitude while
+                    # the fetch recovers on a later cycle.
+                    log.warning("USD/INR refresh failed (%s); reusing cached %.4f (%.0fm old)",
+                                exc, self._rate, staleness / 60.0)
                     return self._rate
+                if self._rate is not None:
+                    log.error("USD/INR refresh failing for %.1fh; the cached %.4f is too old to "
+                              "trust, falling back to %.2f", staleness / 3600.0, self._rate,
+                              _FALLBACK_USD_INR)
+                    return _FALLBACK_USD_INR
                 log.warning("USD/INR unavailable (%s); falling back to %.2f", exc, _FALLBACK_USD_INR)
                 return _FALLBACK_USD_INR
 

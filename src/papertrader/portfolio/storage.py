@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -28,7 +29,13 @@ CREATE TABLE IF NOT EXISTS positions (
     quantity REAL NOT NULL,
     avg_price REAL NOT NULL,
     entry_date TEXT NOT NULL,
-    highest_close_since_entry REAL NOT NULL
+    highest_close_since_entry REAL NOT NULL,
+    -- Charges paid to OPEN this position (brokerage/exchange fees), kept
+    -- separate from avg_price so the strategies' stop/target arithmetic
+    -- still works off the raw fill price. Without it the buy-side cost is
+    -- lost at entry and never appears in realized or unrealized P&L --
+    -- see PaperBroker.sell and Position.unrealized_pnl.
+    entry_charges REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -56,16 +63,57 @@ class Storage:
     def __init__(self, db_path: str, starting_capital: float):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
+        # Per-thread, because one Storage is shared between its engine's
+        # background thread and the Flask request threads reading it.
+        self._tx = threading.local()
         self._init_db(starting_capital)
+
+    def _open(self) -> sqlite3.Connection:
+        # busy_timeout so a reader that arrives mid-write waits for the
+        # lock instead of failing the whole scan with "database is locked".
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     @contextmanager
     def _conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        active = getattr(self._tx, "conn", None)
+        if active is not None:
+            # Inside transaction(): join it rather than opening a second
+            # connection, so the caller's writes land in one atomic unit.
+            yield active
+            return
+        conn = self._open()
         try:
             yield conn
             conn.commit()
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Group several writes into one all-or-nothing commit.
+
+        Each individual accessor here opens and commits its own
+        connection, so a multi-step ledger change (position + cash +
+        trade row) would otherwise be three separate transactions: an
+        exception partway leaves cash moved with no position, or a
+        position closed with no SELL row -- which also silently drops that
+        trade's realized P&L and its re-entry cooldown. Callers that must
+        not half-apply wrap the sequence in this."""
+        if getattr(self._tx, "conn", None) is not None:
+            yield  # already inside one; the outermost owns commit/rollback
+            return
+        conn = self._open()
+        self._tx.conn = conn
+        try:
+            yield
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            self._tx.conn = None
             conn.close()
 
     def _init_db(self, starting_capital: float) -> None:
@@ -81,6 +129,13 @@ class Storage:
             if "realized_pnl" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
             self._backfill_realized_pnl(conn)
+            position_cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
+            if "entry_charges" not in position_cols:
+                # Existing rows default to 0: what they actually paid to
+                # open is not recoverable from the ledger, and 0 keeps
+                # their P&L reading exactly as it does today rather than
+                # inventing a number. New positions record it properly.
+                conn.execute("ALTER TABLE positions ADD COLUMN entry_charges REAL NOT NULL DEFAULT 0")
             account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
             if "last_scan_at" not in account_cols:
                 conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")
@@ -162,6 +217,7 @@ class Storage:
                 avg_price=r["avg_price"],
                 entry_date=r["entry_date"],
                 highest_close_since_entry=r["highest_close_since_entry"],
+                entry_charges=r["entry_charges"],
             )
             for r in rows
         }
@@ -169,14 +225,16 @@ class Storage:
     def upsert_position(self, pos: Position) -> None:
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO positions (symbol, quantity, avg_price, entry_date, highest_close_since_entry)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO positions (symbol, quantity, avg_price, entry_date, highest_close_since_entry, entry_charges)
+                   VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol) DO UPDATE SET
                      quantity=excluded.quantity,
                      avg_price=excluded.avg_price,
                      entry_date=excluded.entry_date,
-                     highest_close_since_entry=excluded.highest_close_since_entry""",
-                (pos.symbol, pos.quantity, pos.avg_price, pos.entry_date, pos.highest_close_since_entry),
+                     highest_close_since_entry=excluded.highest_close_since_entry,
+                     entry_charges=excluded.entry_charges""",
+                (pos.symbol, pos.quantity, pos.avg_price, pos.entry_date, pos.highest_close_since_entry,
+                 pos.entry_charges),
             )
 
     def delete_position(self, symbol: str) -> None:

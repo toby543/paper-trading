@@ -1044,17 +1044,25 @@ class TradingEngine:
                 # reflects the latest file contents one way or another, and
                 # a handful of dict lookups every exit_interval is free.
                 self.cfg.reload()
-                strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
-                risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
-                # Profile-specific regime override (e.g. crypto disables
-                # the Nifty 50 filter) -- must be re-derived the same way
-                # __init__ does it, NOT reset to the bare global `regime:`
-                # block, or a crypto profile's disabled-regime override
-                # gets silently clobbered back to the Nifty 50 filter on
-                # every hot config reload.
-                regime_cfg = self.cfg.get_profile_regime_config(self.profile_name)
-                exec_cfg = self.cfg.get_profile_execution_config(self.profile_name)
+                # Read AND apply under one lock hold. Split across the lock
+                # boundary, these are keyed off a self.profile_name that a
+                # concurrent reload_profile() can change in between: this
+                # thread would then overwrite the new profile's strategy,
+                # risk, regime and fee settings with the old profile's,
+                # while self.storage/self.broker/self.universe already point
+                # at the new one -- the engine trading one profile's ledger
+                # under another profile's rules until the next iteration.
                 with self._state_lock:
+                    strategy_cfg = self.cfg.get_profile_strategy_config(self.profile_name)
+                    risk_cfg = self.cfg.get_profile_risk_config(self.profile_name)
+                    # Profile-specific regime override (e.g. crypto disables
+                    # the Nifty 50 filter) -- must be re-derived the same way
+                    # __init__ does it, NOT reset to the bare global `regime:`
+                    # block, or a crypto profile's disabled-regime override
+                    # gets silently clobbered back to the Nifty 50 filter on
+                    # every hot config reload.
+                    regime_cfg = self.cfg.get_profile_regime_config(self.profile_name)
+                    exec_cfg = self.cfg.get_profile_execution_config(self.profile_name)
                     self.strategy_cfg = strategy_cfg
                     self.risk_cfg = risk_cfg
                     self.regime_cfg = regime_cfg

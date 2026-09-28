@@ -62,31 +62,43 @@ class PaperBroker:
         fill_price = self._fill_price(ltp, "BUY")
         charges = self._charges(fill_price, quantity)
         cost = fill_price * quantity + charges
-        cash = self.storage.get_cash()
-        if cost > cash:
-            raise InsufficientFundsError(f"Need {cost:.2f}, have {cash:.2f} for {symbol}")
-
-        positions = self.storage.get_positions()
-        existing = positions.get(symbol)
         now = datetime.now().isoformat(timespec="seconds")
-        if existing:
-            total_qty = existing.quantity + quantity
-            new_avg = (existing.avg_price * existing.quantity + fill_price * quantity) / total_qty
-            pos = Position(
-                symbol=symbol, quantity=total_qty, avg_price=new_avg,
-                entry_date=existing.entry_date, highest_close_since_entry=max(existing.highest_close_since_entry, ltp),
-            )
-        else:
-            pos = Position(symbol=symbol, quantity=quantity, avg_price=fill_price, entry_date=now, highest_close_since_entry=ltp)
-
-        self.storage.upsert_position(pos)
-        self.storage.set_cash(cash - cost)
         trade = Trade(id=None, symbol=symbol, side="BUY", quantity=quantity, price=fill_price, charges=charges, reason=reason, timestamp=now)
-        self.storage.record_trade(trade)
+
+        # One transaction: the cash check, the position and the trade row
+        # either all land or none do. Three separate commits could debit
+        # cash for a position that was never recorded.
+        with self.storage.transaction():
+            cash = self.storage.get_cash()
+            if cost > cash:
+                raise InsufficientFundsError(f"Need {cost:.2f}, have {cash:.2f} for {symbol}")
+
+            existing = self.storage.get_positions().get(symbol)
+            if existing:
+                total_qty = existing.quantity + quantity
+                new_avg = (existing.avg_price * existing.quantity + fill_price * quantity) / total_qty
+                pos = Position(
+                    symbol=symbol, quantity=total_qty, avg_price=new_avg,
+                    entry_date=existing.entry_date, highest_close_since_entry=max(existing.highest_close_since_entry, ltp),
+                    entry_charges=existing.entry_charges + charges,
+                )
+            else:
+                pos = Position(symbol=symbol, quantity=quantity, avg_price=fill_price, entry_date=now,
+                               highest_close_since_entry=ltp, entry_charges=charges)
+
+            self.storage.upsert_position(pos)
+            self.storage.set_cash(cash - cost)
+            self.storage.record_trade(trade)
         log.info("BUY  %-10s qty=%-12.8g price=%-10.2f reason=%s", symbol, quantity, fill_price, reason)
         return trade
 
     def sell(self, symbol: str, quantity: float, ltp: float, reason: str) -> Trade:
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
+        with self.storage.transaction():
+            return self._sell_locked(symbol, quantity, ltp, reason)
+
+    def _sell_locked(self, symbol: str, quantity: float, ltp: float, reason: str) -> Trade:
         positions = self.storage.get_positions()
         existing = positions.get(symbol)
         # Tolerance, not a bare `<`: with fractional crypto quantities a
@@ -100,7 +112,14 @@ class PaperBroker:
         charges = self._charges(fill_price, quantity)
         proceeds = fill_price * quantity - charges
         now = datetime.now().isoformat(timespec="seconds")
-        realized_pnl = (fill_price - existing.avg_price) * quantity - charges
+        # The share of the entry cost this parcel carries. Omitting it made
+        # realized_pnl overstate the true cash result by every rupee of
+        # brokerage paid to get in -- so "realized + unrealized" and
+        # "equity - starting capital" disagreed on the same dashboard, and
+        # always in the strategy's favour.
+        portion = quantity / existing.quantity if existing.quantity > 0 else 1.0
+        released_entry_charges = existing.entry_charges * min(portion, 1.0)
+        realized_pnl = (fill_price - existing.avg_price) * quantity - charges - released_entry_charges
 
         remaining = existing.quantity - quantity
         # `== 0` would strand an un-closeable dust position: subtracting
@@ -112,6 +131,7 @@ class PaperBroker:
             self.storage.delete_position(symbol)
         else:
             existing.quantity = remaining
+            existing.entry_charges = max(existing.entry_charges - released_entry_charges, 0.0)
             self.storage.upsert_position(existing)
 
         self.storage.set_cash(self.storage.get_cash() + proceeds)

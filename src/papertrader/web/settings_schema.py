@@ -6,6 +6,7 @@ browser) just by existing in config.yaml.
 """
 from __future__ import annotations
 
+import math
 import re
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -451,6 +452,13 @@ def coerce_and_validate(path: tuple[str, ...], raw_value):
             value = int(raw_value) if kind == "int" else float(raw_value)
         except (TypeError, ValueError):
             raise ValueError("expected a number") from None
+        # Explicitly, before the bounds below: every comparison against NaN
+        # is False, so "nan" would satisfy both of them and be persisted to
+        # the profile. It then either kills that profile's scan thread on
+        # every cycle (int(nan // price) raises) or, on a stop-loss, makes
+        # the stop silently unreachable for the same reason.
+        if not math.isfinite(value):
+            raise ValueError("expected a finite number")
         if "min" in spec and value < spec["min"]:
             raise ValueError(f"must be >= {spec['min']}")
         if "max" in spec and value > spec["max"]:

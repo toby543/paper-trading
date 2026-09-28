@@ -26,7 +26,7 @@ import pandas as pd
 
 from ..config import Config
 from ..data import price_cache
-from ..data.nse_client import Quote
+from ..data.nse_client import Quote, is_crypto_symbol
 from ..data.universe import load_universe
 from ..portfolio.broker import InsufficientFundsError, PaperBroker
 from ..portfolio.storage import Storage
@@ -341,7 +341,7 @@ class Backtester:
         last_call = 0.0
         cache_hits = 0
         for i, symbol in enumerate(self.universe):
-            is_crypto = "-" in symbol
+            is_crypto = is_crypto_symbol(symbol)
             cached = None if self.refresh_cache else price_cache.load(symbol)
             if price_cache.covers(cached, fetch_start, fetch_end):
                 sliced = price_cache.slice_range(cached, fetch_start, fetch_end)
@@ -479,7 +479,7 @@ class Backtester:
         series -- the same simplification the live data layer makes, so
         backtest and live agree with each other.
         """
-        if not any("-" in symbol for symbol in self.universe):
+        if not any(is_crypto_symbol(symbol) for symbol in self.universe):
             return 1.0  # equity-only universe, nothing to convert
         from ..data.fx import conversion_rate
 
@@ -559,13 +559,16 @@ class Backtester:
             if not should_exit:
                 continue
 
-            pre_qty, pre_avg = pos.quantity, pos.avg_price
+            pre_qty = pos.quantity
             try:
                 trade = self.broker.sell(symbol, pre_qty, quote.ltp, reason)
             except ValueError:
                 continue
             self._sold_on[symbol] = day
-            realized = pre_qty * (trade.price - pre_avg) - trade.charges
+            # trade.realized_pnl, not a re-derivation: the broker's figure
+            # also nets off the charges paid to OPEN the position, so the
+            # backtest's reported P&L matches the live ledger's definition.
+            realized = trade.realized_pnl
             trade_pnls.append(realized)
             trade_log.append({
                 "date": str(day.date()), "side": "SELL", "symbol": symbol,
