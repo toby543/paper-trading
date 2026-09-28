@@ -59,6 +59,11 @@ def update_config_file(path: str, updates: list[tuple[list[str], object]]) -> No
             tmp_path = path + ".tmp"
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 yaml.dump(data, fh)
+                # Durable before the rename. os.replace is atomic against
+                # a concurrent reader, but a power cut can still land the
+                # rename without the bytes, truncating live config.
+                fh.flush()
+                os.fsync(fh.fileno())
             log.info("Wrote temp file: %s", tmp_path)
 
             os.replace(tmp_path, path)

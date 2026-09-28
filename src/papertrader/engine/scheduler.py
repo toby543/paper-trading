@@ -65,6 +65,10 @@ class TradingEngine:
         # the instant it takes to copy a small dict, so contention here is
         # never a real concern the way it is for _state_lock.
         self._scan_diagnostics_lock = threading.Lock()
+        # Per-thread: the dashboard's read-only candidate preview runs a
+        # full scan from a Flask thread and must not overwrite the
+        # autonomous scan's diagnostics. See find_candidates.
+        self._diagnostics_suppressed = threading.local()
         self._last_scan_diagnostics: dict | None = None
         self.calendar = MarketCalendar(
             timezone=cfg.get("engine", "timezone", default="Asia/Kolkata"),
@@ -282,6 +286,8 @@ class TradingEngine:
         `status` is one of "portfolio_full", "regime_blocked", "scanned",
         or "scan_failed" -- see get_scan_diagnostics()'s docstring for how
         the dashboard uses each."""
+        if getattr(self._diagnostics_suppressed, "on", False):
+            return
         with self._scan_diagnostics_lock:
             self._last_scan_diagnostics = {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -302,7 +308,27 @@ class TradingEngine:
         with self._scan_diagnostics_lock:
             return dict(self._last_scan_diagnostics) if self._last_scan_diagnostics else None
 
-    def find_candidates(self, exclude_symbols: set[str] | None = None) -> list:
+    def find_candidates(self, exclude_symbols: set[str] | None = None,
+                        record_diagnostics: bool = True) -> list:
+        """See _find_candidates_impl. `record_diagnostics=False` runs the
+        scan without touching this engine's last-scan snapshot.
+
+        The dashboard's candidate preview calls this from a Flask thread
+        with a different exclude set (no re-entry cooldown), and every
+        recording site inside overwrote the autonomous scan's snapshot --
+        so the Insights panel would report counts, and "why nothing was
+        bought" reasons, from a preview the engine never acted on.
+        Thread-local, because the preview and the engine's own scan run
+        concurrently in different threads on the same object.
+        """
+        previous = getattr(self._diagnostics_suppressed, "on", False)
+        self._diagnostics_suppressed.on = not record_diagnostics
+        try:
+            return self._find_candidates_impl(exclude_symbols)
+        finally:
+            self._diagnostics_suppressed.on = previous
+
+    def _find_candidates_impl(self, exclude_symbols: set[str] | None = None) -> list:
         """Evaluate the whole universe against the strategy right now and
         return every currently-qualifying candidate, ranked. Read-only --
         places no trades, and does NOT apply the room/regime short-circuits
@@ -898,7 +924,7 @@ class TradingEngine:
             qty = self.risk.position_size_shares(equity, cand.ltp)
             if qty <= 0:
                 continue
-            cost_estimate = qty * cand.ltp
+            cost_estimate = self.broker.estimated_buy_cost(cand.ltp, qty)
             if spent + cost_estimate > scan_budget:
                 log.info("Per-scan cash budget reached; deferring %s to next scan", cand.symbol)
                 continue

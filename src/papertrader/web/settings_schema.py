@@ -485,9 +485,18 @@ def coerce_and_validate(path: tuple[str, ...], raw_value):
 
     if kind in ("int", "float"):
         try:
-            value = int(raw_value) if kind == "int" else float(raw_value)
-        except (TypeError, ValueError):
-            raise ValueError("expected a number") from None
+            if kind == "int":
+                # via float first, so a fractional value is REJECTED rather
+                # than silently truncated: int(3.99) is 3, and a user who
+                # typed 3.99 for a day count got 3 saved with no warning.
+                as_float = float(raw_value)
+                if not as_float.is_integer():
+                    raise ValueError("expected a whole number")
+                value = int(as_float)
+            else:
+                value = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc) if "whole number" in str(exc) else "expected a number") from None
         # Explicitly, before the bounds below: every comparison against NaN
         # is False, so "nan" would satisfy both of them and be persisted to
         # the profile. It then either kills that profile's scan thread on

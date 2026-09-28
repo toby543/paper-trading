@@ -1153,6 +1153,17 @@ const fmtInt = (n) => Number(n ?? 0).toLocaleString(NUM_LOCALE);
 const fmtQty = (n) => Number(n ?? 0).toLocaleString(NUM_LOCALE, IS_CRYPTO_PROFILE
   ? { minimumFractionDigits: 0, maximumFractionDigits: 8 }
   : { maximumFractionDigits: 0 });
+// Prices, as opposed to currency totals: a flat 2 decimals is right for a
+// Rs 3,400 share and useless for a token quoted near Rs 0.0009, which
+// rendered as "0.00" for both its price and its average. Scale the
+// precision to the magnitude, mirroring _round_price in data_api.py.
+// Totals (market value, P&L) keep fmt -- 2dp is correct for those.
+const fmtPrice = (n) => {
+  const v = Number(n ?? 0);
+  const m = Math.abs(v);
+  const dp = m >= 100 ? 2 : m >= 1 ? 4 : m >= 0.0001 ? 6 : 10;
+  return v.toLocaleString(NUM_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: dp });
+};
 const pnlClass = (n) => n > 0 ? "up" : (n < 0 ? "down" : "");
 const signed = (n) => (Number(n ?? 0) >= 0 ? "+" : "") + fmt(n);
 const shortDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
@@ -1220,9 +1231,9 @@ function renderPositions(s) {
     <tr>
       <td class="sym">${p.symbol}<span class="exch">${EXCH}</span></td>
       <td class="mono" data-label="Qty">${fmtQty(p.quantity)}</td>
-      <td class="mono" data-label="Avg">${fmt(p.avg_price)}</td>
-      <td class="mono" data-label="LTP">${fmt(p.ltp)}</td>
-      <td class="mono" data-label="From 52W High" title="${p.week52_high !== null && p.week52_high !== undefined ? "52w high: " + CCY + fmt(p.week52_high) : ""}">${fromHigh}</td>
+      <td class="mono" data-label="Avg">${fmtPrice(p.avg_price)}</td>
+      <td class="mono" data-label="LTP" title="${p.price_stale ? "No live quote - valued at entry price" : ""}">${p.price_stale ? "—" : fmtPrice(p.ltp)}</td>
+      <td class="mono" data-label="From 52W High" title="${p.week52_high !== null && p.week52_high !== undefined ? "52w high: " + CCY + fmtPrice(p.week52_high) : ""}">${fromHigh}</td>
       <td class="mono" data-label="Mkt Value">${fmt(p.market_value)}</td>
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
@@ -1245,7 +1256,7 @@ function renderTrades(trades) {
       </div>
       <div class="ticker-mid">
         <span class="ticker-sym">${t.symbol}</span>
-        <span class="ticker-detail mono">${fmtQty(t.quantity)} @ ${CCY}${fmt(t.price)}</span>
+        <span class="ticker-detail mono">${fmtQty(t.quantity)} @ ${CCY}${fmtPrice(t.price)}</span>
         ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}${CCY}${fmt(t.realized_pnl)}</span>` : ""}
       </div>
       <div class="ticker-reason">${t.reason}</div>
@@ -2063,7 +2074,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "consolidation_breakout") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
       <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
@@ -2073,7 +2084,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "pivot_supertrend") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="R1">${CCY}${fmt(c.r1)}</td>
       <td class="mono up" data-label="Above R1">+${c.pct_above_r1.toFixed(1)}%</td>
       <td class="mono" data-label="SuperTrend">${CCY}${fmt(c.supertrend_value)}</td>
@@ -2084,7 +2095,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "trend_pullback") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Recent High">${CCY}${fmt(c.recent_high)}</td>
       <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
@@ -2094,7 +2105,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "long_term_trend") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="200DMA">${CCY}${fmt(c.fast_ma)}</td>
       <td class="mono" data-label="400DMA">${CCY}${fmt(c.slow_ma)}</td>
       <td class="mono up" data-label="1Y Return">+${c.momentum_return_pct.toFixed(1)}%</td>
@@ -2104,7 +2115,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_momentum") {
     return `
       <td class="sym">${c.symbol}<span class="exch">CRYPTO</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="20DMA">${fmt(c.ma20)}</td>
       <td class="mono" data-label="50DMA">${fmt(c.ma50)}</td>
       <td class="mono" data-label="RSI">${c.rsi.toFixed(1)}</td>
@@ -2115,7 +2126,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_breakout") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
       <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
@@ -2125,7 +2136,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_institutional_swing") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="20DMA">${fmt(c.ma20)}</td>
       <td class="mono" data-label="50DMA">${fmt(c.ma50)}</td>
       <td class="mono" data-label="200DMA">${fmt(c.ma200)}</td>
@@ -2137,7 +2148,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_mean_reversion") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Mean MA">${CCY}${fmt(c.mean_ma)}</td>
       <td class="mono down" data-label="Below Mean">-${c.deviation_pct.toFixed(1)}%</td>
       <td class="mono" data-label="RSI">${c.rsi.toFixed(1)}</td>
@@ -2147,7 +2158,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_trend_pullback") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Recent High">${CCY}${fmt(c.recent_high)}</td>
       <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
@@ -2157,7 +2168,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_breakout_retest") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Breakout Level">${CCY}${fmt(c.breakout_level)}</td>
       <td class="mono" data-label="From Level">${c.pct_from_level.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
@@ -2167,7 +2178,7 @@ function watchlistRowHtml(mode, c) {
   if (mode === "crypto_pairs_trading") {
     return `
       <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
       <td class="mono" data-label="Ratio vs BTC">${c.ratio.toPrecision(4)}</td>
       <td class="mono" data-label="Ratio Mean">${c.ratio_mean.toPrecision(4)}</td>
       <td class="mono down" data-label="Z-Score">${c.z_score.toFixed(2)}</td>
@@ -2177,7 +2188,7 @@ function watchlistRowHtml(mode, c) {
   // 52w_high and cross_sectional_momentum share this shape.
   return `
     <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-    <td class="mono" data-label="LTP">${fmt(c.ltp)}</td>
+    <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
     <td class="mono" data-label="From 52W High" title="52w high: ${CCY}${fmt(c.week52_high)}">${c.pct_from_52w_high <= 0.05 ? "At high" : "-" + c.pct_from_52w_high.toFixed(1) + "%"}</td>
     <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
     <td class="mono ${c.relative_strength_pct === null ? "" : (c.relative_strength_pct >= 0 ? "up" : "down")}" data-label="RS vs Index">${c.relative_strength_pct === null ? "—" : (c.relative_strength_pct >= 0 ? "+" : "") + c.relative_strength_pct.toFixed(1) + "pp"}</td>

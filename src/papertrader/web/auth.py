@@ -67,12 +67,20 @@ def _save_auth_store(store: dict) -> None:
     tmp_path = AUTH_FILE + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as fh:
         json.dump(store, fh, indent=2)
-    os.replace(tmp_path, AUTH_FILE)
-    # 0600: this file holds password hashes.
+        # Durable before the rename: os.replace is atomic with respect to
+        # readers, but without this the new contents can still be lost to
+        # a power cut while the rename survives, leaving an empty file
+        # where the password hashes were.
+        fh.flush()
+        os.fsync(fh.fileno())
+    # 0600 on the TEMP file, before it becomes AUTH_FILE. Applying it
+    # afterwards left a window in which the hashes existed at the default
+    # umask -- and on a fresh install that window is the file's creation.
     try:
-        os.chmod(AUTH_FILE, 0o600)
+        os.chmod(tmp_path, 0o600)
     except OSError:
         pass  # best-effort on platforms where this doesn't apply (e.g. Windows)
+    os.replace(tmp_path, AUTH_FILE)
 
 
 def bootstrap_admin(username: str, password: str) -> dict:

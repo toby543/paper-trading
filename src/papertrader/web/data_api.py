@@ -31,6 +31,33 @@ _CRYPTO_INDEX_TILES = [
 ]
 
 
+def _currency_symbol(engine) -> str:
+    """This profile's currency, matching the frontend's own CCY. Hardcoding
+    a rupee sign in server-built strings put the wrong symbol on a USD
+    profile's insight text while its stat cards showed the right one."""
+    return "$" if getattr(engine, "quote_currency", "INR") == "USD" else "₹"
+
+
+def _round_price(price: float) -> float:
+    """Round for display without collapsing sub-unit assets to 0.00.
+
+    A flat 2dp is right for a Rs 3,400 share and useless for a token
+    quoted near Rs 0.0009 -- PEPE's price and average both rendered as
+    "0.00" on the dashboard. Scale the precision to the magnitude instead,
+    so small prices keep enough significant digits to be readable.
+    """
+    if price is None or not math.isfinite(price):
+        return price
+    magnitude = abs(price)
+    if magnitude >= 100:
+        return round(price, 2)
+    if magnitude >= 1:
+        return round(price, 4)
+    if magnitude >= 0.0001:
+        return round(price, 6)
+    return round(price, 10)
+
+
 def _safe_quote(engine, symbol: str):
     try:
         quote = engine.data.get_quote(symbol)
@@ -97,6 +124,7 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
     data build_summary() already has in hand, so this adds no extra network
     calls or queries. Each insight is {level, title, detail}, where level is
     warn (wants attention), info (worth knowing), or good (working well)."""
+    ccy = _currency_symbol(engine)
     insights: list[dict] = []
     risk_cfg = engine.risk_cfg or {}
     stop_loss_pct = float(risk_cfg.get("stop_loss_pct", 0) or 0)
@@ -141,8 +169,25 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
                               "Position sizing is capped per entry, but price appreciation can drift it up.",
                 })
 
+    # --- Positions with no live price ---
+    # These are valued at cost until a quote comes back, so their P&L
+    # reads as a flat 0.00 and the equity total silently includes a
+    # stale figure. Say so, rather than letting it look like calm.
+    stale = [row["symbol"] for row in position_rows if row.get("price_stale")]
+    if stale:
+        insights.append({
+            "level": "warn",
+            "title": f"No live price for {', '.join(stale[:3])}"
+                     + (f" and {len(stale) - 3} more" if len(stale) > 3 else ""),
+            "detail": "Every data source failed for these, so they are valued at their entry "
+                      "price until a quote returns -- their P&L shows as flat and total equity "
+                      "is stale by that much. Exits cannot trigger on a position with no price.",
+        })
+
     # --- Positions close to being stopped out ---
     for row in position_rows:
+        if row.get("price_stale"):
+            continue  # cost-basis placeholder, not a real distance to a stop
         ltp = row["ltp"]
         triggers = []
         if stop_loss_pct > 0:
@@ -158,7 +203,8 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
             insights.append({
                 "level": "warn",
                 "title": f"{row['symbol']} is {headroom_pct:.1f}% above its {name}",
-                "detail": f"Currently ₹{ltp:,.2f} against a {name} around ₹{level:,.2f}. "
+                "detail": f"Currently {ccy}{_round_price(ltp):,} against a {name} around "
+                          f"{ccy}{_round_price(level):,}. "
                           "A small move down would trigger an exit on the next check.",
             })
 
@@ -223,7 +269,7 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
                 "level": "good",
                 "title": f"{row['symbol']} up {row['unrealized_pnl_pct']:.1f}%",
                 "detail": f"Trailing stop is doing the work here -- it now sits {trailing_stop_pct:.0f}% "
-                          f"below the ₹{row['highest_close_since_entry']:,.2f} peak since entry."
+                          f"below the {ccy}{row['highest_close_since_entry']:,} peak since entry."
                           if trailing_stop_pct > 0 else "One of the stronger open positions.",
             })
 
@@ -258,6 +304,13 @@ def build_summary(engine) -> dict:
     positions_value = 0.0
     for symbol, pos in positions.items():
         quote = _safe_quote(engine, symbol)
+        # Falling back to avg_price prices the row at cost, which renders
+        # as exactly 0.00 P&L -- indistinguishable from a genuinely flat
+        # position, while total_equity quietly absorbs a valuation that is
+        # not a market price at all. Keep the fallback (a dashboard that
+        # 500s on a flaky quote is worse) but flag it, so the row can say
+        # "no price" rather than "unchanged".
+        price_stale = quote is None
         ltp = quote.ltp if quote else pos.avg_price
         week52_high = quote.week52_high if quote else None
         pct_from_high = _pct_from_52w_high(week52_high, ltp)
@@ -265,15 +318,16 @@ def build_summary(engine) -> dict:
         positions_value += mv
         position_rows.append({
             "symbol": symbol,
+            "price_stale": price_stale,
             "quantity": pos.quantity,
-            "avg_price": round(pos.avg_price, 2),
-            "ltp": round(ltp, 2),
+            "avg_price": _round_price(pos.avg_price),
+            "ltp": _round_price(ltp),
             "market_value": round(mv, 2),
             "unrealized_pnl": round(pos.unrealized_pnl(ltp), 2),
             "unrealized_pnl_pct": round(pos.unrealized_pnl_pct(ltp), 2),
             "entry_date": pos.entry_date,
-            "highest_close_since_entry": round(pos.highest_close_since_entry, 2),
-            "week52_high": round(week52_high, 2) if week52_high else None,
+            "highest_close_since_entry": _round_price(pos.highest_close_since_entry),
+            "week52_high": _round_price(week52_high) if week52_high else None,
             "pct_from_52w_high": round(pct_from_high, 2) if pct_from_high is not None else None,
         })
 
@@ -444,14 +498,17 @@ def build_candidates(engine, limit: int = 20) -> dict:
     regime_blocking = regime["enabled"] and regime["status"] == "down"
 
     mode = engine.strategy_cfg.get("mode", "52w_high")
-    ranked = engine.find_candidates(exclude_symbols=set(positions))
+    # A preview must not overwrite the engine's own last-scan diagnostics:
+    # it uses a different exclude set, so the Insights panel would then
+    # explain the preview rather than the scan that actually ran.
+    ranked = engine.find_candidates(exclude_symbols=set(positions), record_diagnostics=False)
 
     rows = []
     for cand in ranked[:limit]:
         if mode == "consolidation_breakout":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "consolidation_high": round(cand.consolidation_high, 2),
                 "consolidation_low": round(cand.consolidation_low, 2),
                 "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
@@ -461,7 +518,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "pivot_supertrend":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "r1": round(cand.r1, 2),
                 "pct_above_r1": round(cand.pct_above_r1, 2),
                 "supertrend_value": round(cand.supertrend_value, 2),
@@ -471,7 +528,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "trend_pullback":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "recent_high": round(cand.recent_high, 2),
                 "pct_from_high": round(cand.pct_from_high, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
@@ -480,7 +537,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "long_term_trend":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "fast_ma": round(cand.fast_ma, 2),
                 "slow_ma": round(cand.slow_ma, 2),
                 "momentum_return_pct": round(cand.momentum_return_pct, 2),
@@ -495,7 +552,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
             # had a candidate to preview; masked at zero candidates.
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "ma20": round(cand.ma20, 2),
                 "ma50": round(cand.ma50, 2),
                 "rsi": round(cand.rsi, 2),
@@ -505,7 +562,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_breakout":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "consolidation_high": round(cand.consolidation_high, 2),
                 "consolidation_low": round(cand.consolidation_low, 2),
                 "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
@@ -515,7 +572,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_institutional_swing":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "ma20": round(cand.ma20, 2),
                 "ma50": round(cand.ma50, 2),
                 "ma200": round(cand.ma200, 2),
@@ -526,7 +583,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_mean_reversion":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "mean_ma": round(cand.mean_ma, 2),
                 "deviation_pct": round(cand.deviation_pct, 2),
                 "rsi": round(cand.rsi, 2),
@@ -535,7 +592,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_trend_pullback":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "recent_high": round(cand.recent_high, 2),
                 "pct_from_high": round(cand.pct_from_high, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
@@ -544,7 +601,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_breakout_retest":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "breakout_level": round(cand.breakout_level, 2),
                 "pct_from_level": round(cand.pct_from_level, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
@@ -553,7 +610,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
         elif mode == "crypto_pairs_trading":
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "ratio": cand.ratio,
                 "ratio_mean": cand.ratio_mean,
                 "z_score": round(cand.z_score, 2),
@@ -563,7 +620,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
             # 52w_high and cross_sectional_momentum share this shape.
             rows.append({
                 "symbol": cand.symbol,
-                "ltp": round(cand.ltp, 2),
+                "ltp": _round_price(cand.ltp),
                 "week52_high": round(cand.week52_high, 2),
                 "pct_from_52w_high": round(cand.pct_from_52w_high, 2),
                 "momentum_return_pct": round(cand.momentum_return_pct, 2),

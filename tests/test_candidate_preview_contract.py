@@ -115,7 +115,11 @@ class _FakeEngine:
         self.trades_24_7 = True
         self._candidate = candidate
 
-    def find_candidates(self, exclude_symbols=None):
+    def find_candidates(self, exclude_symbols=None, record_diagnostics=True):
+        # record_diagnostics mirrors TradingEngine's real signature: the
+        # preview passes False so it cannot clobber the autonomous scan's
+        # diagnostics snapshot.
+        self.record_diagnostics_arg = record_diagnostics
         return [self._candidate]
 
 

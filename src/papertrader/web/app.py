@@ -114,13 +114,39 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     else:
         app.secret_key = boot_store["flask_secret_key"]
     app.permanent_session_lifetime = timedelta(hours=12)
+    # Explicit rather than relying on browser defaults. The session cookie
+    # is the only thing standing between the LAN and a dashboard that can
+    # rewrite live trading config, so: unreadable from JS, and never sent
+    # on a cross-site request (which is what stops another page the owner
+    # has open from POSTing to /api/settings on their behalf).
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+    def _session_is_valid() -> bool:
+        """Authenticated AND the account still exists.
+
+        Checking only the `authenticated` flag meant deleting a user in
+        Admin > Users did not lock them out: their signed cookie stayed
+        valid for the rest of permanent_session_lifetime (12h), during
+        which they could keep rewriting trading config, switching
+        profiles and reloading config. The store is re-read per request
+        already (see get_store), so this costs nothing extra."""
+        if not session.get("authenticated"):
+            return False
+        store = get_store()
+        if store is None:
+            return True  # auth not configured at all; nothing to check against
+        username = session.get("username", "")
+        if username not in (store.get("users") or {}):
+            session.clear()
+            return False
+        return True
 
     def login_required(view):
         """For page routes: redirect to the login page (the browser is
         expecting an HTML response either way)."""
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if get_store() is None or session.get("authenticated"):
+            if get_store() is None or _session_is_valid():
                 return view(*args, **kwargs)
             return redirect(url_for("login", next=request.path))
         return wrapped
@@ -132,7 +158,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         actually react to it."""
         @wraps(view)
         def wrapped(*args, **kwargs):
-            if get_store() is None or session.get("authenticated"):
+            if get_store() is None or _session_is_valid():
                 return view(*args, **kwargs)
             return jsonify({"ok": False, "error": "Not authenticated. Please log in again."}), 401
         return wrapped

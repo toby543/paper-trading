@@ -22,6 +22,24 @@ from ..config import Config
 _jobs: dict[str, "BacktestJob"] = {}
 _lock = threading.Lock()
 
+# Finished jobs are kept only long enough for the dashboard to poll the
+# result and for the user to look at it. Without this the dict grew for
+# the life of the process, holding every backtest result ever run --
+# while /api/backtest/status already tells callers an id can expire.
+_FINISHED_JOB_TTL_SECONDS = 6 * 3600
+_MAX_FINISHED_JOBS = 50
+
+
+def _prune_finished_jobs() -> None:
+    """Caller must hold _lock. Never drops a running job."""
+    finished = [(j.created_at, jid) for jid, j in _jobs.items() if j.status != "running"]
+    cutoff = time.time() - _FINISHED_JOB_TTL_SECONDS
+    stale = {jid for created, jid in finished if created < cutoff}
+    for _created, jid in sorted(finished)[:max(0, len(finished) - _MAX_FINISHED_JOBS)]:
+        stale.add(jid)
+    for jid in stale:
+        _jobs.pop(jid, None)
+
 
 @dataclass
 class BacktestJob:
@@ -70,6 +88,7 @@ def start_backtest_job(cfg: Config, start: str, end: str, universe_file: str | N
         profile_display=bt_cfg.list_profiles().get(profile_name, profile_name),
     )
     with _lock:
+        _prune_finished_jobs()
         _jobs[job_id] = job
 
     thread = threading.Thread(target=_run, args=(job_id, bt_cfg, start, end, profile_name),

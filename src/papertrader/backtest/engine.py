@@ -775,7 +775,7 @@ class Backtester:
             qty = self.risk.position_size_shares(equity_now, cand.ltp)
             if qty <= 0:
                 continue
-            cost_estimate = qty * cand.ltp
+            cost_estimate = self.broker.estimated_buy_cost(cand.ltp, qty)
             if spent + cost_estimate > scan_budget:
                 continue
             try:

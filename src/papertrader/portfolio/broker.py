@@ -46,6 +46,15 @@ class PaperBroker:
         profile's flat charge does not."""
         return self.flat_charges_inr + fill_price * quantity * (self.fee_pct / 100.0)
 
+    def estimated_buy_cost(self, ltp: float, quantity: float) -> float:
+        """What buying this would actually take out of cash, slippage and
+        charges included. Callers budgeting a scan used qty * ltp, which
+        understates every fill, so the per-scan cash cap was exceeded by
+        the sum of the costs it ignored -- worst on a crypto profile,
+        where fee_pct scales with notional."""
+        fill_price = self._fill_price(ltp, "BUY")
+        return fill_price * quantity + self._charges(fill_price, quantity)
+
     def cash(self) -> float:
         return self.storage.get_cash()
 
