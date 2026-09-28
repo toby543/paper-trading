@@ -8,13 +8,6 @@ import tempfile
 
 import pytest
 
-from papertrader.data.fx import (
-    _FALLBACK_USD_INR,
-    _MAX_STALE_SECONDS,
-    _RateCache,
-    _implausible,
-)
-from papertrader.data.nse_client import is_crypto_symbol
 from papertrader.portfolio.broker import InsufficientFundsError, PaperBroker
 from papertrader.portfolio.storage import Storage
 from papertrader.web.settings_schema import coerce_and_validate
@@ -30,34 +23,6 @@ def ledger():
 
 def _broker(storage, fee_pct=0.1, flat=0.0):
     return PaperBroker(storage, slippage_bps=5.0, flat_charges_inr=flat, fee_pct=fee_pct)
-
-
-# --- 1. crypto symbol classification -------------------------------------
-
-def test_hyphenated_nse_equity_is_not_crypto():
-    """BAJAJ-AUTO is a real NSE code in data/universe.csv. Routing it to
-    Binance trips CryptoDataClient's process-wide circuit breaker, which
-    silently downgrades every genuine crypto symbol for the rest of the run."""
-    assert not is_crypto_symbol("BAJAJ-AUTO")
-    assert not is_crypto_symbol("RELIANCE")
-    assert not is_crypto_symbol("M&M")
-
-
-def test_real_crypto_pairs_are_still_detected():
-    for symbol in ("BTC-USD", "ETH-USD", "PEPE-USD", "BTC-USDT"):
-        assert is_crypto_symbol(symbol), symbol
-
-
-def test_shipped_universes_classify_correctly():
-    import csv
-
-    def symbols(path):
-        with open(path) as fh:
-            return [r["symbol"] for r in csv.DictReader(fh) if r.get("symbol")]
-
-    assert all(is_crypto_symbol(s) for s in symbols("data/universe_crypto.csv"))
-    assert not any(is_crypto_symbol(s) for s in symbols("data/universe.csv"))
-    assert not any(is_crypto_symbol(s) for s in symbols("data/universe_nifty500.csv"))
 
 
 # --- 2. atomic ledger writes ---------------------------------------------
@@ -177,50 +142,6 @@ def test_entry_charges_column_is_added_to_an_existing_ledger(ledger):
     old = storage.get_positions()["OLD-USD"]
     assert old.entry_charges == 0.0  # unknown historically; don't invent one
     assert old.unrealized_pnl(120.0) == pytest.approx(40.0)
-
-
-# --- 4. FX rate sanity ----------------------------------------------------
-
-def test_implausible_usd_inr_rates_are_rejected():
-    assert _implausible(0.0111)   # inverted quote
-    assert _implausible(1.0)      # unit quote
-    assert _implausible(0.0)
-    assert not _implausible(88.5)
-
-
-class _RaisingTicker:
-    """Stands in for yfinance.Ticker so these tests exercise get()'s
-    refresh-failure branch deterministically. timeout=0 does NOT reliably
-    fail the real HTTP call -- on a machine with live network access
-    (unlike a network-sandboxed CI runner) yfinance simply completes the
-    request and returns the real current rate, which silently turned both
-    of these into no-ops asserting against live market data instead of
-    the fallback path they're named for."""
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def history(self, *args, **kwargs):
-        raise RuntimeError("simulated network failure")
-
-
-def test_expired_cached_rate_falls_back_instead_of_serving_stale(monkeypatch):
-    cache = _RateCache()
-    cache._rate = 88.0
-    cache._fetched_at = 0.0  # epoch: far older than the staleness ceiling
-
-    monkeypatch.setattr("time.time", lambda: _MAX_STALE_SECONDS + 10_000)
-    monkeypatch.setattr("yfinance.Ticker", _RaisingTicker)
-    assert cache.get(timeout=0) == _FALLBACK_USD_INR
-
-
-def test_recent_cached_rate_is_still_reused_on_a_failed_refresh(monkeypatch):
-    import time as _time
-
-    cache = _RateCache()
-    cache._rate = 88.0
-    cache._fetched_at = _time.time() - 7200  # 2h: stale but within the ceiling
-    monkeypatch.setattr("yfinance.Ticker", _RaisingTicker)
-    assert cache.get(timeout=0) == 88.0
 
 
 # --- 5. settings validation ----------------------------------------------

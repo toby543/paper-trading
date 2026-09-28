@@ -297,9 +297,9 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             # too, not fall back to showing the global Nifty 50 filter.
             regime=cfg.get_profile_regime_config(active_profile),
             account=cfg.get("account", default={}),
-            # Profile's own universe file (e.g. crypto's universe_crypto.csv)
-            # so the Backtest panel's dropdown defaults to what this profile
-            # actually scans, not the global equity universe.
+            # Profile's own universe file, so the Backtest panel's dropdown
+            # defaults to what this profile actually scans, not the global
+            # equity universe.
             universe_cfg={**cfg.get("universe", default={}), "file": cfg.get_profile_universe_file(active_profile)},
             execution=cfg.get("execution", default={}),
             engine_cfg=cfg.get("engine", default={}),

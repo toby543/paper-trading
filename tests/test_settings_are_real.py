@@ -18,7 +18,6 @@ from papertrader.web.settings_schema import (
     _ALL_MODES,
     _FIELD_MODES,
     applies_to_mode,
-    coerce_and_validate,
 )
 
 STRATEGY_DIR = pathlib.Path("src/papertrader/strategy")
@@ -33,14 +32,6 @@ MODE_MODULE = {
     "ipo_base_breakout": "ipo_base_breakout",
     "pivot_supertrend": "pivot_supertrend",
     "trend_pullback": "trend_pullback",
-    "long_term_trend": "long_term_trend",
-    "crypto_momentum": "crypto_momentum",
-    "crypto_breakout": "crypto_breakout",
-    "crypto_institutional_swing": "crypto_institutional_swing",
-    "crypto_mean_reversion": "crypto_mean_reversion",
-    "crypto_trend_pullback": "crypto_trend_pullback",
-    "crypto_breakout_retest": "crypto_breakout_retest",
-    "crypto_pairs_trading": "crypto_pairs_trading",
 }
 
 # Exit keys that momentum_52w_high's check_exit reads on behalf of a mode
@@ -108,30 +99,11 @@ def test_pivot_supertrend_is_not_offered_moving_average_fields():
         assert not applies_to_mode(("strategy", field), "pivot_supertrend"), field
 
 
-def test_long_term_trends_own_fast_ma_is_editable():
-    """The profile runs fast_ma_days: 200 against an old ceiling of 100,
-    so the panel displayed a value it refused to save."""
-    configured = yaml.safe_load(open("profiles/long_term_trend.yaml"))["strategy"]["fast_ma_days"]
-    assert coerce_and_validate(("strategy", "fast_ma_days"), configured) == configured
-
-
-def test_trailing_stop_hidden_for_the_strategies_that_ignore_it():
-    for mode in ("crypto_mean_reversion", "crypto_pairs_trading"):
-        assert not applies_to_mode(("risk", "trailing_stop_pct"), mode), mode
-    assert applies_to_mode(("risk", "trailing_stop_pct"), "crypto_momentum")
-
-
-def test_take_profit_hidden_for_the_strategies_that_ignore_it():
-    for mode in ("crypto_institutional_swing", "crypto_mean_reversion", "crypto_pairs_trading"):
-        assert not applies_to_mode(("risk", "take_profit_pct"), mode), mode
-    assert applies_to_mode(("risk", "take_profit_pct"), "crypto_momentum")
-
-
 def test_equity_breakout_tightness_ceiling_is_editable():
     path = ("strategy", "consolidation_breakout", "max_consolidation_range_pct")
     assert path in {tuple(e["path"]) for e in EDITABLE_SETTINGS}
     assert applies_to_mode(path, "consolidation_breakout")
-    assert not applies_to_mode(path, "crypto_breakout")
+    assert not applies_to_mode(path, "pivot_supertrend")
 
 
 def test_max_retries_reaches_the_http_session():

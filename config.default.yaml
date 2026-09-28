@@ -188,148 +188,6 @@ profiles:
         # uptrend may already be broken rather than just pulling back.
         max_pullback_pct: 12.0
 
-  long_term_trend:
-    display_name: "Long Term Trend"
-    category: long_term
-    # Fresh ledger independent from the other five profiles
-    state_file: data/state_long_term_trend.db
-    starting_capital: 100000.0
-    strategy_mode: long_term_trend
-    # This profile starts fresh with new capital
-    strategy:
-      # Years-long windows, not weeks -- this profile asks "is this stock
-      # in a well-established multi-year uptrend?", not "is today a good
-      # entry?". fast_ma_days/slow_ma_days here play the same structural
-      # role (price > fast > slow) as every other profile's moving
-      # averages, just stretched from weeks to years.
-      fast_ma_days: 200
-      slow_ma_days: 400
-      # A real, multi-year return required on top of the trend check --
-      # merely sitting above a long average for a year of sideways drift
-      # isn't the "already compounding" story this strategy looks for.
-      momentum_lookback_days: 252
-      min_momentum_return_pct: 12.0
-      min_avg_daily_turnover_inr: 50000000
-      max_new_positions_per_scan: 3
-      min_ltp_inr: 0
-      max_ltp_inr: 0
-    # Deliberately much wider than the swing profiles' shared risk
-    # defaults -- risk is profile-scoped (like strategy) precisely so
-    # this profile can tolerate the ordinary volatility of a years-long
-    # hold without getting stopped out of what's still a perfectly
-    # healthy uptrend. Position sizing stays modest (fewer, longer-held
-    # names) rather than the swing profiles' faster-turnover sizing.
-    risk:
-      stop_loss_pct: 20.0
-      trailing_stop_pct: 25.0
-      take_profit_pct: 0
-      position_size_pct_of_equity: 10.0
-      max_open_positions: 8
-      max_cash_deployed_per_scan_pct: 40.0
-      reentry_cooldown_days: 3
-
-  # ============================================================================
-  # CRYPTO TRADING PROFILES
-  # ============================================================================
-  # These profiles trade ONLY cryptocurrency on 24/7 crypto exchanges.
-  # They are COMPLETELY INDEPENDENT from equity profiles:
-  #   - Universe: crypto-only symbols (BTC-USD, ETH-USD, etc.), not NSE stocks
-  #   - Regime: No Nifty 50 filter; crypto has independent market cycles
-  #   - Hours: 24/7 trading (no market open/close checks)
-  #   - Regime Index: BTC-USD (if regime ever re-enabled), not Nifty 50
-  #
-  # NOTE: These profiles use YFinance as fallback for crypto data.
-  # For production trading, integrate Binance/Kraken APIs for real-time data.
-  # ============================================================================
-
-  crypto_momentum:
-    display_name: "Crypto Momentum"
-    category: crypto
-    state_file: data/state_crypto_momentum.db
-    starting_capital: 100000.0
-    strategy_mode: crypto_momentum
-    # Crypto-only universe. Nothing here touches the NSE equity lists.
-    universe_file: data/universe_crypto.csv
-    # Crypto has its own market cycles with no reliable Nifty
-    # correlation, so the equity regime filter is off entirely. BTC-USD
-    # is kept as the crypto-native benchmark for the dashboard's
-    # comparison line.
-    regime:
-      enabled: false
-      index_symbol: "BTC-USD"
-    strategy:
-      # 30 days in a 24/7 market ~= 6 weeks of equity sessions.
-      momentum_lookback_days: 30
-      min_momentum_return_pct: 5.0
-      min_rsi: 50.0                      # RSI > 50 = in a momentum phase
-      # In INR, like the rest of this book: crypto quotes arrive from
-      # the exchanges in USD and are converted at the live USD/INR rate
-      # in the data layer, so the turnover reaching this filter is
-      # already rupees. Rs 48cr/day (~$5M) admits the major/mid-caps
-      # (LINK, ARB, MKR) while excluding genuinely thin names like GMX.
-      min_avg_daily_turnover_inr: 480000000
-      max_new_positions_per_scan: 3
-    risk:
-      stop_loss_pct: 10.0
-      trailing_stop_pct: 15.0
-      take_profit_pct: 25.0
-      position_size_pct_of_equity: 8.0
-      max_open_positions: 10
-      max_cash_deployed_per_scan_pct: 50.0
-      # 24h -- crypto trades continuously, unlike an equity profile's 3-7 days.
-      reentry_cooldown_days: 1
-    # Crypto exchanges charge a percentage of notional (~0.1% taker),
-    # not the flat per-order brokerage+STT an Indian equity broker does.
-    execution:
-      fee_pct: 0.1
-      flat_charges_inr: 0
-      slippage_bps: 5.0
-
-  crypto_breakout:
-    display_name: "Crypto Breakout"
-    category: crypto
-    state_file: data/state_crypto_breakout.db
-    starting_capital: 100000.0
-    strategy_mode: consolidation_breakout
-    # Crypto-only universe. Nothing here touches the NSE equity lists.
-    universe_file: data/universe_crypto.csv
-    # No equity regime filter -- see crypto_momentum above.
-    regime:
-      enabled: false
-      index_symbol: "BTC-USD"
-    strategy:
-      momentum_lookback_days: 21
-      min_momentum_return_pct: 3.0
-      # 20/50 rather than an equity profile's 50/200: crypto timeframes
-      # are compressed by continuous trading.
-      fast_ma_days: 20
-      slow_ma_days: 50
-      # Rs 48cr/day (~$5M) -- see the note under crypto_momentum above.
-      min_avg_daily_turnover_inr: 480000000
-      max_new_positions_per_scan: 3
-      consolidation_breakout:
-        consolidation_days: 7
-        # 20%, not the equity default of 3-5%: crypto's baseline 7-day
-        # range is 3-4x an NSE stock's even in its calmest names -- BTC
-        # (the tightest of the universe) sits at ~14%, so 5% rejected
-        # every coin, every day, with no ceiling loose enough to ever
-        # admit a "genuinely quiet" base at crypto's actual volatility.
-        max_consolidation_range_pct: 20.0
-        volume_multiple: 1.5
-    risk:
-      stop_loss_pct: 8.0
-      trailing_stop_pct: 12.0
-      take_profit_pct: 20.0
-      position_size_pct_of_equity: 6.0
-      max_open_positions: 12
-      max_cash_deployed_per_scan_pct: 60.0
-      reentry_cooldown_days: 1
-    # Percentage exchange fee -- see crypto_momentum above.
-    execution:
-      fee_pct: 0.1
-      flat_charges_inr: 0
-      slippage_bps: 5.0
-
 universe:
   file: data/universe_nifty500.csv   # NSE symbols to scan (no .NS suffix). Loaded once at
                                       # startup -- changing this needs a restart to take effect.
@@ -430,12 +288,6 @@ regime:
   # of regime -- this only gates new buys, never risk management.
   # index_symbol is also reused as the benchmark for
   # strategy.min_relative_strength_pct, even if this filter is disabled.
-  # NOTE: This filter applies only to equity strategies (52w_high, long_term_trend, etc.)
-  # For CRYPTO trading (crypto_momentum, crypto_breakout), this filter has limited
-  # relevance since: (1) crypto trades 24/7 independent of NSE hours,
-  # (2) Nifty 50 correlation with crypto is weak/unreliable, and
-  # (3) crypto has independent market cycles. Consider disabling this
-  # filter when running crypto-only strategies: set enabled: false
   enabled: true
   index_symbol: "^NSEI"   # Nifty 50 index (Yahoo Finance ticker)
   ma_days: 200            # index must be trading above this many-day average
@@ -472,8 +324,7 @@ execution:
   flat_charges_inr: 20.0
 
   # Percentage-of-notional exchange fee. 0 for equity profiles,
-  # which pay the flat brokerage above instead; crypto profiles
-  # override this with ~0.1% and set flat_charges_inr to 0.
+  # which pay the flat brokerage above instead.
   fee_pct: 0
 engine:
   timezone: Asia/Kolkata
@@ -487,16 +338,7 @@ engine:
 
 data_source:
   # "nse" tries the official NSE website API first and falls back to
-  # "yfinance" automatically if it is unreachable or blocked. This applies
-  # to equity profiles only.
-  # CRYPTO profiles (crypto_momentum, crypto_breakout) never go through NSE
-  # or this preferred/fallback pair -- MarketDataClient detects crypto
-  # symbols (universe entries containing "-", e.g. "BTC-USD") and routes
-  # them through a chain of exchanges: Binance first (live 24hr ticker +
-  # daily klines), then Kraken if Binance is unreachable or doesn't list
-  # the pair, then Yahoo Finance's crypto tickers as the last resort. All
-  # of these are public, unauthenticated market-data endpoints -- no API
-  # key required. See src/papertrader/data/crypto_client.py.
+  # "yfinance" automatically if it is unreachable or blocked.
   preferred: nse
   fallback: yfinance
   request_timeout_seconds: 15

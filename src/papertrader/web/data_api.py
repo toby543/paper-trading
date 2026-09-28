@@ -478,19 +478,14 @@ def build_candidates(engine, limit: int = 20) -> dict:
     52w_high and cross_sectional_momentum both use
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
     consolidation_breakout.Candidate, pivot_supertrend.Candidate,
-    trend_pullback.Candidate, long_term_trend.Candidate, ipo_base_breakout.Candidate,
-    crypto_momentum.Candidate, crypto_breakout.Candidate, crypto_institutional_swing.Candidate,
-    crypto_mean_reversion.Candidate, crypto_trend_pullback.Candidate,
-    crypto_breakout_retest.Candidate, and crypto_pairs_trading.Candidate are all
+    trend_pullback.Candidate, and ipo_base_breakout.Candidate are all
     separate dataclasses with none of that shape's fields (no week52_high, pct_from_52w_high,
     relative_strength_pct, volume_multiple). Building one hardcoded row
     shape for every mode previously raised AttributeError the moment one
     of the non-momentum_52w_high modes actually found a candidate --
     silently fine at zero candidates, which is exactly why it went
-    unnoticed the first time (the same class of bug the crypto_momentum
-    branch below had too, subscripting its Candidate dataclass like a
-    dict). `mode` is included in the response so the dashboard can render
-    the right columns instead of guessing.
+    unnoticed the first time. `mode` is included in the response so the
+    dashboard can render the right columns instead of guessing.
     """
     positions = engine.broker.positions()
     room = engine.risk.room_for_new_positions(len(positions))
@@ -543,88 +538,6 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "recent_high": round(cand.recent_high, 2),
                 "pct_from_high": round(cand.pct_from_high, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "long_term_trend":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "fast_ma": round(cand.fast_ma, 2),
-                "slow_ma": round(cand.slow_ma, 2),
-                "momentum_return_pct": round(cand.momentum_return_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_momentum":
-            # crypto_momentum.Candidate is a dataclass, not a dict -- see
-            # the docstring in crypto_momentum.py for why (the same
-            # AttributeError-swallowed-by-a-catch-all bug this function's
-            # own docstring describes for the other modes below). Dict
-            # subscripting here raised TypeError the moment this mode ever
-            # had a candidate to preview; masked at zero candidates.
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "ma20": round(cand.ma20, 2),
-                "ma50": round(cand.ma50, 2),
-                "rsi": round(cand.rsi, 2),
-                "momentum_return_pct": round(cand.momentum_return_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_breakout":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "consolidation_high": round(cand.consolidation_high, 2),
-                "consolidation_low": round(cand.consolidation_low, 2),
-                "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
-                "momentum_return_pct": round(cand.momentum_return_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_institutional_swing":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "ma20": round(cand.ma20, 2),
-                "ma50": round(cand.ma50, 2),
-                "ma200": round(cand.ma200, 2),
-                "volume_multiple": round(cand.volume_multiple, 2),
-                "momentum_return_pct": round(cand.momentum_return_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_mean_reversion":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "mean_ma": round(cand.mean_ma, 2),
-                "deviation_pct": round(cand.deviation_pct, 2),
-                "rsi": round(cand.rsi, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_trend_pullback":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "recent_high": round(cand.recent_high, 2),
-                "pct_from_high": round(cand.pct_from_high, 2),
-                "day_change_pct": round(cand.day_change_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_breakout_retest":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "breakout_level": round(cand.breakout_level, 2),
-                "pct_from_level": round(cand.pct_from_level, 2),
-                "day_change_pct": round(cand.day_change_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "crypto_pairs_trading":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "ratio": cand.ratio,
-                "ratio_mean": cand.ratio_mean,
-                "z_score": round(cand.z_score, 2),
                 "score": round(cand.score, 2),
             })
         else:

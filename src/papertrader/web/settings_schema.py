@@ -15,12 +15,7 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 # type: bool | int | float | choice | time | str.
 EDITABLE_SETTINGS: list[dict] = [
     {"path": ("universe", "file"), "type": "choice",
-     # universe_crypto.csv is listed so the dropdown can represent what a
-     # crypto profile actually scans instead of showing only NSE lists.
-     # Note this key is the SHARED default; a crypto profile overrides it
-     # with its own profiles/<name>.yaml universe_file, which is why the
-     # Edit Settings panel flags this field as not applying to it.
-     "choices": ["data/universe.csv", "data/universe_nifty500.csv", "data/universe_crypto.csv"],
+     "choices": ["data/universe.csv", "data/universe_nifty500.csv"],
      "group": "Universe", "label": "Universe file", "unit": "",
      "desc": "Which symbol list to scan: data/universe.csv is a smaller ~100-symbol starter "
              "list, data/universe_nifty500.csv is the full cleaned Nifty 500. Loaded once at "
@@ -29,20 +24,12 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "proximity_to_52w_high_pct"), "type": "float", "min": 0, "max": 50,
      "group": "Strategy — Entry", "label": "Proximity to 52W high", "unit": "%",
      "desc": "How close to its 52-week high a stock must be trading to qualify."},
-    {"path": ("strategy", "min_rsi"), "type": "float", "min": 0, "max": 100,
-     "group": "Strategy — Entry", "label": "Min RSI", "unit": "(0-100)",
-     "desc": "RSI(14) a coin must be above to count as in a momentum phase. "
-             "50 is the neutral line, so above it means buyers are in control; "
-             "raising it demands stronger momentum and admits fewer coins."},
     {"path": ("strategy", "min_momentum_return_pct"), "type": "float", "min": -100, "max": 500,
      "group": "Strategy — Entry", "label": "Min momentum return", "unit": "%",
      "desc": "Minimum return required over the lookback window below."},
     {"path": ("strategy", "momentum_lookback_days"), "type": "int", "min": 5, "max": 365,
      "group": "Strategy — Entry", "label": "Momentum lookback", "unit": "days",
      "desc": "Window the momentum return above is measured over."},
-    # max matches slow_ma_days: the long_term_trend profile runs
-    # fast_ma_days: 200, which a ceiling of 100 made impossible to edit --
-    # the panel displayed 200 and rejected every save as "must be <= 100".
     {"path": ("strategy", "fast_ma_days"), "type": "int", "min": 2, "max": 400,
      "group": "Strategy — Entry", "label": "Fast moving average", "unit": "days",
      "desc": "Shorter trend-confirmation average; also used for the momentum-breakdown exit."},
@@ -88,11 +75,6 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "consolidation_breakout", "consolidation_days"), "type": "int", "min": 2, "max": 50,
      "group": "Consolidation breakout", "label": "Consolidation period", "unit": "days",
      "desc": "How many days the stock must hold a tight consolidation before breaking out. Only applies when strategy mode is consolidation_breakout."},
-    # The equity twin of crypto_breakout's max_consolidation_range_pct.
-    # consolidation_breakout.py reads it and the profile sets it, but it
-    # had no entry here, so the tightness ceiling -- the filter that
-    # rejects most candidates -- was YAML-only while the crypto version
-    # was editable.
     {"path": ("strategy", "consolidation_breakout", "max_consolidation_range_pct"), "type": "float", "min": 0.5, "max": 100.0,
      "group": "Consolidation breakout", "label": "Max base range", "unit": "%",
      "desc": "How wide (high-to-low as % of average close) the base is allowed to be and still count as a tight consolidation. Only applies when strategy mode is consolidation_breakout."},
@@ -115,89 +97,6 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "ipo_base_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
      "group": "IPO Base Breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is ipo_base_breakout."},
-
-    # crypto_breakout is its own strategy_mode (see crypto_breakout.py), not
-    # consolidation_breakout, so it needs its own subsection here -- without
-    # these, none of a Crypto Breakout profile's own tunables (base length,
-    # tightness, volume confirmation) were reachable from Edit Settings at
-    # all, only hand-editable in the profile YAML.
-    {"path": ("strategy", "crypto_breakout", "consolidation_days"), "type": "int", "min": 2, "max": 50,
-     "group": "Crypto Breakout", "label": "Consolidation period", "unit": "days",
-     "desc": "How many days the coin must hold a base before breaking out. Only applies when strategy mode is crypto_breakout."},
-    {"path": ("strategy", "crypto_breakout", "max_consolidation_range_pct"), "type": "float", "min": 1.0, "max": 100.0,
-     "group": "Crypto Breakout", "label": "Max base range", "unit": "%",
-     "desc": "How wide (high-to-low as % of average close) the base is allowed to be and still count as a tight consolidation. Only applies when strategy mode is crypto_breakout."},
-    {"path": ("strategy", "crypto_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
-     "group": "Crypto Breakout", "label": "Breakout volume", "unit": "× baseline",
-     "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is crypto_breakout."},
-
-    {"path": ("strategy", "max_rsi"), "type": "float", "min": 0, "max": 100,
-     "group": "Institutional Swing", "label": "Max RSI", "unit": "(0-100)",
-     "desc": "RSI(14) a coin must be below to qualify as a bounce-in-progress. 50 is neutral; above means too hot. Only applies when strategy mode is crypto_institutional_swing."},
-    {"path": ("strategy", "pullback_tolerance_pct"), "type": "float", "min": 0, "max": 20,
-     "group": "Institutional Swing", "label": "Pullback tolerance", "unit": "%",
-     "desc": "How close to the 20-day MA the price must be to count as a pullback entry point. Only applies when strategy mode is crypto_institutional_swing."},
-    {"path": ("strategy", "min_volume_multiple"), "type": "float", "min": 1.0, "max": 5.0,
-     "group": "Institutional Swing", "label": "Min volume multiple", "unit": "× baseline",
-     "desc": "Current volume must be at least this multiple of the 20-day average to confirm institutional buying. Only applies when strategy mode is crypto_institutional_swing."},
-    {"path": ("strategy", "time_stop_days"), "type": "int", "min": 1, "max": 30,
-     "group": "Institutional Swing", "label": "Time stop", "unit": "days",
-     "desc": "Exit the position if held longer than this without the trade thesis playing out. Applies to crypto_institutional_swing (don't hold a swing through a regime change), crypto_mean_reversion (a dip that hasn't bounced back isn't a short-term dip anymore) and crypto_pairs_trading (a ratio that hasn't reverted has likely shifted structurally)."},
-    {"path": ("strategy", "profit_target_pct"), "type": "float", "min": 5, "max": 100,
-     "group": "Institutional Swing", "label": "Profit target", "unit": "%",
-     "desc": "Exit swing position when this profit target is hit. Only applies when strategy mode is crypto_institutional_swing."},
-
-    {"path": ("strategy", "crypto_mean_reversion", "long_ma_days"), "type": "int", "min": 20, "max": 300,
-     "group": "Mean Reversion", "label": "Structural trend MA", "unit": "days",
-     "desc": "Price must stay above this moving average to qualify -- keeps the strategy from buying a coin that's simply in freefall. Only applies when strategy mode is crypto_mean_reversion."},
-    {"path": ("strategy", "crypto_mean_reversion", "mean_ma_days"), "type": "int", "min": 5, "max": 100,
-     "group": "Mean Reversion", "label": "Mean MA", "unit": "days",
-     "desc": "The moving average this strategy considers \"the mean\" -- how far price has to fall below it to count as oversold, and the level a position exits at once price reverts back to it. Only applies when strategy mode is crypto_mean_reversion."},
-    {"path": ("strategy", "crypto_mean_reversion", "min_deviation_pct"), "type": "float", "min": 1, "max": 50,
-     "group": "Mean Reversion", "label": "Min deviation from mean", "unit": "%",
-     "desc": "How far below the mean MA price must have fallen to count as oversold enough to buy. Only applies when strategy mode is crypto_mean_reversion."},
-    {"path": ("strategy", "crypto_mean_reversion", "max_rsi"), "type": "float", "min": 0, "max": 100,
-     "group": "Mean Reversion", "label": "Max RSI", "unit": "(0-100)",
-     "desc": "RSI(14) must be at or below this to confirm the dip is real, not just an ordinary daily wiggle. Only applies when strategy mode is crypto_mean_reversion."},
-
-    {"path": ("strategy", "crypto_trend_pullback", "pullback_lookback_days"), "type": "int", "min": 5, "max": 90,
-     "group": "Crypto Trend Pullback", "label": "Pullback lookback", "unit": "days",
-     "desc": "Window used to find the recent high a pullback is measured against. Only applies when strategy mode is crypto_trend_pullback."},
-    {"path": ("strategy", "crypto_trend_pullback", "min_pullback_pct"), "type": "float", "min": 0, "max": 50,
-     "group": "Crypto Trend Pullback", "label": "Min pullback", "unit": "%",
-     "desc": "How far below the recent high price must have pulled back -- too shallow and there's no real discount. Only applies when strategy mode is crypto_trend_pullback."},
-    {"path": ("strategy", "crypto_trend_pullback", "max_pullback_pct"), "type": "float", "min": 1, "max": 80,
-     "group": "Crypto Trend Pullback", "label": "Max pullback", "unit": "%",
-     "desc": "How far below the recent high price can be before the pullback is considered too deep -- the uptrend may already be broken. Only applies when strategy mode is crypto_trend_pullback."},
-
-    {"path": ("strategy", "crypto_breakout_retest", "base_lookback_days"), "type": "int", "min": 5, "max": 90,
-     "group": "Breakout Retest", "label": "Base lookback", "unit": "days",
-     "desc": "Window used to establish the base/resistance level a breakout is measured against. Only applies when strategy mode is crypto_breakout_retest."},
-    {"path": ("strategy", "crypto_breakout_retest", "retest_window_days"), "type": "int", "min": 2, "max": 60,
-     "group": "Breakout Retest", "label": "Retest window", "unit": "days",
-     "desc": "How many recent days to search for a confirmed breakout above the base before today's retest. Only applies when strategy mode is crypto_breakout_retest."},
-    {"path": ("strategy", "crypto_breakout_retest", "breakout_confirm_pct"), "type": "float", "min": 0.5, "max": 30,
-     "group": "Breakout Retest", "label": "Breakout confirmation", "unit": "% above base",
-     "desc": "How far above the base level a bar must have closed to count as a genuine breakout. Only applies when strategy mode is crypto_breakout_retest."},
-    {"path": ("strategy", "crypto_breakout_retest", "retest_tolerance_pct"), "type": "float", "min": 0.5, "max": 20,
-     "group": "Breakout Retest", "label": "Retest tolerance", "unit": "%",
-     "desc": "How close to the breakout level today's price must be to count as retesting it. Only applies when strategy mode is crypto_breakout_retest."},
-
-    {"path": ("strategy", "crypto_pairs_trading", "benchmark_symbol"), "type": "str",
-     "group": "Pairs Trading", "label": "Benchmark symbol", "unit": "",
-     "desc": "The coin every other coin's price ratio is measured against (BTC-USD by default). Only applies when strategy mode is crypto_pairs_trading."},
-    {"path": ("strategy", "crypto_pairs_trading", "trend_ma_days"), "type": "int", "min": 20, "max": 300,
-     "group": "Pairs Trading", "label": "Structural trend MA", "unit": "days",
-     "desc": "Both the coin and the benchmark must stay above their own moving average of this length -- otherwise \"cheap versus BTC\" can just mean \"crashing alongside BTC\". Only applies when strategy mode is crypto_pairs_trading."},
-    {"path": ("strategy", "crypto_pairs_trading", "pairs_lookback_days"), "type": "int", "min": 10, "max": 180,
-     "group": "Pairs Trading", "label": "Ratio lookback", "unit": "days",
-     "desc": "Window used to compute the coin/benchmark ratio's own rolling mean and standard deviation. Only applies when strategy mode is crypto_pairs_trading."},
-    {"path": ("strategy", "crypto_pairs_trading", "entry_z_threshold"), "type": "float", "min": 0.5, "max": 5.0,
-     "group": "Pairs Trading", "label": "Entry z-score", "unit": "std devs",
-     "desc": "How many standard deviations below its own recent average the ratio must fall to count as unusually cheap. Only applies when strategy mode is crypto_pairs_trading."},
-    {"path": ("strategy", "crypto_pairs_trading", "exit_z_threshold"), "type": "float", "min": -2.0, "max": 2.0,
-     "group": "Pairs Trading", "label": "Exit z-score", "unit": "std devs",
-     "desc": "The z-score the ratio must recover to before the position is considered to have reverted. Only applies when strategy mode is crypto_pairs_trading."},
 
     {"path": ("strategy", "pivot_supertrend", "atr_period"), "type": "int", "min": 2, "max": 50,
      "group": "Pivot point + SuperTrend", "label": "ATR period", "unit": "days",
@@ -318,12 +217,6 @@ _STRATEGY_SUBSECTION_MODE = {
     "cross_sectional": "cross_sectional_momentum",
     "consolidation_breakout": "consolidation_breakout",
     "ipo_base_breakout": "ipo_base_breakout",
-    "crypto_breakout": "crypto_breakout",
-    "crypto_institutional_swing": "crypto_institutional_swing",
-    "crypto_mean_reversion": "crypto_mean_reversion",
-    "crypto_trend_pullback": "crypto_trend_pullback",
-    "crypto_breakout_retest": "crypto_breakout_retest",
-    "crypto_pairs_trading": "crypto_pairs_trading",
     "pivot_supertrend": "pivot_supertrend",
     "trend_pullback": "trend_pullback",
 }
@@ -332,21 +225,14 @@ _STRATEGY_SUBSECTION_MODE = {
 # to the modes that actually read them.
 #
 # The shared "Strategy — Entry" block was assumed universal, but that is
-# only true of the 52-week-high strategy it grew out of. crypto_momentum,
-# for instance, reads none of the 52w-high proximity, relative-strength,
-# volume-confirmation or price-band fields, and has its own hardcoded
-# RSI/trend exits rather than the momentum-breakdown toggle -- so the
-# panel was presenting nine editable settings that did nothing for it,
-# indistinguishable from the ones that did. Anything absent from this map
-# is genuinely universal and always shown.
+# only true of the 52-week-high strategy it grew out of. Anything absent
+# from this map is genuinely universal and always shown.
 # Every strategy mode a profile can run. Lets the risk-section entries
 # below be written as "all modes except ...", which stays correct when a
 # mode is added rather than silently omitting it.
 _ALL_MODES = frozenset({
     "52w_high", "cross_sectional_momentum", "consolidation_breakout", "pivot_supertrend",
-    "trend_pullback", "long_term_trend", "ipo_base_breakout",
-    "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_mean_reversion",
-    "crypto_trend_pullback", "crypto_breakout_retest", "crypto_pairs_trading",
+    "trend_pullback", "ipo_base_breakout",
 })
 
 _FIELD_MODES = {
@@ -356,22 +242,15 @@ _FIELD_MODES = {
     ("strategy", "volume_confirmation", "min_volume_multiple"): {"52w_high"},
     ("strategy", "volume_confirmation", "recent_days"): {"52w_high"},
     ("strategy", "volume_confirmation", "baseline_days"): {"52w_high"},
-    # Price bands are applied inside each strategy, and the crypto strategies
-    # don't consult them (crypto_momentum, crypto_breakout, crypto_institutional_swing).
     ("strategy", "min_ltp_inr"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "52w_high", "cross_sectional_momentum",
         "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
     ("strategy", "max_ltp_inr"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "52w_high", "cross_sectional_momentum",
         "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
     ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout", "ipo_base_breakout"},
-    # Momentum fields: all three crypto strategies read these too
-    # (crypto_momentum/crypto_breakout/crypto_institutional_swing all call
-    # config.get("min_momentum_return_pct", ...) and
-    # config.get("momentum_lookback_days", ...)) -- excluding them here
-    # hid a parameter each one actually consults from Edit Settings.
     # pivot_supertrend, trend_pullback and cross_sectional_momentum are
     # deliberately absent: none of the three mentions either key anywhere
     # (cross_sectional has its own strategy.cross_sectional.lookback_days;
@@ -379,52 +258,20 @@ _FIELD_MODES = {
     # put four editable fields on those profiles' panels that changed
     # nothing at all when saved.
     ("strategy", "min_momentum_return_pct"): {
-        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
-        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
+        "52w_high", "consolidation_breakout", "ipo_base_breakout",
     },
     ("strategy", "momentum_lookback_days"): {
-        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
-        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
+        "52w_high", "consolidation_breakout", "ipo_base_breakout",
     },
-    # Fast/slow MAs: crypto_breakout also reads config.get("fast_ma_days")/
-    # ("slow_ma_days") for both its entry uptrend check and its exit trend
-    # break -- it was never actually hardcoded, unlike the comment here used
-    # to claim. crypto_institutional_swing's check_exit also reads
-    # fast_ma_days (for its own trend-break exit), even though its entry
-    # still hardcodes 20/50/200 -- see the note in crypto_institutional_swing.py.
     # pivot_supertrend reads neither: its trend is the SuperTrend band, not
     # a moving-average pair, and it mentions neither key.
     ("strategy", "fast_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "trend_pullback",
         "consolidation_breakout", "ipo_base_breakout",
-        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     ("strategy", "slow_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "trend_pullback",
         "consolidation_breakout", "ipo_base_breakout",
-        "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
-    },
-    # RSI gate: crypto_momentum uses it as a floor (momentum phase),
-    # crypto_institutional_swing uses it as the lower edge of its 35-50
-    # bounce band (config.get("min_rsi", 35.0)) -- both actually read it.
-    ("strategy", "min_rsi"): {"crypto_momentum", "crypto_institutional_swing"},
-    # Only crypto_institutional_swing has an RSI ceiling (maximum for bounce entry).
-    ("strategy", "max_rsi"): {"crypto_institutional_swing"},
-    # Pullback and volume settings specific to crypto_institutional_swing.
-    ("strategy", "pullback_tolerance_pct"): {"crypto_institutional_swing"},
-    ("strategy", "min_volume_multiple"): {"crypto_institutional_swing"},
-    ("strategy", "time_stop_days"): {"crypto_institutional_swing", "crypto_mean_reversion", "crypto_pairs_trading"},
-    ("strategy", "profit_target_pct"): {"crypto_institutional_swing"},
-    # crypto_mean_reversion and crypto_pairs_trading document exactly three
-    # exits each (reversion target, hard stop, time stop) and read neither
-    # of these -- tightening either one on those profiles did nothing.
-    # cross_sectional_momentum keeps them: it has no check_exit of its own,
-    # so the scheduler falls through to momentum_52w_high's, which reads both.
-    ("risk", "trailing_stop_pct"): _ALL_MODES - {"crypto_mean_reversion", "crypto_pairs_trading"},
-    # crypto_institutional_swing is excluded too: it deliberately uses its
-    # own strategy.profit_target_pct instead (see its check_exit).
-    ("risk", "take_profit_pct"): _ALL_MODES - {
-        "crypto_institutional_swing", "crypto_mean_reversion", "crypto_pairs_trading",
     },
 }
 

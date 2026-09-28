@@ -32,15 +32,7 @@ import pytest
 
 from papertrader.strategy import (
     consolidation_breakout,
-    crypto_breakout,
-    crypto_breakout_retest,
-    crypto_institutional_swing,
-    crypto_mean_reversion,
-    crypto_momentum,
-    crypto_pairs_trading,
-    crypto_trend_pullback,
     ipo_base_breakout,
-    long_term_trend,
     momentum_52w_high,
     pivot_supertrend,
     trend_pullback,
@@ -62,14 +54,6 @@ MODE_TO_STRATEGY = {
     "ipo_base_breakout": ipo_base_breakout,
     "pivot_supertrend": pivot_supertrend,
     "trend_pullback": trend_pullback,
-    "long_term_trend": long_term_trend,
-    "crypto_momentum": crypto_momentum,
-    "crypto_breakout": crypto_breakout,
-    "crypto_institutional_swing": crypto_institutional_swing,
-    "crypto_mean_reversion": crypto_mean_reversion,
-    "crypto_trend_pullback": crypto_trend_pullback,
-    "crypto_breakout_retest": crypto_breakout_retest,
-    "crypto_pairs_trading": crypto_pairs_trading,
 }
 
 
@@ -209,7 +193,7 @@ def test_every_strategy_mode_is_covered_by_this_test():
     routed = set(re.findall(r'mode == "(\w+)"', source))
     # Without this the set-difference below could pass on an empty set if the
     # pattern ever stopped matching, silently testing nothing.
-    assert len(routed) > 5, f"only discovered {sorted(routed)} in the scheduler -- parser likely broken"
+    assert len(routed) >= 5, f"only discovered {sorted(routed)} in the scheduler -- parser likely broken"
     # 52w_high is the else-branch default, so it never appears as a literal.
     unknown = routed - set(MODE_TO_STRATEGY)
     assert not unknown, (

@@ -413,11 +413,10 @@ class Config:
 
     def get_profile_universe_file(self, profile_name: str | None = None) -> str:
         """Universe file path for a specific profile (or active profile if
-        not specified). Lets a profile scan its own symbol list -- e.g. a
-        crypto profile's `universe_file: data/universe_crypto.csv` instead
-        of the shared NSE universe every equity profile scans -- falling
-        back to the global `universe.file` setting when the profile
-        doesn't override it."""
+        not specified). Lets a profile scan its own symbol list instead of
+        the shared universe every other profile scans -- falling back to
+        the global `universe.file` setting when the profile doesn't
+        override it."""
         profile_cfg = self.get_profile_config(profile_name)
         return profile_cfg.get("universe_file") or self.universe_file
 
