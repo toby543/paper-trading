@@ -49,6 +49,15 @@ def start_backtest_job(cfg: Config, start: str, end: str, universe_file: str | N
         # dashboard shouldn't affect what the running engine/other panels see.
         bt_cfg = Config(raw=copy.deepcopy(cfg.raw), path=cfg.path)
         bt_cfg.raw.setdefault("universe", {})["file"] = universe_file
+        # The profile's own universe_file wins over the global one in
+        # get_profile_universe_file, which is what Backtester resolves
+        # through -- and every crypto profile sets one. Overriding only
+        # the global key meant a picked universe was silently ignored
+        # while the job still reported it back to the UI, mislabelling
+        # the result. Override it wherever the profile would define it.
+        for profile_cfg in (bt_cfg.raw.get("profiles") or {}).values():
+            if isinstance(profile_cfg, dict) and "universe_file" in profile_cfg:
+                profile_cfg["universe_file"] = universe_file
 
     # Replay whichever profile the caller asked for (the dashboard passes the
     # one currently being viewed), so a backtest matches that profile's own

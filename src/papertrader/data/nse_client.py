@@ -19,7 +19,7 @@ from typing import Optional
 
 import pandas as pd
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .crypto_client import BinanceClient, KrakenClient, CryptoDataUnavailableError
 
@@ -74,8 +74,14 @@ class Quote:
 class NSESession:
     """Thin wrapper that warms up cookies against nseindia.com."""
 
-    def __init__(self, timeout: int = 10):
+    def __init__(self, timeout: int = 10, max_attempts: int = 2):
         self.timeout = timeout
+        # data_source.max_retries was editable and displayed on the
+        # dashboard but read nowhere -- the retry count was hardcoded at 2
+        # attempts regardless. Threaded through so the setting means
+        # something; more attempts also means a failing symbol takes
+        # correspondingly longer before the yfinance fallback is reached.
+        self.max_attempts = max(1, int(max_attempts))
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self._warmed = False
@@ -87,13 +93,19 @@ class NSESession:
         self.session.get(NSE_BASE + "/get-quotes/equity?symbol=RELIANCE", timeout=self.timeout)
         self._warmed = True
 
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=1, min=1, max=3),
-        retry=retry_if_exception_type((requests.RequestException,)),
-    )
     def get_json(self, url: str) -> dict:
+        # Retrying built per call rather than a @retry decorator, so the
+        # attempt count can come from config instead of being fixed at
+        # import time.
+        retrying = Retrying(
+            reraise=True,
+            stop=stop_after_attempt(self.max_attempts),
+            wait=wait_exponential(multiplier=1, min=1, max=3),
+            retry=retry_if_exception_type((requests.RequestException,)),
+        )
+        return retrying(self._get_json_once, url)
+
+    def _get_json_once(self, url: str) -> dict:
         self._warm_up()
         resp = self.session.get(url, timeout=self.timeout)
         if resp.status_code == 401 or resp.status_code == 403:
@@ -117,7 +129,7 @@ class MarketDataClient:
     _YFINANCE_MIN_INTERVAL_SECONDS = 0.2
 
     def __init__(self, preferred: str = "nse", fallback: str = "yfinance", timeout: int = 10,
-                 quote_currency: str = "INR"):
+                 quote_currency: str = "INR", max_retries: int = 2):
         """quote_currency: the currency this client's caller keeps its book
         in. Crypto pairs are quoted in USD by every exchange we read, so
         for an INR book they are converted here, at the data layer, rather
@@ -129,7 +141,7 @@ class MarketDataClient:
         self.fallback = fallback
         self.timeout = timeout
         self.quote_currency = (quote_currency or "INR").upper()
-        self._nse = NSESession(timeout=timeout)
+        self._nse = NSESession(timeout=timeout, max_attempts=max_retries)
         self._binance = BinanceClient(timeout=timeout)
         self._kraken = KrakenClient(timeout=timeout)
         self._history_cache: dict[str, pd.DataFrame] = {}

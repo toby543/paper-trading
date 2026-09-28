@@ -252,12 +252,18 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         quote_currency = cfg.get_profile_quote_currency(active_profile)
         strategy = cfg.get_profile_strategy_config(active_profile)
         risk = cfg.get_profile_risk_config(active_profile)
+        execution = cfg.get_profile_execution_config(active_profile)
 
         return render_template(
             "index.html",
             is_admin=bool(store and auth.is_admin(store, session.get("username", ""))),
-            slippage_bps=cfg.get("execution", "slippage_bps", default=5.0),
-            flat_charges_inr=cfg.get("execution", "flat_charges_inr", default=20.0),
+            # Profile-scoped, like strategy/risk below and like what
+            # /api/settings writes and the engines actually charge. Read
+            # from the global execution: block, a crypto profile's header
+            # advertised the equity flat brokerage (Rs 20/order) it never
+            # pays, instead of its own percentage exchange fee.
+            slippage_bps=execution.get("slippage_bps", 5.0),
+            flat_charges_inr=execution.get("flat_charges_inr", 20.0),
             strategy=strategy,
             risk=risk,
             # Profile-scoped, matching strategy/risk above -- a crypto

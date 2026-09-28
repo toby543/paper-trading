@@ -17,11 +17,12 @@ strategy:
         # flips (less whipsaw, later entries); narrower = more, earlier,
         # noisier flips.
     supertrend_multiplier: 3.0
-        # A SuperTrend flip alone qualifies at min_pct_above_pivot: 0 (any
-        # amount above the prior day's pivot). Raise this to require the
-        # flip to happen with more room above the pivot, i.e. a more
+        # A SuperTrend flip alone qualifies at min_pct_above_r1: 0 (any
+        # amount above the prior day's R1 resistance). Raise this to
+        # require the flip to happen with more room above R1, i.e. a more
         # decisively bullish-biased day, not just barely above it.
-    min_pct_above_pivot: 0.0
+        # (The knob was documented here as min_pct_above_pivot, a name the
+        # strategy never read -- the value below is the real one.)
 
 # Legacy config: used as fallback if active_profile is not recognized or profiles not defined
 # If you have an existing state.db, rename it to state_52w_high.db to preserve trades under the 52w_high profile

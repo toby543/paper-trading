@@ -105,6 +105,7 @@ class TradingEngine:
             preferred=cfg.get("data_source", "preferred", default="nse"),
             fallback=cfg.get("data_source", "fallback", default="yfinance"),
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
+            max_retries=cfg.get("data_source", "max_retries", default=2),
             # Crypto pairs arrive quoted in USD; converted to this
             # profile's own book currency at the data layer.
             quote_currency=self.quote_currency,

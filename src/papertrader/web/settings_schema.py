@@ -40,7 +40,10 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "momentum_lookback_days"), "type": "int", "min": 5, "max": 365,
      "group": "Strategy — Entry", "label": "Momentum lookback", "unit": "days",
      "desc": "Window the momentum return above is measured over."},
-    {"path": ("strategy", "fast_ma_days"), "type": "int", "min": 2, "max": 100,
+    # max matches slow_ma_days: the long_term_trend profile runs
+    # fast_ma_days: 200, which a ceiling of 100 made impossible to edit --
+    # the panel displayed 200 and rejected every save as "must be <= 100".
+    {"path": ("strategy", "fast_ma_days"), "type": "int", "min": 2, "max": 400,
      "group": "Strategy — Entry", "label": "Fast moving average", "unit": "days",
      "desc": "Shorter trend-confirmation average; also used for the momentum-breakdown exit."},
     {"path": ("strategy", "slow_ma_days"), "type": "int", "min": 10, "max": 400,
@@ -85,6 +88,14 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "consolidation_breakout", "consolidation_days"), "type": "int", "min": 2, "max": 50,
      "group": "Consolidation breakout", "label": "Consolidation period", "unit": "days",
      "desc": "How many days the stock must hold a tight consolidation before breaking out. Only applies when strategy mode is consolidation_breakout."},
+    # The equity twin of crypto_breakout's max_consolidation_range_pct.
+    # consolidation_breakout.py reads it and the profile sets it, but it
+    # had no entry here, so the tightness ceiling -- the filter that
+    # rejects most candidates -- was YAML-only while the crypto version
+    # was editable.
+    {"path": ("strategy", "consolidation_breakout", "max_consolidation_range_pct"), "type": "float", "min": 0.5, "max": 100.0,
+     "group": "Consolidation breakout", "label": "Max base range", "unit": "%",
+     "desc": "How wide (high-to-low as % of average close) the base is allowed to be and still count as a tight consolidation. Only applies when strategy mode is consolidation_breakout."},
     {"path": ("strategy", "consolidation_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
      "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
@@ -311,6 +322,16 @@ _STRATEGY_SUBSECTION_MODE = {
 # panel was presenting nine editable settings that did nothing for it,
 # indistinguishable from the ones that did. Anything absent from this map
 # is genuinely universal and always shown.
+# Every strategy mode a profile can run. Lets the risk-section entries
+# below be written as "all modes except ...", which stays correct when a
+# mode is added rather than silently omitting it.
+_ALL_MODES = frozenset({
+    "52w_high", "cross_sectional_momentum", "consolidation_breakout", "pivot_supertrend",
+    "trend_pullback", "long_term_trend",
+    "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_mean_reversion",
+    "crypto_trend_pullback", "crypto_breakout_retest", "crypto_pairs_trading",
+})
+
 _FIELD_MODES = {
     ("strategy", "proximity_to_52w_high_pct"): {"52w_high"},
     ("strategy", "min_relative_strength_pct"): {"52w_high"},
@@ -334,14 +355,18 @@ _FIELD_MODES = {
     # config.get("min_momentum_return_pct", ...) and
     # config.get("momentum_lookback_days", ...)) -- excluding them here
     # hid a parameter each one actually consults from Edit Settings.
+    # pivot_supertrend, trend_pullback and cross_sectional_momentum are
+    # deliberately absent: none of the three mentions either key anywhere
+    # (cross_sectional has its own strategy.cross_sectional.lookback_days;
+    # trend_pullback measures its own pullback window). Listing them here
+    # put four editable fields on those profiles' panels that changed
+    # nothing at all when saved.
     ("strategy", "min_momentum_return_pct"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "52w_high", "long_term_trend",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     ("strategy", "momentum_lookback_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "52w_high", "long_term_trend",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     # Fast/slow MAs: crypto_breakout also reads config.get("fast_ma_days")/
@@ -350,14 +375,14 @@ _FIELD_MODES = {
     # to claim. crypto_institutional_swing's check_exit also reads
     # fast_ma_days (for its own trend-break exit), even though its entry
     # still hardcodes 20/50/200 -- see the note in crypto_institutional_swing.py.
+    # pivot_supertrend reads neither: its trend is the SuperTrend band, not
+    # a moving-average pair, and it mentions neither key.
     ("strategy", "fast_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     ("strategy", "slow_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     # RSI gate: crypto_momentum uses it as a floor (momentum phase),
@@ -371,6 +396,17 @@ _FIELD_MODES = {
     ("strategy", "min_volume_multiple"): {"crypto_institutional_swing"},
     ("strategy", "time_stop_days"): {"crypto_institutional_swing", "crypto_mean_reversion", "crypto_pairs_trading"},
     ("strategy", "profit_target_pct"): {"crypto_institutional_swing"},
+    # crypto_mean_reversion and crypto_pairs_trading document exactly three
+    # exits each (reversion target, hard stop, time stop) and read neither
+    # of these -- tightening either one on those profiles did nothing.
+    # cross_sectional_momentum keeps them: it has no check_exit of its own,
+    # so the scheduler falls through to momentum_52w_high's, which reads both.
+    ("risk", "trailing_stop_pct"): _ALL_MODES - {"crypto_mean_reversion", "crypto_pairs_trading"},
+    # crypto_institutional_swing is excluded too: it deliberately uses its
+    # own strategy.profit_target_pct instead (see its check_exit).
+    ("risk", "take_profit_pct"): _ALL_MODES - {
+        "crypto_institutional_swing", "crypto_mean_reversion", "crypto_pairs_trading",
+    },
 }
 
 
