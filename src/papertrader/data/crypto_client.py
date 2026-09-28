@@ -72,6 +72,37 @@ class CryptoQuote:
     source: str = "binance"
 
 
+def _week52_range(client, symbol: str, cache_key: str,
+                  day_high: float, day_low: float) -> tuple[float, float]:
+    """The real 52-week high/low, fetching the 1y daily history if it is
+    not cached yet.
+
+    Both exchanges' ticker endpoints carry only a 24-HOUR high/low. Using
+    that whenever the history cache happened to be cold meant `week52_high`
+    was quietly a one-day range -- and the scan loop calls get_quote BEFORE
+    get_history for each symbol, so the cache is cold on the first scan
+    after every process start. Any strategy gauging "distance from the
+    52-week high" then sees every coin sitting at its high. Fetching costs
+    one klines call that the same scan is about to make anyway, and the
+    result is cached for both.
+
+    The 24h range remains the last-resort fallback, but it is now logged
+    rather than silent, because a quote that says "52-week" and means
+    "today" is the kind of thing that has to be visible.
+    """
+    cached = client._history_cache.get(cache_key)
+    if cached is None or cached.empty:
+        try:
+            cached = client.get_history(symbol, days=365)
+        except Exception as exc:  # noqa: BLE001 - a quote is still useful without it
+            log.warning("%s: no 1y history for %s (%s); 52-week range falls back to the 24h range",
+                        type(client).__name__, symbol, exc)
+            return day_high, day_low
+    if cached is None or cached.empty:
+        return day_high, day_low
+    return float(cached["High"].max()), float(cached["Low"].min())
+
+
 def to_binance_pair(symbol: str) -> str:
     """"BTC-USD" -> "BTCUSDT". Binance quotes most pairs in USDT, not USD;
     USDT is a USD-pegged stablecoin so this is a like-for-like substitution
@@ -143,12 +174,9 @@ class BinanceClient:
         # range. Reuse the (likely already-cached, from momentum/MA calcs)
         # 1y daily history for a real 52-week high/low when we have it;
         # otherwise fall back to the 24h range rather than fail the quote.
-        week_high, week_low = float(data["highPrice"]), float(data["lowPrice"])
-        cache_key = f"{pair}:365"
-        cached_hist = self._history_cache.get(cache_key)
-        if cached_hist is not None and not cached_hist.empty:
-            week_high = float(cached_hist["High"].max())
-            week_low = float(cached_hist["Low"].min())
+        week_high, week_low = _week52_range(
+            self, symbol, f"{pair}:365", float(data["highPrice"]), float(data["lowPrice"]),
+        )
         return CryptoQuote(
             symbol=symbol,
             ltp=float(data["lastPrice"]),
@@ -258,12 +286,11 @@ class KrakenClient:
         # take the single entry rather than matching the key.
         t = next(iter(result.values()))
         ltp = float(t["c"][0])  # last trade: [price, lot volume]
-        week_high, week_low = float(t["h"][1]), float(t["l"][1])  # today+yesterday high/low
-        cache_key = f"{pair}:365"
-        cached_hist = self._history_cache.get(cache_key)
-        if cached_hist is not None and not cached_hist.empty:
-            week_high = float(cached_hist["High"].max())
-            week_low = float(cached_hist["Low"].min())
+        # t["h"]/t["l"] are [today, last 24 hours]; index 1 is the rolling
+        # 24h figure, NOT "today+yesterday" as this once claimed.
+        week_high, week_low = _week52_range(
+            self, symbol, f"{pair}:365", float(t["h"][1]), float(t["l"][1]),
+        )
         return CryptoQuote(
             symbol=symbol,
             ltp=ltp,

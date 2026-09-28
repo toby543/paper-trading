@@ -243,10 +243,14 @@ def check_exit(
     hard_stop_pct = config.get("stop_loss_pct", 8.0)
     trailing_stop_pct = config.get("trailing_stop_pct", 6.0)
 
-    # Profit target: +22% gain (swing objective)
-    target_price = position.avg_price * (1 + profit_target_pct / 100.0)
-    if quote.ltp >= target_price:
-        return True, f"profit_target (+{profit_target_pct}% = {quote.ltp:.2f})"
+    # Profit target: +22% gain (swing objective). Guarded on > 0 like every
+    # other strategy's take-profit: 0 is this app's "disabled" idiom, and
+    # ungated it means "sell the moment price reaches entry", closing every
+    # position on its first exit check.
+    if profit_target_pct > 0:
+        target_price = position.avg_price * (1 + profit_target_pct / 100.0)
+        if quote.ltp >= target_price:
+            return True, f"profit_target (+{profit_target_pct}% = {quote.ltp:.2f})"
 
     # Hard stop-loss: -8% (trend break, exit before bigger loss)
     hard_stop_price = position.avg_price * (1 - hard_stop_pct / 100.0)
@@ -261,11 +265,25 @@ def check_exit(
     if days_held >= time_stop_days:
         return True, f"time_stop ({days_held} days, current {quote.ltp:.2f})"
 
-    # Trend break: Price closes below 20-day MA (exit if pullback fails)
+    # Trend break: the pullback has FAILED, not merely happened.
+    #
+    # This strategy exists to buy a dip to the 20-day MA -- evaluate_candidate
+    # accepts price within pullback_tolerance_pct on either side of it, and
+    # the profile documents the setup as "200 > 50 > 20 > price". Exiting on
+    # any close below that MA therefore contradicted the entry outright: a
+    # position bought below the MA (the intended case) was sold as a trend
+    # break on its very next exit check, minutes later, for the round-trip
+    # cost. Only a break BEYOND the band the entry tolerates says the
+    # pullback failed, so both sides key off the same number and cannot
+    # disagree again.
     fast_days = int(config.get("fast_ma_days", 20))
+    pullback_tolerance_pct = config.get("pullback_tolerance_pct", 5.0)
     fast_ma = _moving_average(history, fast_days)
-    if fast_ma is not None and quote.ltp < fast_ma:
-        return True, f"trend_break (below {fast_days}-day MA at {quote.ltp:.2f})"
+    if fast_ma is not None:
+        break_price = fast_ma * (1 - pullback_tolerance_pct / 100.0)
+        if quote.ltp < break_price:
+            return True, (f"trend_break ({pullback_tolerance_pct}% below the {fast_days}-day MA "
+                          f"at {quote.ltp:.2f})")
 
     # Trailing stop: -6% below peak (protect profits after +10% gain)
     current_gain_pct = (quote.ltp - position.avg_price) / position.avg_price * 100.0

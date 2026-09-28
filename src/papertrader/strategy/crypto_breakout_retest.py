@@ -93,6 +93,31 @@ def _find_base_and_breakout(
     return base_level
 
 
+def _history_as_of(history: pd.DataFrame, entry_date: str) -> pd.DataFrame | None:
+    """`history` truncated to the bar the position was opened on.
+
+    Lets check_exit re-derive the exact level the entry bounced off,
+    instead of a level measured backwards from today (which slides
+    forward every day the position is held). Returns None when the entry
+    predates the available history, in which case the caller simply
+    skips the level check rather than guessing.
+    """
+    try:
+        entry_ts = pd.Timestamp(entry_date)
+    except (TypeError, ValueError):
+        return None
+    index_tz = getattr(history.index, "tz", None)
+    if entry_ts.tzinfo is not None and index_tz is None:
+        entry_ts = entry_ts.tz_localize(None)
+    elif entry_ts.tzinfo is None and index_tz is not None:
+        entry_ts = entry_ts.tz_localize(index_tz)
+    try:
+        sliced = history.loc[:entry_ts]
+    except (TypeError, KeyError):
+        return None
+    return sliced if not sliced.empty else None
+
+
 def evaluate_candidate(
     symbol: str,
     quote: Quote,
@@ -193,17 +218,25 @@ def check_exit(
             return True, f"take_profit (+{take_profit_pct}% above entry {position.avg_price:.2f})"
 
     # A failed retest invalidates the whole premise of this trade: the
-    # level it bounced off entry is meant to hold as support. Re-derive
-    # it the same way entry did (the base lookback/retest window before
-    # today), and exit if price has closed back below it.
+    # level it bounced off at entry is meant to hold as support.
+    #
+    # Anchored to the ENTRY bar, not to today. Measured backwards from
+    # today, the window slides forward one bar per day, so the "level"
+    # climbed the breakout leg it was supposed to sit below and overtook
+    # the price -- liquidating healthy positions as failed retests on
+    # their second day even when price had not moved at all. The level a
+    # trade is judged against has to be the one it actually entered on.
     br_cfg = config.get("crypto_breakout_retest") or {}
     base_lookback_days = int(br_cfg.get("base_lookback_days", 20))
     retest_window_days = int(br_cfg.get("retest_window_days", 10))
-    if len(history) >= base_lookback_days + retest_window_days + 1:
-        base_window = history.iloc[-(retest_window_days + base_lookback_days + 1):-(retest_window_days + 1)]
-        if not base_window.empty:
-            level = float(base_window["Close"].max())
-            if level > 0 and quote.ltp < level:
-                return True, f"retest_failed (below level {level:.2f})"
+    breakout_confirm_pct = br_cfg.get("breakout_confirm_pct", 3.0)
+
+    history_at_entry = _history_as_of(history, position.entry_date)
+    if history_at_entry is not None:
+        level = _find_base_and_breakout(
+            history_at_entry, base_lookback_days, retest_window_days, breakout_confirm_pct,
+        )
+        if level is not None and level > 0 and quote.ltp < level:
+            return True, f"retest_failed (below entry level {level:.2f})"
 
     return False, ""
