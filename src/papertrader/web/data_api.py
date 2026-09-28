@@ -478,8 +478,8 @@ def build_candidates(engine, limit: int = 20) -> dict:
     52w_high and cross_sectional_momentum both use
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
     consolidation_breakout.Candidate, pivot_supertrend.Candidate,
-    trend_pullback.Candidate, long_term_trend.Candidate, crypto_momentum.Candidate,
-    crypto_breakout.Candidate, crypto_institutional_swing.Candidate,
+    trend_pullback.Candidate, long_term_trend.Candidate, ipo_base_breakout.Candidate,
+    crypto_momentum.Candidate, crypto_breakout.Candidate, crypto_institutional_swing.Candidate,
     crypto_mean_reversion.Candidate, crypto_trend_pullback.Candidate,
     crypto_breakout_retest.Candidate, and crypto_pairs_trading.Candidate are all
     separate dataclasses with none of that shape's fields (no week52_high, pct_from_52w_high,
@@ -513,6 +513,17 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "consolidation_low": round(cand.consolidation_low, 2),
                 "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
                 "momentum_return_pct": round(cand.momentum_return_pct, 2),
+                "score": round(cand.score, 2),
+            })
+        elif mode == "ipo_base_breakout":
+            rows.append({
+                "symbol": cand.symbol,
+                "ltp": _round_price(cand.ltp),
+                "consolidation_high": round(cand.consolidation_high, 2),
+                "consolidation_low": round(cand.consolidation_low, 2),
+                "breakout_volume_multiple": round(cand.breakout_volume / cand.avg_volume, 2) if cand.avg_volume else None,
+                "momentum_return_pct": round(cand.momentum_return_pct, 2),
+                "listing_age_days": cand.listing_age_days,
                 "score": round(cand.score, 2),
             })
         elif mode == "pivot_supertrend":

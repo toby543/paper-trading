@@ -24,7 +24,7 @@ from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
 from ..strategy import (
-    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback,
+    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
     crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
 )
@@ -250,6 +250,8 @@ class TradingEngine:
             cfg = {**self.risk_cfg, **self.strategy_cfg}
             if mode == "consolidation_breakout":
                 should_exit, reason = consolidation_breakout.check_exit(pos, quote, history, cfg)
+            elif mode == "ipo_base_breakout":
+                should_exit, reason = ipo_base_breakout.check_exit(pos, quote, history, cfg)
             elif mode == "pivot_supertrend":
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history, cfg)
             elif mode == "trend_pullback":
@@ -434,6 +436,56 @@ class TradingEngine:
             self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
                                           candidates=len(candidates), reasons=reasons)
             return consolidation_breakout.rank_candidates(candidates)
+
+        if mode == "ipo_base_breakout":
+            candidates = []
+            reasons: dict[str, int] = {}
+            scanned = 0
+            for symbol in self.universe:
+                if symbol in exclude_symbols:
+                    continue
+                try:
+                    quote = self.data.get_quote(symbol)
+                    # period="3y", not the "1y" every other equity strategy
+                    # uses: this strategy's core premise depends on
+                    # len(history) actually reflecting how long the stock
+                    # has been listed. A 1y-capped fetch returns ~250 rows
+                    # for EVERY stock regardless of true age, making a
+                    # 10-year-old blue chip indistinguishable from a
+                    # 6-month-old IPO and defeating the recent-listing
+                    # filter entirely. 3y is comfortably past
+                    # max_listing_days's default (500 trading days, ~2
+                    # years) so a genuinely older stock reliably returns
+                    # more rows than that and gets correctly rejected,
+                    # while a real recent IPO still returns only however
+                    # many trading days it's actually had.
+                    history = self.data.get_history(symbol, period="3y")
+                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
+                except DataUnavailableError as exc:
+                    log.debug("Skipping %s: %s", symbol, exc)
+                    reasons["no_data"] = reasons.get("no_data", 0) + 1
+                    continue
+
+                scanned += 1
+                try:
+                    cand = ipo_base_breakout.evaluate_candidate(
+                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("ipo_base_breakout: skipping %s after evaluation error: %s", symbol, exc)
+                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
+                    continue
+                if cand:
+                    candidates.append(cand)
+
+            log.info(
+                "ipo_base_breakout scan: %d symbols evaluated, %d candidates. Rejections: %s",
+                scanned, len(candidates),
+                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
+            )
+            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
+                                          candidates=len(candidates), reasons=reasons)
+            return ipo_base_breakout.rank_candidates(candidates)
 
         if mode == "pivot_supertrend":
             candidates = []
@@ -947,6 +999,14 @@ class TradingEngine:
                     f"breakout high {ccy}{cand.consolidation_high:.2f}, "
                     f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
                     f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline"
+                )
+            elif mode == "ipo_base_breakout":
+                reason = (
+                    f"ipo_base_breakout score={cand.score:.1f} "
+                    f"breakout high ₹{cand.consolidation_high:.2f}, "
+                    f"{cand.momentum_return_pct:.1f}% {self.strategy_cfg.get('momentum_lookback_days', 21)}d momentum, "
+                    f"volume {cand.breakout_volume/cand.avg_volume:.1f}x baseline, "
+                    f"listed {cand.listing_age_days}d ago"
                 )
             elif mode == "crypto_breakout":
                 ccy = "₹"  # Crypto book is always in INR (converted at data layer)

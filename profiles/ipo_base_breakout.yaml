@@ -1,0 +1,44 @@
+display_name: "IPO Base Breakout"
+state_file: data/state_ipo_base_breakout.db
+starting_capital: 100000.0
+strategy_mode: ipo_base_breakout
+strategy:
+  # Shorter than consolidation_breakout's 21d/5% -- a fresh IPO's initial
+  # move off its base tends to be sharper but shorter-lived than an
+  # established stock's, so this looks for a smaller, more recent pop
+  # rather than requiring the same sustained run.
+  momentum_lookback_days: 15
+  min_momentum_return_pct: 3.0
+  # Shorter MA pair than the equity default (50/200): a stock inside
+  # max_listing_days (500 trading days, ~2 years) below often doesn't
+  # have 200 days of history yet, especially early in its life.
+  fast_ma_days: 10
+  slow_ma_days: 30
+  min_avg_daily_turnover_inr: 20000000
+  max_new_positions_per_scan: 3
+  min_ltp_inr: 0
+  max_ltp_inr: 0
+  ipo_base_breakout:
+    # The defining filter: only consider a stock with between this many
+    # and max_listing_days of trading history. Below min_listing_days
+    # there hasn't been time to form a real base yet; above
+    # max_listing_days it's no longer a "recent IPO" in any meaningful
+    # sense, even if it's still trading well.
+    min_listing_days: 60
+    max_listing_days: 500
+    # Base window and tightness. Wider than consolidation_breakout's 3%:
+    # a stock still finding its footing post-listing naturally swings
+    # more even while consolidating.
+    base_days: 15
+    max_base_range_pct: 15.0
+    volume_multiple: 1.5
+risk:
+  stop_loss_pct: 8.0
+  trailing_stop_pct: 12.0
+  take_profit_pct: 25.0
+  position_size_pct_of_equity: 6.0
+  max_open_positions: 8
+  max_cash_deployed_per_scan_pct: 40.0
+  reentry_cooldown_days: 3
+  exit_below_fast_ma: true
+category: swing

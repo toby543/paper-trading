@@ -100,6 +100,22 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Consolidation breakout", "label": "Breakout volume", "unit": "× baseline",
      "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is consolidation_breakout."},
 
+    {"path": ("strategy", "ipo_base_breakout", "min_listing_days"), "type": "int", "min": 5, "max": 500,
+     "group": "IPO Base Breakout", "label": "Min listing age", "unit": "trading days",
+     "desc": "The stock must have at least this many days of trading history -- enough to have formed a real base. Only applies when strategy mode is ipo_base_breakout."},
+    {"path": ("strategy", "ipo_base_breakout", "max_listing_days"), "type": "int", "min": 60, "max": 1500,
+     "group": "IPO Base Breakout", "label": "Max listing age", "unit": "trading days",
+     "desc": "Beyond this many days of history the stock no longer counts as a recent IPO -- the no-overhead-resistance advantage this strategy trades on is gone. Only applies when strategy mode is ipo_base_breakout."},
+    {"path": ("strategy", "ipo_base_breakout", "base_days"), "type": "int", "min": 2, "max": 50,
+     "group": "IPO Base Breakout", "label": "Base period", "unit": "days",
+     "desc": "How many days the stock must hold a tight consolidation before breaking out. Only applies when strategy mode is ipo_base_breakout."},
+    {"path": ("strategy", "ipo_base_breakout", "max_base_range_pct"), "type": "float", "min": 0.5, "max": 100.0,
+     "group": "IPO Base Breakout", "label": "Max base range", "unit": "%",
+     "desc": "How wide (high-to-low as % of average close) the base is allowed to be and still count as tight. Wider than an established stock's, since a recent listing naturally swings more even while consolidating. Only applies when strategy mode is ipo_base_breakout."},
+    {"path": ("strategy", "ipo_base_breakout", "volume_multiple"), "type": "float", "min": 1.0, "max": 10.0,
+     "group": "IPO Base Breakout", "label": "Breakout volume", "unit": "× baseline",
+     "desc": "Breakout must occur on volume at least this multiple of the 20-day average. Only applies when strategy mode is ipo_base_breakout."},
+
     # crypto_breakout is its own strategy_mode (see crypto_breakout.py), not
     # consolidation_breakout, so it needs its own subsection here -- without
     # these, none of a Crypto Breakout profile's own tunables (base length,
@@ -301,6 +317,7 @@ _BY_PATH = {tuple(entry["path"]): entry for entry in EDITABLE_SETTINGS}
 _STRATEGY_SUBSECTION_MODE = {
     "cross_sectional": "cross_sectional_momentum",
     "consolidation_breakout": "consolidation_breakout",
+    "ipo_base_breakout": "ipo_base_breakout",
     "crypto_breakout": "crypto_breakout",
     "crypto_institutional_swing": "crypto_institutional_swing",
     "crypto_mean_reversion": "crypto_mean_reversion",
@@ -327,7 +344,7 @@ _STRATEGY_SUBSECTION_MODE = {
 # mode is added rather than silently omitting it.
 _ALL_MODES = frozenset({
     "52w_high", "cross_sectional_momentum", "consolidation_breakout", "pivot_supertrend",
-    "trend_pullback", "long_term_trend",
+    "trend_pullback", "long_term_trend", "ipo_base_breakout",
     "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_mean_reversion",
     "crypto_trend_pullback", "crypto_breakout_retest", "crypto_pairs_trading",
 })
@@ -343,13 +360,13 @@ _FIELD_MODES = {
     # don't consult them (crypto_momentum, crypto_breakout, crypto_institutional_swing).
     ("strategy", "min_ltp_inr"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
     ("strategy", "max_ltp_inr"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend",
-        "pivot_supertrend", "trend_pullback",
+        "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
-    ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout"},
+    ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout", "ipo_base_breakout"},
     # Momentum fields: all three crypto strategies read these too
     # (crypto_momentum/crypto_breakout/crypto_institutional_swing all call
     # config.get("min_momentum_return_pct", ...) and
@@ -362,11 +379,11 @@ _FIELD_MODES = {
     # put four editable fields on those profiles' panels that changed
     # nothing at all when saved.
     ("strategy", "min_momentum_return_pct"): {
-        "52w_high", "long_term_trend",
+        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     ("strategy", "momentum_lookback_days"): {
-        "52w_high", "long_term_trend",
+        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     # Fast/slow MAs: crypto_breakout also reads config.get("fast_ma_days")/
@@ -379,10 +396,12 @@ _FIELD_MODES = {
     # a moving-average pair, and it mentions neither key.
     ("strategy", "fast_ma_days"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     ("strategy", "slow_ma_days"): {
         "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     # RSI gate: crypto_momentum uses it as a floor (momentum phase),

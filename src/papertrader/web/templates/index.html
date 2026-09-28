@@ -2057,6 +2057,7 @@ function renderWatchlistNote(data) {
 // (signed %, the 52w-high tooltip, etc.) each one actually needs.
 const WATCHLIST_HEAD = {
   consolidation_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
+  ipo_base_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Listed</th><th>Score</th>`,
   pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>R1</th><th>Above R1</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
   trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
   long_term_trend: `<th>Symbol</th><th>LTP</th><th>200DMA</th><th>400DMA</th><th>1Y Return</th><th>Score</th>`,
@@ -2078,6 +2079,17 @@ function watchlistRowHtml(mode, c) {
       <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
       <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
+      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
+    `;
+  }
+  if (mode === "ipo_base_breakout") {
+    return `
+      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
+      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
+      <td class="mono" data-label="Breakout High">${CCY}${fmt(c.consolidation_high)}</td>
+      <td class="mono up" data-label="Momentum">+${c.momentum_return_pct.toFixed(1)}%</td>
+      <td class="mono" data-label="Breakout Volume">${c.breakout_volume_multiple === null ? "—" : c.breakout_volume_multiple.toFixed(1) + "×"}</td>
+      <td class="mono" data-label="Listed">${c.listing_age_days}d ago</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }

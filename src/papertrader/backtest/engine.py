@@ -40,7 +40,7 @@ from ..strategy.momentum_52w_high import (
     rank_candidates as rank_52w,
 )
 from ..strategy import (
-    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback,
+    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
     crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
 )
@@ -128,6 +128,20 @@ def _required_trading_days(strategy_cfg: dict, trades_24_7: bool = False) -> int
     if mode == "consolidation_breakout":
         cb_cfg = strategy_cfg.get("consolidation_breakout") or {}
         needed = max(needed, int(cb_cfg.get("consolidation_days", 10)) + 1)
+    elif mode == "ipo_base_breakout":
+        ipo_cfg = strategy_cfg.get("ipo_base_breakout") or {}
+        needed = max(needed, int(ipo_cfg.get("base_days", 15)) + 1)
+        # +250 (roughly a trading year), not just max_listing_days itself:
+        # this strategy's core premise is "len(history) is short", and that
+        # only means anything in a backtest if an established stock's
+        # FETCHED history reliably exceeds max_listing_days -- otherwise a
+        # 10-year-old blue chip whose backtest buffer only reaches back
+        # ~500 days looks exactly like a genuine recent IPO. A real recent
+        # IPO has no more history to return regardless of how far back the
+        # fetch asks, so this only widens the buffer for stocks that
+        # actually have more history to give.
+        max_listing_days = int(ipo_cfg.get("max_listing_days", 500))
+        needed = max(needed, max_listing_days + 250)
     elif mode == "crypto_breakout":
         cb_cfg = strategy_cfg.get("crypto_breakout") or {}
         needed = max(needed, int(cb_cfg.get("consolidation_days", 7)) + 1)
@@ -538,6 +552,8 @@ class Backtester:
             cfg = {**self.risk_cfg, **self.strategy_cfg}
             if mode == "consolidation_breakout":
                 should_exit, reason = consolidation_breakout.check_exit(pos, quote, history_upto, cfg)
+            elif mode == "ipo_base_breakout":
+                should_exit, reason = ipo_base_breakout.check_exit(pos, quote, history_upto, cfg)
             elif mode == "pivot_supertrend":
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history_upto, cfg)
             elif mode == "trend_pullback":
@@ -630,6 +646,26 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = consolidation_breakout.rank_candidates(candidates)
+        elif mode == "ipo_base_breakout":
+            candidates = []
+            for symbol in self.universe:
+                if symbol in positions or symbol in cooldown_blocked:
+                    continue
+                hist = self._history.get(symbol)
+                if hist is None:
+                    continue
+                history_upto = hist.loc[:day]
+                quote = self._quote_for(symbol, history_upto)
+                if quote is None:
+                    continue
+                turnover = _avg_daily_turnover(history_upto)
+                cand = ipo_base_breakout.evaluate_candidate(
+                    symbol, quote, history_upto, turnover, self.strategy_cfg,
+                    reasons=self._entry_rejections,
+                )
+                if cand:
+                    candidates.append(cand)
+            ranked = ipo_base_breakout.rank_candidates(candidates)
         elif mode == "pivot_supertrend":
             candidates = []
             for symbol in self.universe:

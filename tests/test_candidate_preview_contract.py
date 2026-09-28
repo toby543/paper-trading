@@ -39,6 +39,7 @@ from papertrader.strategy import (
     crypto_momentum,
     crypto_pairs_trading,
     crypto_trend_pullback,
+    ipo_base_breakout,
     long_term_trend,
     momentum_52w_high,
     pivot_supertrend,
@@ -58,6 +59,7 @@ MODE_TO_STRATEGY = {
     "52w_high": momentum_52w_high,
     "cross_sectional_momentum": momentum_52w_high,  # imports 52w_high's Candidate directly
     "consolidation_breakout": consolidation_breakout,
+    "ipo_base_breakout": ipo_base_breakout,
     "pivot_supertrend": pivot_supertrend,
     "trend_pullback": trend_pullback,
     "long_term_trend": long_term_trend,
