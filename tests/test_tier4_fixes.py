@@ -2,6 +2,7 @@
 import json
 import os
 import stat
+import sys
 import tempfile
 import time
 
@@ -131,6 +132,13 @@ def test_finished_jobs_are_capped_in_number():
 
 # --- auth store is never briefly world-readable -------------------------
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod's mode bits are a POSIX concept; Windows has no equivalent "
+           "to assert against (os.stat always reports 0o666-ish regardless "
+           "of the chmod call), unlike the deployment target this protects "
+           "(a Linux server -- see setup_pi.sh)",
+)
 def test_auth_store_is_written_private(tmp_path, monkeypatch):
     target = tmp_path / "auth_secrets.json"
     monkeypatch.setattr("papertrader.web.auth.AUTH_FILE", str(target))

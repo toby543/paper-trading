@@ -188,14 +188,28 @@ def test_implausible_usd_inr_rates_are_rejected():
     assert not _implausible(88.5)
 
 
+class _RaisingTicker:
+    """Stands in for yfinance.Ticker so these tests exercise get()'s
+    refresh-failure branch deterministically. timeout=0 does NOT reliably
+    fail the real HTTP call -- on a machine with live network access
+    (unlike a network-sandboxed CI runner) yfinance simply completes the
+    request and returns the real current rate, which silently turned both
+    of these into no-ops asserting against live market data instead of
+    the fallback path they're named for."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def history(self, *args, **kwargs):
+        raise RuntimeError("simulated network failure")
+
+
 def test_expired_cached_rate_falls_back_instead_of_serving_stale(monkeypatch):
     cache = _RateCache()
     cache._rate = 88.0
     cache._fetched_at = 0.0  # epoch: far older than the staleness ceiling
 
     monkeypatch.setattr("time.time", lambda: _MAX_STALE_SECONDS + 10_000)
-    # No network in tests, so the refresh inside get() fails and we take
-    # the stale-vs-fallback branch.
+    monkeypatch.setattr("yfinance.Ticker", _RaisingTicker)
     assert cache.get(timeout=0) == _FALLBACK_USD_INR
 
 
@@ -205,6 +219,7 @@ def test_recent_cached_rate_is_still_reused_on_a_failed_refresh(monkeypatch):
     cache = _RateCache()
     cache._rate = 88.0
     cache._fetched_at = _time.time() - 7200  # 2h: stale but within the ceiling
+    monkeypatch.setattr("yfinance.Ticker", _RaisingTicker)
     assert cache.get(timeout=0) == 88.0
 
 
