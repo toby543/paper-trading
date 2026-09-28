@@ -73,6 +73,16 @@ def _moving_average(history: pd.DataFrame, days: int) -> float | None:
     return float(history["Close"].tail(days).mean())
 
 
+def _now(today: pd.Timestamp | None) -> pd.Timestamp:
+    """"Now" for holding-period arithmetic: wall clock when live, the
+    simulated day when a backtest supplies one. Without the override a
+    backtest measures real elapsed time since the run started (entry_date
+    is stamped with wall-clock now() by PaperBroker, which backtests reuse
+    unchanged), so days_held is 0 for the whole run and the time stop below
+    can never fire. Kept naive to match entry_date, which is naive local."""
+    return pd.Timestamp.now() if today is None else pd.Timestamp(today)
+
+
 def _ratio_series(coin_history: pd.DataFrame, benchmark_history: pd.DataFrame) -> pd.Series | None:
     """Coin close / benchmark close, aligned on their shared dates.
 
@@ -204,6 +214,7 @@ def check_exit(
     history: pd.DataFrame,
     config: dict,
     benchmark_history: pd.DataFrame | None = None,
+    today: pd.Timestamp | None = None,
 ) -> tuple[bool, str]:
     stop_loss_pct = config.get("stop_loss_pct", 10.0)
     stop_price = position.avg_price * (1 - stop_loss_pct / 100.0)
@@ -227,7 +238,7 @@ def check_exit(
 
     time_stop_days = config.get("time_stop_days", 10)
     entry_ts = pd.Timestamp(position.entry_date)
-    days_held = (pd.Timestamp.now() - entry_ts).days
+    days_held = (_now(today) - entry_ts).days
     if days_held >= time_stop_days:
         return True, f"time_stop ({days_held} days, current {quote.ltp:.2f})"
 

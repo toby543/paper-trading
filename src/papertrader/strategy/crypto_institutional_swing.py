@@ -41,6 +41,16 @@ def _moving_average(history: pd.DataFrame, days: int) -> float | None:
     return float(history["Close"].tail(days).mean())
 
 
+def _now(today: pd.Timestamp | None) -> pd.Timestamp:
+    """"Now" for holding-period arithmetic: wall clock when live, the
+    simulated day when a backtest supplies one. Without the override a
+    backtest measures real elapsed time since the run started (entry_date
+    is stamped with wall-clock now() by PaperBroker, which backtests reuse
+    unchanged), so days_held is 0 for the whole run and the time stop below
+    can never fire. Kept naive to match entry_date, which is naive local."""
+    return pd.Timestamp.now() if today is None else pd.Timestamp(today)
+
+
 def _rsi(history: pd.DataFrame, period: int = 14) -> float | None:
     """Calculate RSI(14). Returns None if it cannot be computed.
 
@@ -210,7 +220,10 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
-def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:
+def check_exit(
+    position: Position, quote: Quote, history: pd.DataFrame, config: dict,
+    today: pd.Timestamp | None = None,
+) -> tuple[bool, str]:
     """Determine if a swing position should exit.
 
     Exit conditions (in order):
@@ -244,7 +257,7 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
     # Position has no "entry_time" attribute -- only "entry_date" (an ISO
     # string). hasattr(position, 'entry_time') was always False, so
     # days_held was always 0 and this exit could never fire.
-    days_held = (pd.Timestamp.now() - pd.Timestamp(position.entry_date)).days
+    days_held = (_now(today) - pd.Timestamp(position.entry_date)).days
     if days_held >= time_stop_days:
         return True, f"time_stop ({days_held} days, current {quote.ltp:.2f})"
 

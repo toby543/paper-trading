@@ -55,6 +55,16 @@ def _moving_average(history: pd.DataFrame, days: int) -> float | None:
     return float(history["Close"].tail(days).mean())
 
 
+def _now(today: pd.Timestamp | None) -> pd.Timestamp:
+    """"Now" for holding-period arithmetic: wall clock when live, the
+    simulated day when a backtest supplies one. Without the override a
+    backtest measures real elapsed time since the run started (entry_date
+    is stamped with wall-clock now() by PaperBroker, which backtests reuse
+    unchanged), so days_held is 0 for the whole run and the time stop below
+    can never fire. Kept naive to match entry_date, which is naive local."""
+    return pd.Timestamp.now() if today is None else pd.Timestamp(today)
+
+
 def _rsi(history: pd.DataFrame, period: int = 14) -> float | None:
     """Same NaN-safe RSI(14) as every other crypto strategy here -- see
     crypto_momentum._rsi for why a flat window must return None, not NaN."""
@@ -144,7 +154,10 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
-def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:
+def check_exit(
+    position: Position, quote: Quote, history: pd.DataFrame, config: dict,
+    today: pd.Timestamp | None = None,
+) -> tuple[bool, str]:
     stop_loss_pct = config.get("stop_loss_pct", 8.0)
     stop_price = position.avg_price * (1 - stop_loss_pct / 100.0)
     if quote.ltp <= stop_price:
@@ -167,7 +180,7 @@ def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: 
     # days has stopped being what this strategy is designed to hold.
     time_stop_days = config.get("time_stop_days", 5)
     entry_ts = pd.Timestamp(position.entry_date)
-    days_held = (pd.Timestamp.now() - entry_ts).days
+    days_held = (_now(today) - entry_ts).days
     if days_held >= time_stop_days:
         return True, f"time_stop ({days_held} days, current {quote.ltp:.2f})"
 

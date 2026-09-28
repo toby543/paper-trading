@@ -193,7 +193,14 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(candidates, key=lambda c: c.score, reverse=True)
 
 
-def check_exit(position: Position, quote: Quote, history: pd.DataFrame, config: dict) -> tuple[bool, str]:
+def check_exit(
+    position: Position, quote: Quote, history: pd.DataFrame, config: dict,
+    # Unused here (this strategy has no holding-period exit), but part of the
+    # signature every simple crypto strategy shares so the one dispatch loop
+    # in the backtester can call them all identically -- see
+    # _SIMPLE_CRYPTO_STRATEGIES in backtest/engine.py.
+    today: pd.Timestamp | None = None,
+) -> tuple[bool, str]:
     """
     Determine if a crypto position should exit.
 

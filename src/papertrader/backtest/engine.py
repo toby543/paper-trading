@@ -545,11 +545,14 @@ class Backtester:
             elif mode == "long_term_trend":
                 should_exit, reason = long_term_trend.check_exit(pos, quote, history_upto, cfg)
             elif mode in _SIMPLE_CRYPTO_STRATEGIES:
-                should_exit, reason = _SIMPLE_CRYPTO_STRATEGIES[mode].check_exit(pos, quote, history_upto, cfg)
+                should_exit, reason = _SIMPLE_CRYPTO_STRATEGIES[mode].check_exit(
+                    pos, quote, history_upto, cfg, today=day,
+                )
             elif mode == "crypto_pairs_trading":
                 should_exit, reason = crypto_pairs_trading.check_exit(
                     pos, quote, history_upto, cfg,
                     benchmark_history=self._pairs_benchmark_history(day),
+                    today=day,
                 )
             else:
                 should_exit, reason = exit_52w(pos, quote, history_upto, cfg)
@@ -776,11 +779,29 @@ class Backtester:
                 trade = self.broker.buy(cand.symbol, qty, cand.ltp, reason=f"score={cand.score:.1f}")
             except InsufficientFundsError:
                 continue
+            self._stamp_simulated_entry_date(cand.symbol, day)
             spent += cost_estimate
             trade_log.append({
                 "date": str(day.date()), "side": "BUY", "symbol": cand.symbol,
                 "qty": qty, "price": round(trade.price, 2), "reason": trade.reason, "pnl": None,
             })
+
+    def _stamp_simulated_entry_date(self, symbol: str, day: pd.Timestamp) -> None:
+        """Rewrite a just-opened position's entry_date to the simulated day.
+
+        PaperBroker is reused unchanged from live trading, so buy() stamps
+        entry_date with wall-clock now(). Left alone, every holding-period
+        exit (crypto's time stops) would measure real seconds elapsed since
+        the backtest started rather than simulated days held, and so could
+        never fire. Every buy here opens a new position -- _run_entries skips
+        symbols already in `positions` -- so there is no add-on case whose
+        original entry date would need preserving.
+        """
+        pos = self.broker.positions().get(symbol)
+        if pos is None:
+            return
+        pos.entry_date = day.isoformat()
+        self.storage.upsert_position(pos)
 
     def _mark_to_market(self, day: pd.Timestamp) -> float:
         quotes = {}
