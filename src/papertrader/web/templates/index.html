@@ -726,6 +726,7 @@
           <select id="btUniverse" class="edit-input wide">
             <option value="data/universe.csv" {{ 'selected' if universe_cfg.get('file', 'data/universe.csv') == 'data/universe.csv' else '' }}>Default (data/universe.csv)</option>
             <option value="data/universe_nifty500.csv" {{ 'selected' if universe_cfg.get('file') == 'data/universe_nifty500.csv' else '' }}>Nifty 500 (data/universe_nifty500.csv)</option>
+            <option value="data/universe_ipo_all.csv" {{ 'selected' if universe_cfg.get('file') == 'data/universe_ipo_all.csv' else '' }}>Recent IPOs, NSE + BSE (data/universe_ipo_all.csv)</option>
           </select>
         </div>
         <button id="backtestRunBtn" class="edit-save-btn">Run Backtest</button>

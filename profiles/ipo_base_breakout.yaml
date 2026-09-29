@@ -2,6 +2,9 @@ display_name: "IPO Base Breakout"
 state_file: data/state_ipo_base_breakout.db
 starting_capital: 100000.0
 strategy_mode: ipo_base_breakout
+# All sectors, NSE + BSE: recent NSE listings plus BSE-only stocks (".BO").
+# Rebuild with `python scripts/build_ipo_universe.py` as new IPOs list.
+universe_file: data/universe_ipo_all.csv
 strategy:
   # Shorter than consolidation_breakout's 21d/5% -- a fresh IPO's initial
   # move off its base tends to be sharper but shorter-lived than an

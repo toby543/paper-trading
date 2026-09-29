@@ -26,7 +26,7 @@ import pandas as pd
 
 from ..config import Config
 from ..data import price_cache
-from ..data.nse_client import Quote
+from ..data.nse_client import Quote, yahoo_ticker
 from ..data.universe import load_universe
 from ..portfolio.broker import InsufficientFundsError, PaperBroker
 from ..portfolio.storage import Storage
@@ -307,7 +307,7 @@ class Backtester:
                     _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
                 last_call = _time.time()
                 try:
-                    ticker_symbol = symbol + ".NS"
+                    ticker_symbol = yahoo_ticker(symbol)
                     df = yf.Ticker(ticker_symbol).history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
                     if not df.empty:
                         df.index = df.index.tz_localize(None)
