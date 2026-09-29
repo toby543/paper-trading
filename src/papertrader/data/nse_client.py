@@ -39,6 +39,22 @@ DEFAULT_HEADERS = {
 }
 
 
+BSE_SUFFIX = ".BO"
+
+
+def is_bse_symbol(symbol: str) -> bool:
+    """BSE-only listings are written with a ".BO" suffix in the universe
+    (e.g. "500002.BO", the BSE scrip code Yahoo resolves reliably). Anything
+    without it is an NSE symbol."""
+    return symbol.upper().endswith(BSE_SUFFIX)
+
+
+def yahoo_ticker(symbol: str) -> str:
+    """Yahoo Finance ticker for a universe symbol: BSE ("ABB.BO") and crypto
+    ("BTC-USD") symbols are already full tickers, NSE symbols get ".NS"."""
+    return symbol if is_bse_symbol(symbol) or is_crypto_symbol(symbol) else symbol + ".NS"
+
+
 class DataUnavailableError(RuntimeError):
     """Raised when neither NSE nor the fallback source could serve a quote."""
 
@@ -232,7 +248,8 @@ class MarketDataClient:
                 quote.week52_high *= fx
                 quote.week52_low *= fx
             return quote
-        if self.preferred == "nse" and not self._nse_broken:
+        # The NSE quote API only knows NSE symbols; BSE ones go straight to Yahoo.
+        if self.preferred == "nse" and not self._nse_broken and not is_bse_symbol(symbol):
             try:
                 return self._quote_from_nse(symbol)
             except Exception as exc:  # noqa: BLE001 - deliberately broad, we fall back
@@ -262,7 +279,7 @@ class MarketDataClient:
         import yfinance as yf
 
         self._throttle_yfinance()
-        ticker_symbol = symbol if is_crypto else symbol + ".NS"
+        ticker_symbol = symbol if is_crypto else yahoo_ticker(symbol)
         ticker = yf.Ticker(ticker_symbol)
         # `timeout` bounds the underlying HTTP call the same way self.timeout
         # already bounds every NSE request -- without it, a stalled
@@ -323,10 +340,7 @@ class MarketDataClient:
         import yfinance as yf
 
         self._throttle_yfinance()
-        # Crypto symbols (e.g. "BTC-USD") are already full Yahoo Finance
-        # tickers -- see _is_crypto_symbol -- and must NOT get the ".NS"
-        # equity suffix, or every history fetch for a crypto profile fails.
-        ticker_symbol = symbol if self._is_crypto_symbol(symbol) else symbol + ".NS"
+        ticker_symbol = yahoo_ticker(symbol)
         try:
             # timeout=self.timeout: see the comment in _quote_from_yfinance --
             # without it, a stalled connection hangs this call forever with

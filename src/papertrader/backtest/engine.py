@@ -26,7 +26,7 @@ import pandas as pd
 
 from ..config import Config
 from ..data import price_cache
-from ..data.nse_client import Quote, is_crypto_symbol
+from ..data.nse_client import Quote, is_crypto_symbol, yahoo_ticker
 from ..data.universe import load_universe
 from ..portfolio.broker import InsufficientFundsError, PaperBroker
 from ..portfolio.storage import Storage
@@ -367,14 +367,7 @@ class Backtester:
                     _time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
                 last_call = _time.time()
                 try:
-                    # Crypto universe symbols ("BTC-USD") are already full
-                    # Yahoo Finance tickers -- unlike NSE equity codes,
-                    # which need ".NS" appended. Mirrors
-                    # MarketDataClient._is_crypto_symbol; without this, every
-                    # backtest for a crypto profile would fetch the
-                    # nonexistent ticker "BTC-USD.NS" and silently end up
-                    # with zero history for every symbol.
-                    ticker_symbol = symbol if "-" in symbol else symbol + ".NS"
+                    ticker_symbol = yahoo_ticker(symbol)
                     df = yf.Ticker(ticker_symbol).history(start=fetch_start, end=fetch_end, timeout=self._fetch_timeout)
                     if not df.empty:
                         df.index = df.index.tz_localize(None)

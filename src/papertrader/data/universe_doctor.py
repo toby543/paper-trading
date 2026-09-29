@@ -23,6 +23,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
+from .nse_client import yahoo_ticker
+
 log = logging.getLogger(__name__)
 
 # Stale symbol -> (candidate replacement, why). Verified at runtime.
@@ -69,7 +71,7 @@ def probe_yfinance(symbol: str) -> bool:
     """True if `symbol` resolves to real NSE price data right now."""
     import yfinance as yf
     try:
-        df = yf.Ticker(symbol + ".NS").history(period="5d")
+        df = yf.Ticker(yahoo_ticker(symbol)).history(period="5d")
         return not df.empty
     except Exception:  # noqa: BLE001 - any failure means "can't use this symbol"
         return False
