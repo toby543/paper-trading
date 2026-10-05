@@ -116,6 +116,45 @@ class Storage:
             self._tx.conn = None
             conn.close()
 
+    @staticmethod
+    def _backfill_entry_charges(conn) -> int:
+        """Rebuild entry_charges for open positions that recorded 0, by
+        replaying that symbol's trades with the same rule PaperBroker uses
+        (a BUY adds its charge; a SELL releases the sold fraction of the
+        accumulated charges). Positions that already carry a value are
+        left alone. Returns how many positions were updated."""
+        updated = 0
+        open_rows = conn.execute(
+            "SELECT symbol FROM positions WHERE entry_charges = 0"
+        ).fetchall()
+        for row in open_rows:
+            symbol = row["symbol"]
+            qty = 0.0
+            charges = 0.0
+            trades = conn.execute(
+                "SELECT side, quantity, charges FROM trades WHERE symbol = ? ORDER BY id", (symbol,)
+            ).fetchall()
+            for t in trades:
+                if t["side"] == "BUY":
+                    qty += t["quantity"]
+                    charges += t["charges"]
+                elif t["side"] == "SELL" and qty > 0:
+                    portion = min(t["quantity"] / qty, 1.0)
+                    charges -= charges * portion
+                    qty -= t["quantity"]
+                    if qty <= 1e-9:
+                        qty, charges = 0.0, 0.0
+            if charges > 0:
+                conn.execute(
+                    "UPDATE positions SET entry_charges = ? WHERE symbol = ?", (charges, symbol)
+                )
+                updated += 1
+        return updated
+
+    def backfill_entry_charges(self) -> int:
+        with self._conn() as conn:
+            return self._backfill_entry_charges(conn)
+
     def _init_db(self, starting_capital: float) -> None:
         with self._conn() as conn:
             conn.executescript(SCHEMA)
@@ -131,11 +170,10 @@ class Storage:
             self._backfill_realized_pnl(conn)
             position_cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
             if "entry_charges" not in position_cols:
-                # Existing rows default to 0: what they actually paid to
-                # open is not recoverable from the ledger, and 0 keeps
-                # their P&L reading exactly as it does today rather than
-                # inventing a number. New positions record it properly.
                 conn.execute("ALTER TABLE positions ADD COLUMN entry_charges REAL NOT NULL DEFAULT 0")
+                # What an existing position paid to open IS recoverable: every
+                # BUY row in trades carries its charge.
+                self._backfill_entry_charges(conn)
             account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
             if "last_scan_at" not in account_cols:
                 conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")

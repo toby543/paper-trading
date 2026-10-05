@@ -28,3 +28,5 @@ config.yaml.tmp
 profiles/*.bak
 profiles/*.tmp
 .env
+
+data/*.bak-entry-charges
