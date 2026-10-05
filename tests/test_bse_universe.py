@@ -31,3 +31,26 @@ def test_ipo_profile_universe_covers_both_exchanges():
     assert any(s.endswith(".BO") for s in symbols), "no BSE symbols"
     assert any(not s.endswith(".BO") for s in symbols), "no NSE symbols"
     assert len(symbols) == len(set(symbols))
+
+
+def _load_builder():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("build_ipo_universe", "scripts/build_ipo_universe.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_rights_entitlements_are_not_universe_members():
+    is_re = _load_builder().is_rights_entitlement
+    assert is_re("CENTEXT-RE", "Century Extrusions Limited-RE")
+    assert is_re("ABC-RE1", "ABC Limited")
+    assert not is_re("BAJAJ-AUTO", "Bajaj Auto Limited")
+    assert not is_re("KLBRENG-B", "Kilburn Engineering Limited")
+    assert not is_re("RELIANCE", "Reliance Industries Limited")
+
+
+def test_universe_has_no_rights_entitlement_symbols():
+    symbols = load_universe("data/universe_ipo_all.csv")
+    assert not [s for s in symbols if s.upper().endswith("-RE")]
