@@ -187,6 +187,35 @@
   .panel-head { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
   .panel-head h2 { font-family: "Inter", ui-sans-serif, system-ui, sans-serif; font-weight: 700; font-size: 14.5px; margin: 0; letter-spacing: -0.01em; }
   .panel-head .meta { font-size: 11px; color: var(--ink-faint); }
+  /* ---------- manual trade ticket ---------- */
+  .manual-body { padding: 16px 20px 20px; }
+  .manual-search-wrap { position: relative; }
+  .manual-search-wrap .edit-input { width: 100%; text-align: left; box-sizing: border-box; }
+  .manual-results {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg); max-height: 320px; overflow-y: auto; display: none;
+  }
+  .manual-results.open { display: block; }
+  .manual-result { display: flex; justify-content: space-between; gap: 12px; padding: 9px 12px; cursor: pointer; font-size: 13px; }
+  .manual-result:hover, .manual-result.active { background: var(--accent-wash); }
+  .manual-result .nm { color: var(--ink-dim); font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .manual-ticket { display: none; margin-top: 16px; }
+  .manual-ticket.open { display: block; }
+  .manual-quote { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; margin-bottom: 14px; }
+  .manual-quote .px { font-size: 22px; font-weight: 700; }
+  .manual-quote .meta { font-size: 12px; color: var(--ink-dim); }
+  .manual-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .manual-side { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .manual-side button { background: transparent; border: 0; color: var(--ink-dim); padding: 8px 18px; font-weight: 600; cursor: pointer; }
+  .manual-side button.on.buy { background: var(--up, #2e9d6b); color: #fff; }
+  .manual-side button.on.sell { background: var(--down, #d4574a); color: #fff; }
+  .manual-est { margin-top: 10px; font-size: 12.5px; color: var(--ink-dim); }
+  .manual-msg { margin-top: 10px; font-size: 13px; }
+  .manual-msg.err { color: var(--down, #d4574a); }
+  .manual-msg.ok { color: var(--up, #2e9d6b); }
+  .manual-sell-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-dim); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+  .manual-sell-btn:hover { border-color: var(--down, #d4574a); color: var(--down, #d4574a); }
   .period-select {
     background: var(--surface-2); color: var(--ink-dim); border: 1px solid var(--border);
     border-radius: 999px; padding: 4px 10px; cursor: pointer; font-weight: 500;
@@ -647,6 +676,41 @@
         <div class="indices-grid" id="indicesGrid"></div>
       </div>
 
+      {% if is_manual_profile %}
+      <div class="panel" id="manualPanel">
+        <div class="panel-head">
+          <h2>Manual Trade</h2>
+          <span class="meta mono" id="manualMeta">search any NSE / BSE stock</span>
+        </div>
+        <div class="manual-body">
+          <div class="manual-search-wrap">
+            <input type="text" id="manualSearch" class="edit-input" autocomplete="off"
+                   placeholder="Search by name or symbol, e.g. reliance, tata, ABB" aria-label="Search stocks">
+            <div class="manual-results" id="manualResults" role="listbox"></div>
+          </div>
+          <div class="manual-ticket" id="manualTicket">
+            <div class="manual-quote">
+              <span class="mono" id="manualSymbol" style="font-weight:700;"></span>
+              <span class="mono px" id="manualPrice">&mdash;</span>
+              <span class="meta mono" id="manualDay"></span>
+              <span class="meta" id="manualName"></span>
+            </div>
+            <div class="manual-row">
+              <span class="manual-side">
+                <button type="button" id="manualBuyBtn" class="buy on">Buy</button>
+                <button type="button" id="manualSellBtn" class="sell">Sell</button>
+              </span>
+              <input type="number" id="manualQty" class="edit-input" min="1" step="1" value="1" style="width:110px;" aria-label="Quantity">
+              <input type="text" id="manualNote" class="edit-input wide" maxlength="100" placeholder="Note (optional)" style="width:220px; text-align:left;">
+              <button type="button" id="manualPlaceBtn" class="edit-save-btn">Place order</button>
+            </div>
+            <div class="manual-est mono" id="manualEst"></div>
+            <div class="manual-msg" id="manualMsg"></div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="panel">
         <div class="panel-head">
           <h2>Open Positions</h2>
@@ -656,7 +720,7 @@
           <table id="positionsTable">
             <thead>
               <tr>
-                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>
+                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>{% if is_manual_profile %}<th></th>{% endif %}
               </tr>
             </thead>
             <tbody id="positionsBody"></tbody>
@@ -804,7 +868,11 @@
     <div id="rulesBody" class="panel-body-collapsible">
     <div class="rules-grid">
       <div class="rules-col">
-        {% if strategy.get('mode') == 'cross_sectional_momentum' %}
+        {% if strategy.get('mode') == 'manual' %}
+        <div class="rules-col-label">Entry &mdash; manual</div>
+        <div class="rule"><span>Entries</span><span class="mono">you place every order</span></div>
+        <div class="rule"><span>Market hours</span><span class="mono">orders fill only while the market is open</span></div>
+        {% elif strategy.get('mode') == 'cross_sectional_momentum' %}
         {% set cs = strategy.get('cross_sectional', {}) %}
         <div class="rules-col-label">Entry — cross-sectional momentum</div>
         <div class="rule"><span>Ranking</span><span class="mono">top {{ cs.get('top_pct', '—') }}% of universe by return</span></div>
@@ -967,6 +1035,10 @@
         {% endif %}
       </div>
       <div class="rules-col">
+        {% if strategy.get('mode') == 'manual' %}
+        <div class="rules-col-label">Exit &mdash; manual</div>
+        <div class="rule"><span>Exits</span><span class="mono">you sell every position yourself</span></div>
+        {% else %}
         <div class="rules-col-label">Exit — first to trigger wins</div>
         {% if risk.get('take_profit_pct') %}
         <div class="rule"><span>Take profit</span><span class="mono up">+{{ risk.get('take_profit_pct') }}% from entry</span></div>
@@ -985,10 +1057,15 @@
         {% elif risk.get('exit_below_fast_ma') %}
         <div class="rule"><span>Momentum breakdown</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% endif %}
+        {% endif %}
         <div class="rules-col-label" style="margin-top: 14px;">Sizing &amp; exposure</div>
+        {% if strategy.get('mode') != 'manual' %}
         <div class="rule"><span>Position size</span><span class="mono">{{ risk.get('position_size_pct_of_equity', '—') }}% of equity</span></div>
+        {% endif %}
         <div class="rule"><span>Max open positions</span><span class="mono">{{ risk.get('max_open_positions', '—') }}</span></div>
+        {% if strategy.get('mode') != 'manual' %}
         <div class="rule"><span>Max cash deployed / scan</span><span class="mono">{{ risk.get('max_cash_deployed_per_scan_pct', '—') }}% of free cash</span></div>
+        {% endif %}
       </div>
     </div>
     </div>
@@ -1140,6 +1217,7 @@ async function authFetch(url, opts) {
 const ACTIVE_PROFILE = {{ active_profile | tojson }};
 const PROFILE_CATEGORIES = {{ profile_categories | tojson }};
 const IS_CRYPTO_PROFILE = {{ is_crypto_profile | tojson }};
+const IS_MANUAL = {{ is_manual_profile | tojson }};
 // A crypto profile's book is quoted in USD, so it gets $ and plain
 // thousands grouping; an NSE profile keeps ₹ and lakh/crore grouping.
 // Book currency, not asset class: a crypto profile priced in rupees
@@ -1196,8 +1274,10 @@ function renderStats(s) {
     { label: "Unrealized P&L", value: (unrealized >= 0 ? "+" : "") + CCY + fmt(unrealized), sub: "on open positions (" + (unrealizedPct >= 0 ? "+" : "") + unrealizedPct.toFixed(2) + "%)", subCls: pnlClass(unrealized), valueCls: pnlClass(unrealized) },
     { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + CCY + fmt(s.total_realized_pnl), sub: "from closed sells (" + (s.total_realized_pnl_pct >= 0 ? "+" : "") + s.total_realized_pnl_pct + "%)", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
-    { label: "Universe Scanned", value: fmtInt(s.universe_size),
-      sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
+    IS_MANUAL
+      ? { label: "Tradable", value: "NSE + BSE", sub: "search any listed stock" }
+      : { label: "Universe Scanned", value: fmtInt(s.universe_size),
+          sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
   ];
   document.getElementById("stats").innerHTML = cards.map(c => `
     <div class="stat ${c.hero ? "hero" : ""}">
@@ -1227,7 +1307,7 @@ function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">No open positions — the next scan will look for qualifying entries.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 10 : 9}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {
@@ -1246,9 +1326,158 @@ function renderPositions(s) {
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
       <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
+      ${IS_MANUAL ? `<td><button type="button" class="manual-sell-btn" data-symbol="${p.symbol}" data-qty="${p.quantity}">Sell</button></td>` : ""}
     </tr>`;
   }).join("");
 }
+
+// ---------- manual trade ticket (manual profiles only) ----------
+const manual = { symbol: null, side: "BUY", quote: null, searchTimer: null, seq: 0 };
+
+function manualEl(id) { return document.getElementById(id); }
+function manualMsg(text, cls) {
+  const el = manualEl("manualMsg");
+  el.textContent = text || "";
+  el.className = "manual-msg " + (cls || "");
+}
+
+function manualUpdateEstimate() {
+  const est = manualEl("manualEst");
+  const q = manual.quote;
+  const qty = Math.floor(Number(manualEl("manualQty").value));
+  if (!q || !(qty > 0)) { est.textContent = ""; return; }
+  if (manual.side === "BUY") {
+    const cost = q.buy_cost_per_share * qty + q.buy_cost_fixed;
+    est.textContent = `Approx. cost ${CCY}${fmt(cost)} incl. slippage and charges · cash ${CCY}${fmt(q.cash)}` +
+      (q.held_quantity ? ` · you hold ${fmtInt(q.held_quantity)}` : "");
+  } else {
+    est.textContent = q.held_quantity
+      ? `You hold ${fmtInt(q.held_quantity)} @ avg ${CCY}${fmt(q.held_avg_price)} · selling ${fmtInt(qty)} at about ${CCY}${fmt(q.ltp)}`
+      : "You don't hold this stock.";
+  }
+}
+
+function manualSetSide(side) {
+  manual.side = side;
+  manualEl("manualBuyBtn").className = "buy" + (side === "BUY" ? " on" : "");
+  manualEl("manualSellBtn").className = "sell" + (side === "SELL" ? " on" : "");
+  manualEl("manualPlaceBtn").textContent = side === "BUY" ? "Place buy order" : "Place sell order";
+  manualUpdateEstimate();
+}
+
+async function manualLoadQuote(symbol, name) {
+  manual.symbol = symbol;
+  manualEl("manualTicket").classList.add("open");
+  manualEl("manualSymbol").textContent = symbol;
+  manualEl("manualName").textContent = name || "";
+  manualEl("manualPrice").textContent = "…";
+  manualEl("manualDay").textContent = "";
+  manualMsg("");
+  manual.quote = null;
+  try {
+    const res = await authFetch("/api/manual/quote?profile=" + encodeURIComponent(ACTIVE_PROFILE) +
+                                "&symbol=" + encodeURIComponent(symbol));
+    const q = await res.json();
+    if (!q.ok) { manualEl("manualPrice").textContent = "—"; manualMsg(q.error || "Quote failed.", "err"); return; }
+    manual.quote = q;
+    manualEl("manualPrice").textContent = CCY + fmt(q.ltp);
+    const chg = q.prev_close ? (q.ltp - q.prev_close) / q.prev_close * 100 : 0;
+    manualEl("manualDay").textContent = `${signed(chg)}% today · 52w ${fmt(q.week52_low)}–${fmt(q.week52_high)}` +
+      (q.market_open ? "" : " · market closed");
+    manualSetSide(manual.side);
+  } catch (e) {
+    manualMsg("Could not fetch a quote: " + e.message, "err");
+  }
+}
+
+function manualSelect(symbol, name) {
+  manualEl("manualResults").classList.remove("open");
+  manualEl("manualSearch").value = symbol;
+  manualLoadQuote(symbol, name);
+}
+
+async function manualSearch(query) {
+  const box = manualEl("manualResults");
+  const mine = ++manual.seq;
+  if (!query.trim()) { box.classList.remove("open"); return; }
+  try {
+    const res = await authFetch("/api/manual/search?q=" + encodeURIComponent(query));
+    const data = await res.json();
+    if (mine !== manual.seq) return;  // a newer keystroke superseded this one
+    if (!data.results.length) {
+      box.innerHTML = `<div class="manual-result"><span>No matches</span></div>`;
+    } else {
+      box.innerHTML = data.results.map(r =>
+        `<div class="manual-result" role="option" data-symbol="${r.symbol}" data-name="${r.name.replace(/"/g, "&quot;")}">
+           <span class="mono">${r.symbol} <span style="color:var(--ink-faint);">${r.exchange}</span></span>
+           <span class="nm">${r.name}</span></div>`).join("");
+    }
+    box.classList.add("open");
+  } catch (e) { /* auth redirect or network blip: leave the box as is */ }
+}
+
+async function manualPlaceOrder() {
+  const qty = Math.floor(Number(manualEl("manualQty").value));
+  if (!manual.symbol || !manual.quote) { manualMsg("Pick a stock first.", "err"); return; }
+  if (!(qty > 0)) { manualMsg("Enter a whole number of shares.", "err"); return; }
+  const price = manual.quote.ltp;
+  if (!window.confirm(`${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`)) return;
+  const btn = manualEl("manualPlaceBtn");
+  btn.disabled = true;
+  try {
+    const res = await authFetch("/api/manual/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: ACTIVE_PROFILE, symbol: manual.symbol, side: manual.side,
+        quantity: qty, note: manualEl("manualNote").value,
+      }),
+    });
+    const out = await res.json();
+    if (!out.ok) { manualMsg(out.error || "Order rejected.", "err"); return; }
+    const done = `${out.side === "BUY" ? "Bought" : "Sold"} ${fmtInt(out.quantity)} × ${out.symbol} at ${CCY}${fmt(out.price)}` +
+      (out.realized_pnl !== null && out.realized_pnl !== undefined ? ` · realized ${CCY}${signed(out.realized_pnl)}` : "");
+    manualEl("manualNote").value = "";
+    await manualLoadQuote(manual.symbol, manualEl("manualName").textContent);
+    manualMsg(done, "ok");  // after the quote reload, which clears the message
+    refresh();
+  } catch (e) {
+    manualMsg("Order failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function initManualTicket() {
+  if (!IS_MANUAL || !manualEl("manualPanel")) return;
+  const input = manualEl("manualSearch");
+  input.addEventListener("input", () => {
+    clearTimeout(manual.searchTimer);
+    manual.searchTimer = setTimeout(() => manualSearch(input.value), 200);
+  });
+  manualEl("manualResults").addEventListener("click", (ev) => {
+    const row = ev.target.closest(".manual-result[data-symbol]");
+    if (row) manualSelect(row.dataset.symbol, row.dataset.name);
+  });
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest(".manual-search-wrap")) manualEl("manualResults").classList.remove("open");
+  });
+  manualEl("manualBuyBtn").addEventListener("click", () => manualSetSide("BUY"));
+  manualEl("manualSellBtn").addEventListener("click", () => manualSetSide("SELL"));
+  manualEl("manualQty").addEventListener("input", manualUpdateEstimate);
+  manualEl("manualPlaceBtn").addEventListener("click", manualPlaceOrder);
+  document.getElementById("positionsBody").addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".manual-sell-btn");
+    if (!btn) return;
+    manualEl("manualSearch").value = btn.dataset.symbol;
+    manualEl("manualQty").value = btn.dataset.qty;
+    manualSetSide("SELL");
+    manualLoadQuote(btn.dataset.symbol, "");
+    manualEl("manualPanel").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+initManualTicket();
+
 
 function renderTrades(trades) {
   const el = document.getElementById("tickerBody");

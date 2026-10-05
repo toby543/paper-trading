@@ -243,7 +243,7 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
             "detail": f"The filters that rejected the most: {top_str}. Zero candidates is often correct "
                       "-- a qualifying setup is rare by design -- rather than a sign anything is broken.",
         })
-    elif market_open and free_slots > 0 and cash_pct >= 60.0:
+    elif market_open and free_slots > 0 and cash_pct >= 60.0 and not getattr(engine, "is_manual", False):
         # No scan diagnostics recorded yet (e.g. right after a restart,
         # before this profile's first cycle) -- fall back to the old,
         # less specific heuristic rather than saying nothing at all.

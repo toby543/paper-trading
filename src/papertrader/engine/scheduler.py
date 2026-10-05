@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from ..config import Config
 from ..data.nse_client import MarketDataClient, DataUnavailableError
 from ..data.universe import load_universe
+from .manual import MANUAL_MODE, ManualTrader
 from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
@@ -133,6 +134,23 @@ class TradingEngine:
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
         self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
 
+    @property
+    def is_manual(self) -> bool:
+        """A manual profile places no automatic entries or exits; every
+        trade is entered by the user through manual_trader()."""
+        return self.strategy_cfg.get("mode") == MANUAL_MODE
+
+    def manual_trader(self) -> ManualTrader:
+        manual_cfg = self.cfg.get_profile_config(self.profile_name).get("manual") or {}
+        return ManualTrader(
+            broker=self.broker,
+            data=self.data,
+            risk=self.risk,
+            is_market_open=lambda: self.trades_24_7 or self.calendar.is_market_open(),
+            lock=self._state_lock,
+            allow_when_market_closed=bool(manual_cfg.get("allow_when_market_closed", False)),
+        )
+
     def reload_profile(self) -> str:
         """Reload engine configuration from disk after profile has changed.
         Called when user switches profiles via API. Returns new profile name."""
@@ -239,6 +257,13 @@ class TradingEngine:
             except DataUnavailableError as exc:
                 log.warning("Could not fetch pairs-trading benchmark history (%s); exits fall back to stop-loss/time-stop only this cycle", exc)
         for symbol, pos in positions.items():
+            if self.is_manual:
+                # The user decides every exit; just keep the peak price current.
+                try:
+                    self.broker.update_trailing_high(symbol, self.data.get_quote(symbol).ltp)
+                except DataUnavailableError as exc:
+                    log.warning("Skipping price refresh for %s: %s", symbol, exc)
+                continue
             try:
                 quote = self.data.get_quote(symbol)
                 history = self.data.get_history(symbol, period="1y")
@@ -340,6 +365,8 @@ class TradingEngine:
         currently blocks acting on it). Shared by scan_for_entries() below
         and the dashboard's on-demand candidate-preview endpoint.
         """
+        if self.is_manual:
+            return []
         exclude_symbols = exclude_symbols if exclude_symbols is not None else set(self.broker.positions())
         mode = self.strategy_cfg.get("mode", "52w_high")
 
@@ -940,6 +967,8 @@ class TradingEngine:
         # dashboard even while the engine keeps running normally.
         self.storage.set_last_scan_at(datetime.now().isoformat(timespec="seconds"))
         mode = self.strategy_cfg.get("mode", "52w_high")
+        if self.is_manual:
+            return  # no automatic entries
 
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))

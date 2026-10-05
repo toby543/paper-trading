@@ -455,6 +455,17 @@ CRYPTO_INERT_PATHS = {
 }
 
 
+# A manual profile runs no strategy, scan or automatic exit, so only the
+# settings that still govern its fills, price refresh and ledger apply.
+_MANUAL_SECTIONS = frozenset({"execution", "data_source", "logging", "account"})
+_MANUAL_FIELDS = frozenset({
+    ("risk", "max_open_positions"),
+    ("engine", "market_open"),
+    ("engine", "market_close"),
+    ("engine", "exit_check_interval_minutes"),
+})
+
+
 def applies_to_profile(path: tuple[str, ...], mode: str, is_crypto: bool) -> bool:
     """Whether this field governs the profile currently being viewed --
     applies_to_mode plus the crypto-inert globals above."""
@@ -471,6 +482,8 @@ def applies_to_mode(path: tuple[str, ...], mode: str) -> bool:
     _FIELD_MODES). Used to filter the Edit Settings panel down to what
     the active profile's strategy genuinely governs, so every field shown
     is one that changes its behaviour."""
+    if mode == "manual":
+        return tuple(path) in _MANUAL_FIELDS or path[0] in _MANUAL_SECTIONS
     if len(path) >= 2 and path[0] == "strategy" and path[1] in _STRATEGY_SUBSECTION_MODE:
         return _STRATEGY_SUBSECTION_MODE[path[1]] == mode
     modes = _FIELD_MODES.get(tuple(path))

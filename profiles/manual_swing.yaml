@@ -1,0 +1,12 @@
+display_name: "Manual Swing"
+state_file: data/state_manual_swing.db
+starting_capital: 100000.0
+# No strategy: the engine places no entries and no exits for this profile.
+# Search a stock on the dashboard and buy/sell it by hand.
+strategy_mode: manual
+manual:
+  # Paper fills use the live price, which only exists while the market is open.
+  allow_when_market_closed: false
+risk:
+  max_open_positions: 15
+category: swing

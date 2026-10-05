@@ -32,6 +32,8 @@ from . import auth
 from ..config import Config
 from ..config_editor import update_config_file, update_config_files
 from ..data.universe import load_universe
+from ..data import symbol_search
+from ..engine.manual import ManualOrderError
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
 from .data_api import (
@@ -327,6 +329,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             active_state_file_short=active_state_file_short,
             active_starting_capital=active_starting_capital,
             multi_profile_mode=cfg.is_multi_profile_mode(),
+            is_manual_profile=cfg.get_profile_strategy_mode(active_profile) == "manual",
         )
 
     @app.get("/api/summary")
@@ -376,10 +379,59 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         limit = request.args.get("limit", default=20, type=int)
         return jsonify(build_candidates(get_current_engine(), limit=limit))
 
+    # ---- manual trading (profiles whose strategy_mode is "manual") ----
+    def _manual_engine(profile_name: str | None):
+        # By the engine's live profile_name, not the dict key: in
+        # single-profile mode one engine is re-pointed at other profiles.
+        for engine in engines.values():
+            if engine.profile_name == profile_name:
+                return engine if engine.is_manual else None
+        return None
+
+    @app.get("/api/manual/search")
+    @api_login_required
+    def api_manual_search():
+        results = symbol_search.search(request.args.get("q", ""), limit=15)
+        return jsonify({"results": [
+            {"symbol": e.symbol, "name": e.name, "exchange": e.exchange} for e in results
+        ]})
+
+    @app.get("/api/manual/quote")
+    @api_login_required
+    def api_manual_quote():
+        engine = _manual_engine(request.args.get("profile"))
+        if engine is None:
+            return jsonify({"ok": False, "error": "Not a manual profile."}), 400
+        try:
+            return jsonify({"ok": True, **engine.manual_trader().quote(request.args.get("symbol", ""))})
+        except ManualOrderError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/manual/order")
+    @api_login_required
+    def api_manual_order():
+        # JSON only: a cross-site HTML form cannot send application/json
+        # without a CORS preflight, which is what keeps another page from
+        # placing orders on the owner's behalf.
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "Expected a JSON body."}), 415
+        payload = request.get_json(silent=True) or {}
+        engine = _manual_engine(payload.get("profile"))
+        if engine is None:
+            return jsonify({"ok": False, "error": "Not a manual profile."}), 400
+        try:
+            result = engine.manual_trader().place_order(
+                payload.get("symbol"), payload.get("side"), payload.get("quantity"), payload.get("note", ""))
+        except ManualOrderError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": True, **result})
+
     @app.post("/api/backtest/run")
     @api_login_required
     def api_backtest_run():
         payload = request.get_json(silent=True) or {}
+        if get_current_engine().is_manual:
+            return jsonify({"ok": False, "error": "A manual profile has no strategy to backtest."}), 400
         start = (payload.get("start") or "").strip()
         end = (payload.get("end") or "").strip()
         universe_file = (payload.get("universe_file") or "").strip() or None
