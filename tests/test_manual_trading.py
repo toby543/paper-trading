@@ -62,6 +62,11 @@ def test_blank_query_returns_nothing(directory):
     assert symbol_search.search("   ", path=directory) == []
 
 
+def test_shipped_directory_includes_etfs():
+    for query in ("niftybees", "nippon india etf nifty 50 bees", "nifty 50 bees"):
+        assert symbol_search.search(query)[0].symbol == "NIFTYBEES", query
+
+
 def test_shipped_directory_finds_a_known_stock():
     assert any(e.symbol == "RELIANCE" for e in symbol_search.search("reliance"))
     assert symbol_search.find("RELIANCE") is not None
