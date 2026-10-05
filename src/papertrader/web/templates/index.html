@@ -588,6 +588,13 @@
 
   <!-- Strategy comparison: all profiles side by side -->
   {% if profiles and profiles|length > 1 %}
+  <div class="stats" style="grid-template-columns: minmax(0, 320px); margin-bottom: 20px;">
+    <div class="stat" id="allUnrealizedTile">
+      <div class="label">Unrealized P&amp;L &middot; all strategies</div>
+      <div class="value mono" id="allUnrealizedValue">&mdash;</div>
+      <div class="sub mono" id="allUnrealizedSub">&nbsp;</div>
+    </div>
+  </div>
   <div class="panel" id="comparePanel" style="margin-bottom: 20px;">
     <div class="panel-head collapsible-head" id="comparePanelHead">
       <h2>Strategy Comparison</h2>
@@ -2178,6 +2185,29 @@ function renderInsights(summary) {
 let lastComparisonData = { profiles: [] };
 let lastLiveSummary = null;
 
+// Every profile's unrealized P&L summed, across ALL tabs (not just the one
+// being viewed). Each row is already in rupees -- non-INR books are
+// converted at the data layer before reaching storage -- so the sum is
+// valid, and is shown with a rupee sign rather than the viewed profile's CCY.
+function renderAllUnrealizedTile(allRows) {
+  const valueEl = document.getElementById("allUnrealizedValue");
+  const subEl = document.getElementById("allUnrealizedSub");
+  const tile = document.getElementById("allUnrealizedTile");
+  if (!valueEl || !subEl || !allRows.length) return;
+  const total = allRows.reduce((sum, r) => sum + (Number(r.unrealized_pnl) || 0), 0);
+  const capital = allRows.reduce((sum, r) => sum + (Number(r.starting_capital) || 0), 0);
+  const open = allRows.reduce((sum, r) => sum + (Number(r.open_positions) || 0), 0);
+  const pct = capital ? total / capital * 100 : 0;
+  valueEl.textContent = "₹" + signed(total);
+  valueEl.className = "value mono " + pnlClass(total);
+  subEl.textContent = `${open} open positions · ${signed(pct)}% of capital`;
+  subEl.className = "sub mono " + pnlClass(total);
+  tile.title = allRows
+    .filter(r => r.open_positions > 0)
+    .map(r => `${r.display_name}: ₹${signed(r.unrealized_pnl)}`)
+    .join(String.fromCharCode(10)) || "No open positions";
+}
+
 function renderComparison(data, liveSummary) {
   const tbody = document.getElementById("compareBody2");
   if (!tbody) return;  // panel only rendered when more than one profile exists
@@ -2214,6 +2244,7 @@ function renderComparison(data, liveSummary) {
     // order against the other (still-cached) rows' stale ones.
     allRows = allRows.slice().sort((a, b) => b.total_return_pct - a.total_return_pct);
   }
+  renderAllUnrealizedTile(allRows);
   // Only compare profiles within the tab currently being viewed -- a
   // long-term profile's return over years isn't a meaningful comparison
   // against a swing profile's return over weeks anyway.
