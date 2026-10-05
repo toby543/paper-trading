@@ -421,7 +421,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             return jsonify({"ok": False, "error": "Not a manual profile."}), 400
         try:
             result = engine.manual_trader().place_order(
-                payload.get("symbol"), payload.get("side"), payload.get("quantity"), payload.get("note", ""))
+                payload.get("symbol"), payload.get("side"), payload.get("quantity"), payload.get("note", ""),
+                expected_price=payload.get("expected_price"))
         except ManualOrderError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify({"ok": True, **result})

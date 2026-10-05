@@ -17,6 +17,9 @@ from ..portfolio.broker import InsufficientFundsError
 
 MANUAL_MODE = "manual"
 MAX_NOTE_LENGTH = 100
+# A fill more than this far from the price the user saw is refused: the
+# quote on screen can be minutes old by the time Place order is clicked.
+PRICE_TOLERANCE_PCT = 2.0
 
 
 class ManualOrderError(ValueError):
@@ -57,12 +60,17 @@ class ManualTrader:
         # with it, the flat charge does not): cost(n) = slope * n + fixed.
         one, two = self.broker.estimated_buy_cost(q.ltp, 1), self.broker.estimated_buy_cost(q.ltp, 2)
         slope = two - one
+        def finite(value):
+            # NaN is not valid JSON, and thin or newly listed stocks do
+            # produce a missing previous close or 52-week figure.
+            return value if value is not None and math.isfinite(value) else None
+
         return {
             "symbol": symbol,
             "ltp": q.ltp,
-            "prev_close": q.prev_close,
-            "week52_high": q.week52_high,
-            "week52_low": q.week52_low,
+            "prev_close": finite(q.prev_close),
+            "week52_high": finite(q.week52_high),
+            "week52_low": finite(q.week52_low),
             "source": q.source,
             "market_open": bool(self.is_market_open()),
             "cash": self.broker.cash(),
@@ -72,7 +80,7 @@ class ManualTrader:
             "buy_cost_fixed": one - slope,
         }
 
-    def place_order(self, symbol: str, side: str, quantity, note: str = "") -> dict:
+    def place_order(self, symbol: str, side: str, quantity, note: str = "", expected_price=None) -> dict:
         symbol = (symbol or "").strip().upper()
         side = (side or "").strip().upper()
         if side not in ("BUY", "SELL"):
@@ -104,6 +112,15 @@ class ManualTrader:
                 if qty > held.quantity:
                     raise ManualOrderError(f"You only hold {held.quantity:g} of {symbol}.")
             q = self._live_price(symbol)
+            if expected_price is not None:
+                try:
+                    seen = float(expected_price)
+                except (TypeError, ValueError):
+                    raise ManualOrderError("Expected price must be a number.") from None
+                if math.isfinite(seen) and seen > 0 and abs(q.ltp - seen) / seen * 100.0 > PRICE_TOLERANCE_PCT:
+                    raise ManualOrderError(
+                        f"The price moved from {seen:,.2f} to {q.ltp:,.2f} since you looked. "
+                        "Nothing was traded; review the new price and place the order again.")
             try:
                 trade = (self.broker.buy if side == "BUY" else self.broker.sell)(symbol, qty, q.ltp, reason)
             except InsufficientFundsError as exc:

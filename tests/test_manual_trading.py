@@ -298,3 +298,49 @@ def test_manual_engine_keeps_the_peak_price_current(tmp_path, monkeypatch):
     engine.data.ltp = 130.0
     engine.check_exits()
     assert engine.broker.positions()["AAA"].highest_close_since_entry == 130.0
+
+
+# --- bug-check regressions -----------------------------------------------------
+
+def test_quote_payload_never_contains_nan(trader_env):
+    """NaN is not valid JSON; a missing previous close or 52-week figure
+    (thin or new listings) used to make the browser's res.json() throw."""
+    import json
+
+    trader, _, data, _ = trader_env
+    data.get_quote = lambda s: Quote(s, 100.0, float("nan"), float("nan"), float("inf"), 1.0, datetime.now(), "x")
+    q = trader.quote("AAA")
+    assert q["prev_close"] is None and q["week52_high"] is None and q["week52_low"] is None
+    json.dumps(q, allow_nan=False)  # raises on NaN/Infinity
+
+
+def test_order_is_refused_when_the_price_moved_since_the_quote(trader_env):
+    trader, broker, data, _ = trader_env
+    data.ltp = 105.0  # +5% from the 100.0 the user saw
+    with pytest.raises(ManualOrderError, match="price moved"):
+        trader.place_order("AAA", "BUY", 1, expected_price=100.0)
+    assert not broker.positions()
+    trader.place_order("AAA", "BUY", 1, expected_price=104.0)  # within tolerance
+    assert "AAA" in broker.positions()
+
+
+def test_expected_price_is_optional_and_validated(trader_env):
+    trader, broker, _, _ = trader_env
+    trader.place_order("AAA", "BUY", 1)
+    with pytest.raises(ManualOrderError, match="Expected price"):
+        trader.place_order("AAA", "BUY", 1, expected_price="abc")
+
+
+def test_user_text_is_escaped_before_it_reaches_the_page():
+    """The note is stored in the trade reason and the trade log renders it
+    via innerHTML, so it must go through escapeText."""
+    source = open("src/papertrader/web/templates/index.html", encoding="utf-8").read()
+    assert "${escapeText(t.reason)}" in source
+    assert '<div class="ticker-reason">${t.reason}</div>' not in source
+    assert "${escapeText(r.name)}" in source
+
+
+def test_api_passes_expected_price_through(client):
+    r = client.post("/api/manual/order", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 1, "expected_price": 50})
+    assert r.status_code == 400 and "price moved" in r.get_json()["error"]

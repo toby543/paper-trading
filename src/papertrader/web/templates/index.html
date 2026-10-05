@@ -1332,7 +1332,7 @@ function renderPositions(s) {
 }
 
 // ---------- manual trade ticket (manual profiles only) ----------
-const manual = { symbol: null, side: "BUY", quote: null, searchTimer: null, seq: 0 };
+const manual = { symbol: null, side: "BUY", quote: null, searchTimer: null, seq: 0, quoteSeq: 0 };
 
 function manualEl(id) { return document.getElementById(id); }
 function manualMsg(text, cls) {
@@ -1366,6 +1366,7 @@ function manualSetSide(side) {
 }
 
 async function manualLoadQuote(symbol, name) {
+  const mine = ++manual.quoteSeq;
   manual.symbol = symbol;
   manualEl("manualTicket").classList.add("open");
   manualEl("manualSymbol").textContent = symbol;
@@ -1378,15 +1379,17 @@ async function manualLoadQuote(symbol, name) {
     const res = await authFetch("/api/manual/quote?profile=" + encodeURIComponent(ACTIVE_PROFILE) +
                                 "&symbol=" + encodeURIComponent(symbol));
     const q = await res.json();
+    if (mine !== manual.quoteSeq) return;  // the user has since picked another stock
     if (!q.ok) { manualEl("manualPrice").textContent = "—"; manualMsg(q.error || "Quote failed.", "err"); return; }
     manual.quote = q;
     manualEl("manualPrice").textContent = CCY + fmt(q.ltp);
     const chg = q.prev_close ? (q.ltp - q.prev_close) / q.prev_close * 100 : 0;
-    manualEl("manualDay").textContent = `${signed(chg)}% today · 52w ${fmt(q.week52_low)}–${fmt(q.week52_high)}` +
+    const range = q.week52_low !== null && q.week52_high !== null ? ` · 52w ${fmt(q.week52_low)}–${fmt(q.week52_high)}` : "";
+    manualEl("manualDay").textContent = (q.prev_close ? `${signed(chg)}% today` : "no previous close") + range +
       (q.market_open ? "" : " · market closed");
     manualSetSide(manual.side);
   } catch (e) {
-    manualMsg("Could not fetch a quote: " + e.message, "err");
+    if (mine === manual.quoteSeq) manualMsg("Could not fetch a quote: " + e.message, "err");
   }
 }
 
@@ -1408,9 +1411,9 @@ async function manualSearch(query) {
       box.innerHTML = `<div class="manual-result"><span>No matches</span></div>`;
     } else {
       box.innerHTML = data.results.map(r =>
-        `<div class="manual-result" role="option" data-symbol="${r.symbol}" data-name="${r.name.replace(/"/g, "&quot;")}">
-           <span class="mono">${r.symbol} <span style="color:var(--ink-faint);">${r.exchange}</span></span>
-           <span class="nm">${r.name}</span></div>`).join("");
+        `<div class="manual-result" role="option" data-symbol="${escapeText(r.symbol)}" data-name="${escapeText(r.name)}">
+           <span class="mono">${escapeText(r.symbol)} <span style="color:var(--ink-faint);">${escapeText(r.exchange)}</span></span>
+           <span class="nm">${escapeText(r.name)}</span></div>`).join("");
     }
     box.classList.add("open");
   } catch (e) { /* auth redirect or network blip: leave the box as is */ }
@@ -1430,7 +1433,7 @@ async function manualPlaceOrder() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         profile: ACTIVE_PROFILE, symbol: manual.symbol, side: manual.side,
-        quantity: qty, note: manualEl("manualNote").value,
+        quantity: qty, note: manualEl("manualNote").value, expected_price: price,
       }),
     });
     const out = await res.json();
@@ -1496,7 +1499,7 @@ function renderTrades(trades) {
         <span class="ticker-detail mono">${fmtQty(t.quantity)} @ ${CCY}${fmtPrice(t.price)}</span>
         ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}${CCY}${fmt(t.realized_pnl)}</span>` : ""}
       </div>
-      <div class="ticker-reason">${t.reason}</div>
+      <div class="ticker-reason">${escapeText(t.reason)}</div>
     </div>
   `).join("");
 }
