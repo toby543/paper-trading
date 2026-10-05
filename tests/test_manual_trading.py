@@ -808,3 +808,56 @@ def test_api_schedules_when_closed(client, trader_env):
     out = client.post("/api/manual/order", json={
         "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 2}).get_json()
     assert out["ok"] and out["status"] == "scheduled"
+
+
+# --- a scheduled buy honours its entry price ------------------------------------------
+
+def test_scheduled_buy_with_an_entry_price_never_pays_more_than_it(closed):
+    trader, broker, data, state = closed
+    out = trader.place_order("AAA", "BUY", 5, entry_price=100.0)   # equal to the last price
+    assert out["status"] == "pending" and out["limit_price"] == 100.0
+    assert broker.storage.get_pending_orders()[0]["order_type"] == "limit"
+
+    _open_market(state, data, price=106.0)        # the open gaps above the entry
+    trader.run_automation()
+    assert not broker.positions()                 # not bought at 106
+    data.ltp = 100.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].avg_price <= 100.1   # entry price, plus slippage only
+
+
+def test_scheduled_buy_fills_at_the_open_when_that_is_at_or_below_the_entry(closed):
+    trader, broker, data, state = closed
+    trader.place_order("AAA", "BUY", 5, entry_price=100.0)
+    _open_market(state, data, price=98.0)
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+    assert broker.positions()["AAA"].avg_price < 100.0
+
+
+def test_an_entry_above_the_last_price_is_still_a_ceiling_not_ignored(closed):
+    trader, broker, data, state = closed
+    out = trader.place_order("AAA", "BUY", 5, entry_price=110.0, stop_loss=105, target_price=130)
+    assert out["status"] == "pending" and out["limit_price"] == 110.0
+    _open_market(state, data, price=112.0)
+    trader.run_automation()
+    assert not broker.positions()                 # 112 is above the 110 ceiling
+    data.ltp = 109.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 5
+
+
+def test_scheduled_entry_levels_are_checked_against_the_entry_price(closed):
+    trader, _, _, _ = closed
+    with pytest.raises(ManualOrderError, match="below the entry price"):
+        trader.place_order("AAA", "BUY", 1, entry_price=110.0, stop_loss=105.0 + 6)
+    with pytest.raises(ManualOrderError, match="above the entry price"):
+        trader.place_order("AAA", "BUY", 1, entry_price=110.0, target_price=109)
+
+
+def test_scheduled_buy_without_an_entry_price_still_runs_at_the_open(closed):
+    trader, broker, data, state = closed
+    assert trader.place_order("AAA", "BUY", 5)["status"] == "scheduled"
+    _open_market(state, data, price=106.0)
+    trader.run_automation()
+    assert "AAA" in broker.positions()

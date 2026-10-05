@@ -181,10 +181,11 @@ class ManualTrader:
 
     def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note, held) -> dict:
         """The market is closed: queue the order. A buy with an entry price
-        below the last price waits for that price (a limit order, as when the
-        market is open); anything else runs at the next open at whatever the
-        price is then. The engine only acts while the market is open, so the
-        order waits through nights, weekends and holidays by itself."""
+        buys at that price or better and never above it: it fills once the
+        market is open and the price is at or below the entry, however far
+        that is from the last price. Only a buy with no entry price runs at
+        whatever the open is. The engine only acts while the market is open,
+        so the order waits through nights, weekends and holidays by itself."""
         try:
             last = self._live_price(symbol).ltp  # the last traded price (previous close)
         except ManualOrderError:
@@ -194,7 +195,7 @@ class ManualTrader:
             return {"symbol": symbol, "side": "SELL", "status": "scheduled", "order_id": order_id,
                     "quantity": qty, "cash": self.broker.cash()}
 
-        limit_order = entry is not None and last is not None and entry < last * (1 - MARKET_ENTRY_TOLERANCE)
+        limit_order = entry is not None
         reference = entry if limit_order else last
         if reference is not None:
             self._check_levels(reference, sl, target, "entry price" if limit_order else "last price")
