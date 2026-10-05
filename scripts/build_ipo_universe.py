@@ -19,6 +19,7 @@ import argparse
 import csv
 import io
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 
@@ -31,6 +32,16 @@ HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.bseindia.com/"}
 NSE_SERIES = {"EQ", "BE"}
 BSE_SERIES = {"A", "B", "X", "XT", "T"}
 OUT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "universe_ipo_all.csv")
+
+
+_RIGHTS_ENTITLEMENT = re.compile(r"-RE\d*$", re.IGNORECASE)
+
+
+def is_rights_entitlement(symbol: str, company_name: str) -> bool:
+    """NSE lists a rights entitlement as its own ticker (e.g. CENTEXT-RE,
+    company name "...Limited-RE"). It is not a stock and has no price history."""
+    return bool(_RIGHTS_ENTITLEMENT.search(str(symbol).strip())
+                or _RIGHTS_ENTITLEMENT.search(str(company_name).strip()))
 
 
 def fetch_nse() -> pd.DataFrame:
@@ -70,6 +81,8 @@ def main() -> int:
     cutoff = datetime.now() - timedelta(days=args.max_age_days)
     nse_eq = nse[nse["SERIES"].isin(NSE_SERIES)]
     recent = nse_eq[nse_eq["LISTED"] >= cutoff]
+    recent = recent[~recent.apply(
+        lambda r: is_rights_entitlement(r["SYMBOL"], r["NAME OF COMPANY"]), axis=1)]
     symbols = sorted(recent["SYMBOL"].str.strip().str.upper().unique())
     print(f"NSE: {len(nse_eq)} equity listings, {len(symbols)} listed within {args.max_age_days} days")
 
