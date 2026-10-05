@@ -80,7 +80,11 @@ CREATE TABLE IF NOT EXISTS pending_orders (
     created_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     detail TEXT NOT NULL DEFAULT '',
-    resolved_at TEXT
+    resolved_at TEXT,
+    -- side BUY/SELL; order_type "limit" (wait for limit_price) or "market_open"
+    -- (run at the next open; limit_price is 0 and unused)
+    side TEXT NOT NULL DEFAULT 'BUY',
+    order_type TEXT NOT NULL DEFAULT 'limit'
 );
 """
 
@@ -200,6 +204,11 @@ class Storage:
                 # What an existing position paid to open IS recoverable: every
                 # BUY row in trades carries its charge.
                 self._backfill_entry_charges(conn)
+            order_cols = {r["name"] for r in conn.execute("PRAGMA table_info(pending_orders)").fetchall()}
+            if "side" not in order_cols:
+                conn.execute("ALTER TABLE pending_orders ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
+            if "order_type" not in order_cols:
+                conn.execute("ALTER TABLE pending_orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'limit'")
             account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
             if "last_scan_at" not in account_cols:
                 conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")
@@ -327,13 +336,15 @@ class Storage:
                 )
 
     def add_pending_order(self, symbol: str, quantity: float, limit_price: float,
-                          stop_loss: float | None, target_price: float | None, note: str) -> int:
+                          stop_loss: float | None, target_price: float | None, note: str,
+                          side: str = "BUY", order_type: str = "limit") -> int:
         with self._conn() as conn:
             cur = conn.execute(
-                """INSERT INTO pending_orders (symbol, quantity, limit_price, stop_loss, target_price, note, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO pending_orders
+                   (symbol, quantity, limit_price, stop_loss, target_price, note, created_at, side, order_type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (symbol, quantity, limit_price, stop_loss, target_price, note,
-                 datetime.now().isoformat(timespec="seconds")),
+                 datetime.now().isoformat(timespec="seconds"), side, order_type),
             )
             return int(cur.lastrowid)
 

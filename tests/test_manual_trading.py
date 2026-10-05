@@ -79,11 +79,12 @@ class _FakeData:
     def __init__(self, ltp=100.0):
         self.ltp = ltp
         self.fail = False
+        self.bar_date = None
 
     def get_quote(self, symbol):
         if self.fail:
             raise DataUnavailableError("down")
-        return Quote(symbol, self.ltp, 99.0, 120.0, 80.0, 1000.0, datetime.now(), "fake")
+        return Quote(symbol, self.ltp, 99.0, 120.0, 80.0, 1000.0, datetime.now(), "fake", self.bar_date)
 
 
 @pytest.fixture
@@ -141,14 +142,14 @@ def test_unknown_symbol_is_rejected(trader_env):
     assert not broker.positions()
 
 
-def test_market_closed_blocks_orders_unless_allowed(trader_env):
+def test_market_closed_schedules_the_order_unless_after_hours_fills_are_allowed(trader_env):
     trader, broker, _, state = trader_env
     state["open"] = False
-    with pytest.raises(ManualOrderError, match="market is closed"):
-        trader.place_order("AAA", "BUY", 1)
+    out = trader.place_order("AAA", "BUY", 1)
+    assert out["status"] == "scheduled" and not broker.positions()
     trader.allow_when_market_closed = True
-    trader.place_order("AAA", "BUY", 1)
-    assert "AAA" in broker.positions()
+    assert trader.place_order("BBB", "BUY", 1)["status"] == "filled"
+    assert "BBB" in broker.positions()
 
 
 def test_cannot_sell_what_you_do_not_hold_or_more_than_you_hold(trader_env):
@@ -632,3 +633,178 @@ def test_api_levels_orders_and_cancel(client):
     assert client.post("/api/manual/cancel", json={
         "profile": "manual_swing", "order_id": pend["order_id"]}).get_json()["ok"]
     assert client.get("/api/manual/orders?profile=auto").status_code == 400
+
+
+# --- scheduling orders while the market is closed -----------------------------------
+
+@pytest.fixture
+def closed(trader_env):
+    trader, broker, data, state = trader_env
+    state["open"] = False
+    return trader, broker, data, state
+
+
+def _open_market(state, data, price=None):
+    state["open"] = True
+    if price is not None:
+        data.ltp = price
+
+
+def test_a_closed_market_buy_is_queued_without_touching_cash_or_positions(closed):
+    trader, broker, _, _ = closed
+    cash = broker.cash()
+    out = trader.place_order("AAA", "BUY", 10, stop_loss=95, target_price=120)
+    assert out["status"] == "scheduled" and out["last_price"] == 100.0
+    assert not broker.positions() and broker.cash() == cash
+    order = broker.storage.get_pending_orders()[0]
+    assert (order["side"], order["order_type"], order["stop_loss"]) == ("BUY", "market_open", 95.0)
+
+
+def test_scheduled_buy_runs_at_the_open_price_and_applies_its_levels(closed):
+    trader, broker, data, state = closed
+    trader.place_order("AAA", "BUY", 10, stop_loss=95, target_price=120, note="gap play")
+    _open_market(state, data, price=103.0)
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 10
+    assert broker.storage.get_levels()["AAA"] == {"stop_loss": 95.0, "target_price": 120.0}
+    order = broker.storage.get_recent_orders()[0]
+    assert order["status"] == "filled" and "at the open" in order["detail"]
+    assert broker.storage.get_trades(limit=1)[0].reason == "manual scheduled buy: gap play"
+
+
+def test_scheduled_order_waits_while_the_price_is_still_yesterdays(closed):
+    from datetime import timedelta
+
+    trader, broker, data, state = closed
+    trader.place_order("AAA", "BUY", 5)
+    _open_market(state, data)
+    data.bar_date = datetime.now().date() - timedelta(days=1)  # Yahoo has not produced today's bar yet
+    trader.run_automation()
+    assert not broker.positions() and len(broker.storage.get_pending_orders()) == 1
+    data.bar_date = datetime.now().date()
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_scheduled_buy_is_cancelled_if_the_open_gaps_through_its_stop_or_target(closed):
+    trader, broker, data, state = closed
+    trader.place_order("AAA", "BUY", 5, stop_loss=95)
+    trader.place_order("BBB", "BUY", 5, target_price=110)
+    _open_market(state, data, price=90.0)   # below the stop, not above the target
+    trader.run_automation()
+    orders = {o["symbol"]: o for o in broker.storage.get_recent_orders()}
+    assert orders["AAA"]["status"] == "cancelled" and "stop loss" in orders["AAA"]["detail"]
+    assert orders["BBB"]["status"] == "filled"
+
+    state["open"] = False
+    data.ltp = 100.0
+    trader.place_order("CCC", "BUY", 1, target_price=105)   # queued again for the next open
+    _open_market(state, data, price=107.0)
+    trader.run_automation()
+    assert "target" in [o for o in broker.storage.get_recent_orders() if o["symbol"] == "CCC"][0]["detail"]
+
+
+def test_scheduled_buy_is_cancelled_with_a_reason_if_cash_is_gone_by_the_open(closed):
+    trader, broker, data, state = closed
+    trader.place_order("AAA", "BUY", 900)          # about 90k of 100k at the last price
+    state["open"] = True
+    trader.place_order("BBB", "BUY", 800)          # a live market buy spends it first
+    state["open"] = False
+    _open_market(state, data)
+    trader.run_automation()
+    order = [o for o in broker.storage.get_recent_orders() if o["symbol"] == "AAA"][0]
+    assert order["status"] == "cancelled" and "Need" in order["detail"]
+
+
+def test_scheduled_sell_runs_at_the_open(closed):
+    trader, broker, data, state = closed
+    state["open"] = True
+    trader.place_order("AAA", "BUY", 10)
+    state["open"] = False
+    out = trader.place_order("AAA", "SELL", 4)
+    assert out["status"] == "scheduled" and broker.positions()["AAA"].quantity == 10
+    _open_market(state, data, price=108.0)
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 6
+    assert broker.storage.get_trades(limit=1)[0].reason == "manual scheduled sell"
+
+
+def test_scheduled_sell_is_cancelled_if_the_shares_are_already_gone(closed):
+    trader, broker, data, state = closed
+    state["open"] = True
+    trader.place_order("AAA", "BUY", 5, stop_loss=95)
+    state["open"] = False
+    trader.place_order("AAA", "SELL", 5)
+    _open_market(state, data, price=90.0)   # the stop sells it first (levels run before queued orders)
+    trader.run_automation()
+    order = broker.storage.get_recent_orders()[0]
+    assert order["status"] == "cancelled" and "no longer hold" in order["detail"]
+
+
+def test_closed_market_validation_still_applies(closed):
+    trader, broker, _, _ = closed
+    with pytest.raises(ManualOrderError, match="Stop loss must be below the last price"):
+        trader.place_order("AAA", "BUY", 1, stop_loss=101)
+    with pytest.raises(ManualOrderError, match="would need about"):
+        trader.place_order("AAA", "BUY", 5_000)
+    with pytest.raises(ManualOrderError, match="don't hold"):
+        trader.place_order("AAA", "SELL", 1)
+    with pytest.raises(ManualOrderError, match="Unknown symbol"):
+        trader.place_order("ZZZ", "BUY", 1)
+    assert not broker.storage.get_pending_orders()
+
+
+def test_closed_market_entry_below_the_last_price_is_a_limit_order(closed):
+    trader, broker, data, state = closed
+    out = trader.place_order("AAA", "BUY", 5, entry_price=95)
+    assert out["status"] == "pending" and out["limit_price"] == 95.0
+    _open_market(state, data, price=97.0)
+    trader.run_automation()
+    assert not broker.positions()        # opened above the limit: keeps waiting
+    data.ltp = 94.0
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_a_scheduled_order_can_be_cancelled_before_the_open(closed):
+    trader, broker, data, state = closed
+    oid = trader.place_order("AAA", "BUY", 5)["order_id"]
+    trader.cancel_order(oid)
+    _open_market(state, data)
+    trader.run_automation()
+    assert not broker.positions()
+
+
+def test_pending_orders_table_from_the_earlier_version_is_migrated(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE pending_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, quantity REAL NOT NULL,
+            limit_price REAL NOT NULL, stop_loss REAL, target_price REAL, note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            detail TEXT NOT NULL DEFAULT '', resolved_at TEXT);
+        INSERT INTO pending_orders (symbol, quantity, limit_price, created_at) VALUES ('AAA', 3, 90, 'x');
+    """)
+    conn.commit()
+    conn.close()
+    storage = Storage(path, 100_000.0)
+    order = storage.get_pending_orders()[0]
+    assert (order["side"], order["order_type"]) == ("BUY", "limit")  # old orders stay limit buys
+    storage.add_pending_order("BBB", 1, 0.0, None, None, "", "SELL", "market_open")
+    assert len(storage.get_pending_orders()) == 2
+
+
+def test_quote_tells_the_page_whether_closed_orders_queue(closed):
+    trader, _, _, _ = closed
+    q = trader.quote("AAA")
+    assert q["market_open"] is False and q["queue_when_closed"] is True
+
+
+def test_api_schedules_when_closed(client, trader_env):
+    trader_env[3]["open"] = False
+    out = client.post("/api/manual/order", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 2}).get_json()
+    assert out["ok"] and out["status"] == "scheduled"

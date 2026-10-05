@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 import pandas as pd
@@ -85,6 +85,10 @@ class Quote:
     volume: float
     timestamp: datetime
     source: str  # "nse" or "yfinance"
+    # Trading date of the price bar this quote came from, when known (the
+    # Yahoo fallback is built from daily bars, so right after the open it can
+    # still be yesterday's). None for sources that are live by construction.
+    bar_date: date | None = None
 
 
 class NSESession:
@@ -306,6 +310,7 @@ class MarketDataClient:
             volume=float(last["Volume"]),
             timestamp=datetime.now(),
             source="yfinance",
+            bar_date=last.name.date() if hasattr(last.name, "date") else None,
         )
 
     # ---- historical bars (for MAs / momentum returns) ----------------

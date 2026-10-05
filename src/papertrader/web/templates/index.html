@@ -610,6 +610,21 @@
 
   <div class="stats" id="stats"></div>
 
+  <!-- Market indices: the second row, straight under the stat cards -->
+  <div class="panel" id="indicesPanel" style="margin-bottom: 20px;">
+    <div class="panel-head">
+      <h2>Market Indices</h2>
+      <select id="indicesPeriod" class="meta mono period-select">
+        <option value="1mo">1mo</option>
+        <option value="3mo">3mo</option>
+        <option value="6mo" selected>6mo</option>
+        <option value="1y">1y</option>
+        <option value="2y">2y</option>
+      </select>
+    </div>
+    <div class="indices-grid" id="indicesGrid"></div>
+  </div>
+
   <!-- Smart insights: derived observations about the current book -->
   <div class="panel" id="insightsPanel" style="margin-bottom: 20px; display: none;">
     <div class="panel-head collapsible-head" id="insightsPanelHead">
@@ -679,20 +694,6 @@
           <div class="chart-legend" id="chartLegend"></div>
           <canvas id="equityCanvas"></canvas>
         </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Market Indices</h2>
-          <select id="indicesPeriod" class="meta mono period-select">
-            <option value="1mo">1mo</option>
-            <option value="3mo">3mo</option>
-            <option value="6mo" selected>6mo</option>
-            <option value="1y">1y</option>
-            <option value="2y">2y</option>
-          </select>
-        </div>
-        <div class="indices-grid" id="indicesGrid"></div>
       </div>
 
       {% if is_manual_profile %}
@@ -1389,6 +1390,11 @@ function manualNum(id) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// Market closed and the profile queues orders: they run at the next open.
+function manualQueues() {
+  return !!(manual.quote && !manual.quote.market_open && manual.quote.queue_when_closed);
+}
+
 function manualIsLimitEntry() {
   const entry = manualNum("manualEntry");
   return manual.side === "BUY" && manual.quote && entry !== null && entry > 0 && entry < manual.quote.ltp * 0.9995;
@@ -1404,7 +1410,8 @@ function manualUpdateEstimate() {
     const price = manualIsLimitEntry() ? entry : q.ltp;
     const cost = q.buy_cost_per_share * qty * (price / q.ltp) + q.buy_cost_fixed;
     est.textContent = `Approx. cost ${CCY}${fmt(cost)} incl. slippage and charges · cash ${CCY}${fmt(q.cash)}` +
-      (q.held_quantity ? ` · you hold ${fmtInt(q.held_quantity)}` : "");
+      (q.held_quantity ? ` · you hold ${fmtInt(q.held_quantity)}` : "") +
+      (manualQueues() && !manualIsLimitEntry() ? " · runs at the next market open" : "");
     const sl = manualNum("manualStop"), tg = manualNum("manualTarget");
     const parts = [];
     if (sl > 0 && sl < price) parts.push(`Risk ${CCY}${fmt((price - sl) * qty)} (${((price - sl) / price * 100).toFixed(1)}%)`);
@@ -1414,7 +1421,8 @@ function manualUpdateEstimate() {
   } else {
     manualEl("manualRR").textContent = "";
     est.textContent = q.held_quantity
-      ? `You hold ${fmtInt(q.held_quantity)} @ avg ${CCY}${fmt(q.held_avg_price)} · selling ${fmtInt(qty)} at about ${CCY}${fmt(q.ltp)}`
+      ? `You hold ${fmtInt(q.held_quantity)} @ avg ${CCY}${fmt(q.held_avg_price)} · selling ${fmtInt(qty)} at about ${CCY}${fmt(q.ltp)}` +
+        (manualQueues() ? " · runs at the next market open" : "")
       : "You don't hold this stock.";
   }
 }
@@ -1429,8 +1437,10 @@ function manualSetSide(side) {
 }
 
 function manualRefreshPlaceButton() {
-  manualEl("manualPlaceBtn").textContent = manual.side === "SELL" ? "Place sell order"
-    : (manualIsLimitEntry() ? "Place limit buy order" : "Place buy order");
+  manualEl("manualPlaceBtn").textContent = manual.side === "SELL"
+    ? (manualQueues() ? "Schedule sell for market open" : "Place sell order")
+    : (manualIsLimitEntry() ? "Place limit buy order"
+       : (manualQueues() ? "Schedule buy for market open" : "Place buy order"));
   const held = manual.quote && manual.quote.held_quantity > 0;
   manualEl("manualLevelsBtn").style.display = held ? "inline-block" : "none";
 }
@@ -1512,9 +1522,12 @@ async function manualPlaceOrder() {
   const target = buy ? manualNum("manualTarget") : null;
   if ([entry, stop, target].some(Number.isNaN)) { manualMsg("Entry, stop loss and target must be numbers.", "err"); return; }
   const limit = manualIsLimitEntry();
+  const scheduled = manualQueues() && !limit;
   let question = limit
     ? `Place a limit order to BUY ${qty} × ${manual.symbol} when the price falls to ${CCY}${fmt(entry)}?`
-    : `${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`;
+    : (scheduled
+      ? `Schedule: ${manual.side} ${qty} × ${manual.symbol} for the next market open?\nIt runs within about 5 minutes of the open, at whatever the price is then (last price ${CCY}${fmt(price)}).`
+      : `${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`);
   if (buy && stop) question += `\nStop loss ${CCY}${fmt(stop)}`;
   if (buy && target) question += `\nTarget ${CCY}${fmt(target)}`;
   if (!window.confirm(question)) return;
@@ -1529,6 +1542,8 @@ async function manualPlaceOrder() {
     let done;
     if (out.status === "pending") {
       done = `Limit order placed: buy ${fmtInt(out.quantity)} × ${out.symbol} when the price reaches ${CCY}${fmt(out.limit_price)}`;
+    } else if (out.status === "scheduled") {
+      done = `Scheduled: ${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} at the next market open`;
     } else {
       done = `${out.side === "BUY" ? "Bought" : "Sold"} ${fmtInt(out.quantity)} × ${out.symbol} at ${CCY}${fmt(out.price)}` +
         (out.realized_pnl !== null && out.realized_pnl !== undefined ? ` · realized ${CCY}${signed(out.realized_pnl)}` : "");
@@ -1569,12 +1584,15 @@ async function manualRefreshOrders() {
     const res = await authFetch("/api/manual/orders?profile=" + encodeURIComponent(ACTIVE_PROFILE));
     const data = await res.json();
     if (!data.ok || !data.orders.length) { box.innerHTML = ""; return; }
-    box.innerHTML = `<div class="manual-orders-title">Limit orders</div>` + data.orders.map(o => {
+    box.innerHTML = `<div class="manual-orders-title">Pending and recent orders</div>` + data.orders.map(o => {
       const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "");
       const status = o.status === "pending"
         ? `<button type="button" class="manual-sell-btn" data-cancel="${o.id}">Cancel</button>`
         : `<span class="manual-order-status ${o.status}">${escapeText(o.status)} — ${escapeText(o.detail)}</span>`;
-      return `<div class="manual-order"><span class="mono">Buy ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at ≤ ${CCY}${fmt(o.limit_price)}${lv}</span>${status}</div>`;
+      const what = o.order_type === "market_open"
+        ? `${o.side === "SELL" ? "Sell" : "Buy"} ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at market open`
+        : `Buy ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at ≤ ${CCY}${fmt(o.limit_price)}`;
+      return `<div class="manual-order"><span class="mono">${what}${lv}</span>${status}</div>`;
     }).join("");
   } catch (e) { /* transient; the next poll retries */ }
 }

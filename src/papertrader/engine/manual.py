@@ -13,6 +13,7 @@ import logging
 import math
 import threading
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Callable
 
 from ..data.nse_client import DataUnavailableError
@@ -100,6 +101,7 @@ class ManualTrader:
             "week52_low": finite(q.week52_low),
             "source": q.source,
             "market_open": bool(self.is_market_open()),
+            "queue_when_closed": not self.allow_when_market_closed,
             "cash": self.broker.cash(),
             "held_quantity": held.quantity if held else 0,
             "held_avg_price": held.avg_price if held else None,
@@ -128,8 +130,7 @@ class ManualTrader:
         target = _optional_price(target_price, "Target price")
         if side == "SELL" and (entry is not None or sl is not None or target is not None):
             raise ManualOrderError("Entry price, stop loss and target apply to buy orders only.")
-        if not (self.allow_when_market_closed or self.is_market_open()):
-            raise ManualOrderError("The market is closed, so no fill price is available. Try again during market hours.")
+        market_open = self.allow_when_market_closed or self.is_market_open()
         note = " ".join((note or "").split())[:MAX_NOTE_LENGTH]
 
         with self.lock:
@@ -146,6 +147,8 @@ class ManualTrader:
                     raise ManualOrderError(f"You don't hold {symbol}.")
                 if qty > held.quantity:
                     raise ManualOrderError(f"You only hold {held.quantity:g} of {symbol}.")
+            if not market_open:
+                return self._schedule_for_open(symbol, side, qty, entry, sl, target, note, held)
             q = self._live_price(symbol)
             self._check_price_protection(q.ltp, expected_price)
 
@@ -175,6 +178,40 @@ class ManualTrader:
             out = self._result(symbol, "BUY", qty, trade)
             out["stop_loss"], out["target_price"] = sl, target
             return out
+
+    def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note, held) -> dict:
+        """The market is closed: queue the order. A buy with an entry price
+        below the last price waits for that price (a limit order, as when the
+        market is open); anything else runs at the next open at whatever the
+        price is then. The engine only acts while the market is open, so the
+        order waits through nights, weekends and holidays by itself."""
+        try:
+            last = self._live_price(symbol).ltp  # the last traded price (previous close)
+        except ManualOrderError:
+            last = None
+        if side == "SELL":
+            order_id = self.storage.add_pending_order(symbol, qty, 0.0, None, None, note, "SELL", "market_open")
+            return {"symbol": symbol, "side": "SELL", "status": "scheduled", "order_id": order_id,
+                    "quantity": qty, "cash": self.broker.cash()}
+
+        limit_order = entry is not None and last is not None and entry < last * (1 - MARKET_ENTRY_TOLERANCE)
+        reference = entry if limit_order else last
+        if reference is not None:
+            self._check_levels(reference, sl, target, "entry price" if limit_order else "last price")
+            cost = self.broker.estimated_buy_cost(reference, qty)
+            if cost > self.broker.cash():
+                raise ManualOrderError(
+                    f"{qty} × {symbol} at about {reference:,.2f} would need about {cost:,.2f}; "
+                    f"you have {self.broker.cash():,.2f}.")
+        if limit_order:
+            order_id = self.storage.add_pending_order(symbol, qty, entry, sl, target, note)
+            return {"symbol": symbol, "side": "BUY", "status": "pending", "order_id": order_id,
+                    "quantity": qty, "limit_price": entry, "stop_loss": sl, "target_price": target,
+                    "cash": self.broker.cash()}
+        order_id = self.storage.add_pending_order(symbol, qty, 0.0, sl, target, note, "BUY", "market_open")
+        return {"symbol": symbol, "side": "BUY", "status": "scheduled", "order_id": order_id,
+                "quantity": qty, "stop_loss": sl, "target_price": target, "last_price": last,
+                "cash": self.broker.cash()}
 
     # ------------------------------------------------------------------
     def set_levels(self, symbol: str, stop_loss, target_price) -> dict:
@@ -234,35 +271,68 @@ class ManualTrader:
                 log.error("Failed to sell %s on its manual level: %s", symbol, exc)
 
         for order in self.storage.get_pending_orders():
-            self._try_fill_limit_order(order)
+            self._try_fill_order(order)
 
-    def _try_fill_limit_order(self, order: dict) -> None:
+    @staticmethod
+    def _is_fresh(quote) -> bool:
+        """False when the price is built from an earlier day's bar, as the
+        Yahoo fallback is for the first minutes after the open: a scheduled
+        order must not fill on yesterday's close."""
+        bar = getattr(quote, "bar_date", None)
+        return bar is None or (isinstance(bar, date) and bar >= datetime.now().date())
+
+    def _try_fill_order(self, order: dict) -> None:
         symbol = order["symbol"]
+        side = order.get("side", "BUY")
         try:
             q = self._live_price(symbol)
         except ManualOrderError:
             return
-        if q.ltp > order["limit_price"]:
+        if not self._is_fresh(q):
+            return  # wait for today's price
+        is_limit = order.get("order_type", "limit") == "limit"
+        if is_limit and q.ltp > order["limit_price"]:
             return
+
+        def cancel(why: str) -> None:
+            self.storage.resolve_pending_order(order["id"], "cancelled", why)
+
         positions = self.broker.positions()
-        if symbol not in positions and self.risk.room_for_new_positions(len(positions)) <= 0:
-            self.storage.resolve_pending_order(order["id"], "cancelled", "maximum open positions reached")
-            return
-        reason = "manual limit buy" + (f": {order['note']}" if order["note"] else "")
+        qty = order["quantity"]
+        if side == "SELL":
+            held = positions.get(symbol)
+            if held is None or held.quantity < qty:
+                cancel("you no longer hold enough shares")
+                return
+        else:
+            if symbol not in positions and self.risk.room_for_new_positions(len(positions)) <= 0:
+                cancel("maximum open positions reached")
+                return
+            # A price that gapped through the order's own stop or target would
+            # buy a position that exits on the very next check.
+            if order["stop_loss"] and q.ltp <= order["stop_loss"]:
+                cancel(f"the price opened at {q.ltp:,.2f}, at or below your stop loss ({order['stop_loss']:,.2f})")
+                return
+            if order["target_price"] and q.ltp >= order["target_price"]:
+                cancel(f"the price opened at {q.ltp:,.2f}, at or above your target ({order['target_price']:,.2f})")
+                return
+        kind = "limit" if is_limit else "scheduled"
+        reason = f"manual {kind} {side.lower()}" + (f": {order['note']}" if order["note"] else "")
+        detail = f"filled at {q.ltp:,.2f}" + (f" (limit {order['limit_price']:,.2f})" if is_limit else " at the open")
         try:
             with self.storage.transaction():
                 # Claim the order first: if anything below fails the claim
                 # rolls back with it, so an order can never fill twice.
-                if not self.storage.resolve_pending_order(
-                        order["id"], "filled", f"filled at {q.ltp:,.2f} (limit {order['limit_price']:,.2f})"):
+                if not self.storage.resolve_pending_order(order["id"], "filled", detail):
                     return
-                self._fill(symbol, "BUY", order["quantity"], q.ltp, reason)
-                self._apply_levels(symbol, order["stop_loss"], order["target_price"])
-            log.info("Limit order #%s filled: %s", order["id"], symbol)
+                self._fill(symbol, side, qty, q.ltp, reason)
+                if side == "BUY":
+                    self._apply_levels(symbol, order["stop_loss"], order["target_price"])
+            log.info("Order #%s filled: %s %s", order["id"], side, symbol)
         except ManualOrderError as exc:
-            self.storage.resolve_pending_order(order["id"], "cancelled", str(exc))
+            cancel(str(exc))
         except Exception:  # noqa: BLE001 - one bad order must not stop the others
-            log.exception("Could not fill limit order #%s", order["id"])
+            log.exception("Could not fill order #%s", order["id"])
 
     # ------------------------------------------------------------------
     def _check_price_protection(self, live: float, expected_price) -> None:
