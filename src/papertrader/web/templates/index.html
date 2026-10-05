@@ -619,7 +619,7 @@
 
   <!-- Strategy comparison: all profiles side by side -->
   {% if profiles and profiles|length > 1 %}
-  <div class="stats" style="grid-template-columns: minmax(0, 320px); margin-bottom: 20px;">
+  <div class="stats" id="allUnrealizedWrap" style="grid-template-columns: minmax(0, 320px); margin-bottom: 20px;">
     <div class="stat" id="allUnrealizedTile">
       <div class="label">Unrealized P&amp;L &middot; all strategies</div>
       <div class="value mono" id="allUnrealizedValue">&mdash;</div>
@@ -648,6 +648,16 @@
       </div>
     </div>
   </div>
+  {% endif %}
+
+  {% if is_manual_profile %}
+  <style>
+    /* A manual profile runs no strategy: hide everything about one. */
+    #watchlistPanel, #backtestPanel, #rulesPanel, #settingsPanel, #comparePanel, #allUnrealizedWrap { display: none !important; }
+    /* Ticket first, then what you hold; charts below. */
+    .col-main > #manualPanel { order: -2; }
+    .col-main > #positionsPanel { order: -1; }
+  </style>
   {% endif %}
 
   <div class="grid">
@@ -713,7 +723,7 @@
       </div>
       {% endif %}
 
-      <div class="panel">
+      <div class="panel" id="positionsPanel">
         <div class="panel-head">
           <h2>Open Positions</h2>
           <span class="meta mono" id="positionsMeta">0 held</span>

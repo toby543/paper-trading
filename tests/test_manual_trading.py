@@ -49,6 +49,15 @@ def test_search_prefers_nse_over_bse_at_equal_rank(directory):
     assert symbols.index("ABB") < symbols.index("ABB.BO")
 
 
+def test_name_starting_with_the_query_beats_a_name_merely_containing_it(tmp_path):
+    path = tmp_path / "d.csv"
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["symbol", "name", "exchange"])
+        w.writerows([("HCL-INSYS", "HCL Infosystems Limited", "NSE"), ("INFY", "Infosys Limited", "NSE")])
+    assert symbol_search.search("infosys", path=str(path))[0].symbol == "INFY"
+
+
 def test_blank_query_returns_nothing(directory):
     assert symbol_search.search("   ", path=directory) == []
 
@@ -230,7 +239,9 @@ def client(trader_env, monkeypatch):
         "manual_swing": _FakeEngine("manual_swing", True, trader),
         "auto": _FakeEngine("auto", False),
     }
-    app = create_app(engines, Config.load())
+    cfg = Config.load()
+    cfg.raw["active_profile"] = "manual_swing"
+    app = create_app(engines, cfg)
     return app.test_client()
 
 
@@ -344,6 +355,24 @@ def test_api_passes_expected_price_through(client):
     r = client.post("/api/manual/order", json={
         "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 1, "expected_price": 50})
     assert r.status_code == 400 and "price moved" in r.get_json()["error"]
+
+
+def test_manual_profile_hides_every_strategy_panel_and_the_regime_pill():
+    from papertrader.web.data_api import _market_regime
+
+    class _E:
+        is_manual = True
+        regime_cfg = {"enabled": True, "index_symbol": "^NSEI", "ma_days": 200}
+
+    assert _market_regime(_E())["enabled"] is False
+
+
+def test_manual_page_hides_strategy_panels(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="manualPanel"' in html
+    hidden = html.split("A manual profile runs no strategy")[1].split("</style>")[0]
+    for panel in ("watchlistPanel", "backtestPanel", "rulesPanel", "settingsPanel", "comparePanel", "allUnrealizedWrap"):
+        assert f"#{panel}" in hidden
 
 
 def test_manual_profile_gets_its_own_dashboard_tab(client):

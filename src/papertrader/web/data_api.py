@@ -100,7 +100,9 @@ def _market_regime(engine) -> dict:
     regime_cfg = engine.regime_cfg or {}
     index_symbol = regime_cfg.get("index_symbol", "^NSEI")
     ma_days = regime_cfg.get("ma_days", 200)
-    if not regime_cfg.get("enabled", False):
+    # A manual profile never gates anything on the market regime, so it
+    # must not display a trend pill that implies it does.
+    if getattr(engine, "is_manual", False) or not regime_cfg.get("enabled", False):
         return {"enabled": False, "status": None, "index_symbol": index_symbol, "ma_days": ma_days}
     try:
         index_history = engine.data.get_index_history(index_symbol)

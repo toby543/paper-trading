@@ -35,7 +35,7 @@ def load_directory(path: str = DIRECTORY_PATH) -> list[SymbolEntry]:
 
 def search(query: str, limit: int = 15, path: str = DIRECTORY_PATH) -> list[SymbolEntry]:
     """Case-insensitive match on symbol or company name. Ranked: exact symbol,
-    symbol prefix, name word-prefix, then any substring; NSE before BSE."""
+    symbol prefix, name prefix, word inside the name, then any substring; NSE before BSE."""
     q = query.strip().upper()
     if not q:
         return []
@@ -46,10 +46,12 @@ def search(query: str, limit: int = 15, path: str = DIRECTORY_PATH) -> list[Symb
             rank = 0
         elif e.symbol.startswith(q):
             rank = 1
-        elif name.startswith(q) or (" " + q) in name:
+        elif name.startswith(q):
             rank = 2
-        elif q in e.symbol or q in name:
+        elif (" " + q) in name:
             rank = 3
+        elif q in e.symbol or q in name:
+            rank = 4
         else:
             continue
         ranked.append((rank, 0 if e.exchange == "NSE" else 1, e.symbol, e))
