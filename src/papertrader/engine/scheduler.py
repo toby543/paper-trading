@@ -240,6 +240,11 @@ class TradingEngine:
         return is_market_in_uptrend(index_history, self.regime_cfg.get("ma_days", 200))
 
     def check_exits(self) -> None:
+        if self.is_manual:
+            # No strategy exits: only the stop loss / target the user set on
+            # each position, and any limit order the price has reached.
+            self.manual_trader().run_automation()
+            return
         positions = self.broker.positions()
         mode = self.strategy_cfg.get("mode", "52w_high")
         # Fetched once per call, not once per position -- same "fetch the
@@ -257,13 +262,6 @@ class TradingEngine:
             except DataUnavailableError as exc:
                 log.warning("Could not fetch pairs-trading benchmark history (%s); exits fall back to stop-loss/time-stop only this cycle", exc)
         for symbol, pos in positions.items():
-            if self.is_manual:
-                # The user decides every exit; just keep the peak price current.
-                try:
-                    self.broker.update_trailing_high(symbol, self.data.get_quote(symbol).ltp)
-                except DataUnavailableError as exc:
-                    log.warning("Skipping price refresh for %s: %s", symbol, exc)
-                continue
             try:
                 quote = self.data.get_quote(symbol)
                 history = self.data.get_history(symbol, period="1y")

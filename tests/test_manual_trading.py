@@ -384,3 +384,251 @@ def test_manual_profile_gets_its_own_dashboard_tab(client):
     html = client.get("/").get_data(as_text=True)
     assert 'data-category="manual"' in html and "Manual Trading" in html
     assert '"manual_swing": "manual"' in html  # PROFILE_CATEGORIES maps it to that tab
+
+
+# --- entry price, stop loss, target, limit orders --------------------------------
+
+def _storage(broker):
+    return broker.storage
+
+
+def test_buy_records_stop_loss_and_target(trader_env):
+    trader, broker, _, _ = trader_env
+    out = trader.place_order("AAA", "BUY", 10, stop_loss=95, target_price=120)
+    assert out["status"] == "filled" and out["stop_loss"] == 95
+    assert _storage(broker).get_levels()["AAA"] == {"stop_loss": 95.0, "target_price": 120.0}
+    assert trader.quote("AAA")["held_stop_loss"] == 95.0
+
+
+@pytest.mark.parametrize("sl,tg,msg", [(100, None, "Stop loss must be below"), (105, None, "Stop loss must be below"),
+                                       (None, 100, "Target must be above"), (None, 90, "Target must be above"),
+                                       (-5, None, "positive"), ("abc", None, "number")])
+def test_bad_levels_are_rejected_and_nothing_trades(trader_env, sl, tg, msg):
+    trader, broker, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match=msg):
+        trader.place_order("AAA", "BUY", 1, stop_loss=sl, target_price=tg)
+    assert not broker.positions()
+
+
+def test_levels_cannot_be_sent_with_a_sell(trader_env):
+    trader, _, _, _ = trader_env
+    trader.place_order("AAA", "BUY", 2)
+    with pytest.raises(ManualOrderError, match="buy orders only"):
+        trader.place_order("AAA", "SELL", 1, stop_loss=90)
+
+
+def test_entry_at_or_above_the_live_price_is_a_market_buy(trader_env):
+    trader, broker, _, _ = trader_env
+    assert trader.place_order("AAA", "BUY", 1, entry_price=100.0)["status"] == "filled"
+    assert trader.place_order("BBB", "BUY", 1, entry_price=130.0)["status"] == "filled"
+    assert set(broker.positions()) == {"AAA", "BBB"}
+
+
+def test_entry_below_the_live_price_places_a_pending_limit_order(trader_env):
+    trader, broker, _, _ = trader_env
+    cash = broker.cash()
+    out = trader.place_order("AAA", "BUY", 10, entry_price=90, stop_loss=85, target_price=110)
+    assert out["status"] == "pending" and out["limit_price"] == 90.0
+    assert not broker.positions() and broker.cash() == cash
+    assert [o["symbol"] for o in broker.storage.get_pending_orders()] == ["AAA"]
+
+
+def test_limit_order_levels_are_checked_against_the_entry_price(trader_env):
+    trader, _, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match="below the entry price"):
+        trader.place_order("AAA", "BUY", 1, entry_price=90, stop_loss=92)
+    with pytest.raises(ManualOrderError, match="above the entry price"):
+        trader.place_order("AAA", "BUY", 1, entry_price=90, target_price=89)
+
+
+def test_limit_order_is_refused_when_it_could_never_be_afforded(trader_env):
+    trader, broker, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match="would need about"):
+        trader.place_order("AAA", "BUY", 5_000, entry_price=90)
+    assert not broker.storage.get_pending_orders()
+
+
+def test_stop_loss_sells_the_whole_position_automatically(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10, stop_loss=95, target_price=120)
+    data.ltp = 94.0
+    trader.run_automation()
+    assert "AAA" not in broker.positions()
+    last = broker.storage.get_trades(limit=1)[0]
+    assert last.side == "SELL" and "stop-loss" in last.reason and last.realized_pnl < 0
+    assert broker.storage.get_levels() == {}  # levels die with the position
+
+
+def test_target_sells_automatically_and_in_between_does_nothing(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10, stop_loss=95, target_price=120)
+    data.ltp = 110.0
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+    data.ltp = 121.0
+    trader.run_automation()
+    assert "AAA" not in broker.positions()
+    assert "target" in broker.storage.get_trades(limit=1)[0].reason
+
+
+def test_a_position_without_levels_is_never_sold_automatically(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10)
+    data.ltp = 1.0
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_a_reentry_does_not_inherit_the_previous_positions_stop(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 5, stop_loss=90)
+    trader.place_order("AAA", "SELL", 5)
+    trader.place_order("AAA", "BUY", 5)
+    assert broker.storage.get_levels() == {}
+
+
+def test_partial_sell_keeps_the_levels(trader_env):
+    trader, broker, _, _ = trader_env
+    trader.place_order("AAA", "BUY", 10, stop_loss=90, target_price=130)
+    trader.place_order("AAA", "SELL", 4)
+    assert broker.storage.get_levels()["AAA"]["stop_loss"] == 90.0
+
+
+def test_adding_to_a_holding_keeps_levels_left_blank_and_replaces_given_ones(trader_env):
+    trader, broker, _, _ = trader_env
+    trader.place_order("AAA", "BUY", 5, stop_loss=90, target_price=130)
+    trader.place_order("AAA", "BUY", 5, stop_loss=92)
+    assert broker.storage.get_levels()["AAA"] == {"stop_loss": 92.0, "target_price": 130.0}
+
+
+def test_set_levels_updates_and_clears_and_validates(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 5)
+    trader.set_levels("AAA", 92, 140)
+    assert broker.storage.get_levels()["AAA"] == {"stop_loss": 92.0, "target_price": 140.0}
+    with pytest.raises(ManualOrderError, match="below the current price"):
+        trader.set_levels("AAA", 100, None)
+    trader.set_levels("AAA", None, None)
+    assert broker.storage.get_levels() == {}
+    with pytest.raises(ManualOrderError, match="don't hold"):
+        trader.set_levels("BBB", 90, None)
+
+
+def _pending(broker):
+    return broker.storage.get_pending_orders()
+
+
+def test_limit_order_fills_when_the_price_reaches_it_and_applies_its_levels(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10, entry_price=90, stop_loss=85, target_price=110, note="dip")
+    trader.run_automation()  # price still 100: nothing happens
+    assert not broker.positions() and len(_pending(broker)) == 1
+
+    data.ltp = 89.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 10
+    assert broker.storage.get_levels()["AAA"] == {"stop_loss": 85.0, "target_price": 110.0}
+    assert not _pending(broker)
+    assert broker.storage.get_recent_orders()[0]["status"] == "filled"
+    assert broker.storage.get_trades(limit=1)[0].reason == "manual limit buy: dip"
+
+
+def test_limit_order_cannot_fill_twice(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10, entry_price=90)
+    data.ltp = 80.0
+    trader.run_automation()
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 10
+
+
+def test_limit_order_is_cancelled_with_a_reason_if_cash_ran_out(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 900, entry_price=90)   # affordable now (about 81k of 100k)
+    trader.place_order("BBB", "BUY", 800)                   # a market buy uses the cash first
+    data.ltp = 80.0
+    trader.run_automation()
+    order = [o for o in broker.storage.get_recent_orders() if o["symbol"] == "AAA"][0]
+    assert order["status"] == "cancelled" and "Need" in order["detail"]
+    assert "AAA" not in broker.positions()
+
+
+def test_limit_order_is_cancelled_when_the_position_limit_filled_up(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 1, entry_price=90)  # pending
+    trader.place_order("BBB", "BUY", 1)
+    trader.place_order("CCC", "BUY", 1)                  # fixture allows 2 open positions: these fill it
+    data.ltp = 85.0
+    trader.run_automation()
+    order = broker.storage.get_recent_orders()[0]
+    assert order["status"] == "cancelled" and "maximum open positions" in order["detail"]
+    assert "AAA" not in broker.positions()
+
+
+def test_cancel_order(trader_env):
+    trader, broker, data, _ = trader_env
+    oid = trader.place_order("AAA", "BUY", 1, entry_price=90)["order_id"]
+    assert trader.cancel_order(oid)["status"] == "cancelled"
+    data.ltp = 50.0
+    trader.run_automation()
+    assert not broker.positions()
+    with pytest.raises(ManualOrderError, match="no longer pending"):
+        trader.cancel_order(oid)
+
+
+def test_manual_engine_sells_on_a_stop_loss_during_its_normal_exit_check(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "manual.db"))
+    engine = TradingEngine(cfg, profile_name="manual_swing")
+    engine.data = _FakeData(ltp=100.0)
+    engine.broker.buy("AAA", 10, 100.0, "manual")
+    engine.storage.set_levels("AAA", 95.0, 120.0)
+
+    engine.data.ltp = 94.0
+    engine.check_exits()  # the call run_forever() makes, with the lock already held
+    assert "AAA" not in engine.broker.positions()
+
+
+def test_summary_rows_carry_levels_and_insights_ignore_phantom_global_stops(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+    from papertrader.web.data_api import build_summary
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "manual.db"))
+    engine = TradingEngine(cfg, profile_name="manual_swing")
+    engine.data = _FakeData(ltp=100.0)
+    engine.broker.buy("AAA", 10, 100.0, "manual")
+    engine.storage.set_levels("AAA", 99.0, 130.0)
+
+    summary = build_summary(engine)
+    row = summary["positions"][0]
+    assert row["stop_loss"] == 99.0 and row["target_price"] == 130.0
+    titles = [i["title"] for i in summary["insights"]]
+    assert any("above its stop-loss" in t for t in titles)  # the user's own stop, about 1% away
+
+    engine.storage.set_levels("AAA", None, None)
+    titles = [i["title"] for i in build_summary(engine)["insights"]]
+    assert not any("stop" in t for t in titles)  # no phantom stop from the shared defaults
+
+
+def test_api_levels_orders_and_cancel(client):
+    ok = client.post("/api/manual/order", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 2,
+        "stop_loss": 90, "target_price": 130}).get_json()
+    assert ok["ok"] and ok["status"] == "filled"
+    lv = client.post("/api/manual/levels", json={
+        "profile": "manual_swing", "symbol": "AAA", "stop_loss": 92, "target_price": None}).get_json()
+    assert lv["ok"] and lv["stop_loss"] == 92.0 and lv["target_price"] is None
+
+    pend = client.post("/api/manual/order", json={
+        "profile": "manual_swing", "symbol": "BBB", "side": "BUY", "quantity": 1, "entry_price": 80}).get_json()
+    assert pend["status"] == "pending"
+    orders = client.get("/api/manual/orders?profile=manual_swing").get_json()["orders"]
+    assert [o["symbol"] for o in orders] == ["BBB"]
+    assert client.post("/api/manual/cancel", json={
+        "profile": "manual_swing", "order_id": pend["order_id"]}).get_json()["ok"]
+    assert client.get("/api/manual/orders?profile=auto").status_code == 400

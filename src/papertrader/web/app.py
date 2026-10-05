@@ -422,10 +422,42 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         try:
             result = engine.manual_trader().place_order(
                 payload.get("symbol"), payload.get("side"), payload.get("quantity"), payload.get("note", ""),
-                expected_price=payload.get("expected_price"))
+                expected_price=payload.get("expected_price"), entry_price=payload.get("entry_price"),
+                stop_loss=payload.get("stop_loss"), target_price=payload.get("target_price"))
         except ManualOrderError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify({"ok": True, **result})
+
+    def _manual_json_action(action):
+        if not request.is_json:
+            return jsonify({"ok": False, "error": "Expected a JSON body."}), 415
+        payload = request.get_json(silent=True) or {}
+        engine = _manual_engine(payload.get("profile"))
+        if engine is None:
+            return jsonify({"ok": False, "error": "Not a manual profile."}), 400
+        try:
+            return jsonify({"ok": True, **action(engine.manual_trader(), payload)})
+        except ManualOrderError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/manual/levels")
+    @api_login_required
+    def api_manual_levels():
+        return _manual_json_action(lambda t, p: t.set_levels(
+            p.get("symbol"), p.get("stop_loss"), p.get("target_price")))
+
+    @app.post("/api/manual/cancel")
+    @api_login_required
+    def api_manual_cancel():
+        return _manual_json_action(lambda t, p: t.cancel_order(p.get("order_id")))
+
+    @app.get("/api/manual/orders")
+    @api_login_required
+    def api_manual_orders():
+        engine = _manual_engine(request.args.get("profile"))
+        if engine is None:
+            return jsonify({"ok": False, "error": "Not a manual profile."}), 400
+        return jsonify({"ok": True, "orders": engine.manual_trader().orders()})
 
     @app.post("/api/backtest/run")
     @api_login_required

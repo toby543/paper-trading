@@ -131,6 +131,11 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
     risk_cfg = engine.risk_cfg or {}
     stop_loss_pct = float(risk_cfg.get("stop_loss_pct", 0) or 0)
     trailing_stop_pct = float(risk_cfg.get("trailing_stop_pct", 0) or 0)
+    if getattr(engine, "is_manual", False):
+        # A manual profile has no percentage stops of its own (the shared
+        # defaults would otherwise be reported as if they applied); only each
+        # position's own stop loss counts, added per row below.
+        stop_loss_pct = trailing_stop_pct = 0.0
     max_positions = engine.risk.max_open_positions
 
     # --- Engine health: is this profile's loop actually still scanning? ---
@@ -196,6 +201,8 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
             triggers.append(("stop-loss", row["avg_price"] * (1 - stop_loss_pct / 100.0)))
         if trailing_stop_pct > 0:
             triggers.append(("trailing stop", row["highest_close_since_entry"] * (1 - trailing_stop_pct / 100.0)))
+        if row.get("stop_loss"):
+            triggers.append(("stop-loss", row["stop_loss"]))
         if not triggers or ltp <= 0:
             continue
         # The binding stop is whichever sits highest (closest below price).
@@ -304,6 +311,7 @@ def build_summary(engine) -> dict:
 
     position_rows = []
     positions_value = 0.0
+    levels = engine.storage.get_levels() if getattr(engine, "is_manual", False) else {}
     for symbol, pos in positions.items():
         quote = _safe_quote(engine, symbol)
         # Falling back to avg_price prices the row at cost, which renders
@@ -331,6 +339,8 @@ def build_summary(engine) -> dict:
             "highest_close_since_entry": _round_price(pos.highest_close_since_entry),
             "week52_high": _round_price(week52_high) if week52_high else None,
             "pct_from_52w_high": round(pct_from_high, 2) if pct_from_high is not None else None,
+            "stop_loss": levels.get(symbol, {}).get("stop_loss"),
+            "target_price": levels.get(symbol, {}).get("target_price"),
         })
 
     total_equity = cash + positions_value

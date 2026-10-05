@@ -214,6 +214,13 @@
   .manual-msg { margin-top: 10px; font-size: 13px; }
   .manual-msg.err { color: var(--down, #d4574a); }
   .manual-msg.ok { color: var(--up, #2e9d6b); }
+  .manual-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .manual-orders { margin-top: 16px; }
+  .manual-orders-title { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .manual-order { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .manual-order-status { color: var(--ink-dim); font-size: 12px; text-align: right; }
+  .manual-order-status.filled { color: var(--up, #2e9d6b); }
+  .manual-order-status.cancelled { color: var(--ink-faint); }
   .manual-sell-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-dim); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
   .manual-sell-btn:hover { border-color: var(--down, #d4574a); color: var(--down, #d4574a); }
   .period-select {
@@ -712,13 +719,32 @@
                 <button type="button" id="manualBuyBtn" class="buy on">Buy</button>
                 <button type="button" id="manualSellBtn" class="sell">Sell</button>
               </span>
-              <input type="number" id="manualQty" class="edit-input" min="1" step="1" value="1" style="width:110px;" aria-label="Quantity">
-              <input type="text" id="manualNote" class="edit-input wide" maxlength="100" placeholder="Note (optional)" style="width:220px; text-align:left;">
-              <button type="button" id="manualPlaceBtn" class="edit-save-btn">Place order</button>
+              <label class="manual-field">Quantity
+                <input type="number" id="manualQty" class="edit-input" min="1" step="1" value="1" style="width:110px;">
+              </label>
+            </div>
+            <div class="manual-row" id="manualBuyFields" style="margin-top:12px;">
+              <label class="manual-field">Entry price
+                <input type="number" id="manualEntry" class="edit-input" min="0" step="0.05" style="width:130px;"
+                       title="Leave at the live price to buy now, or enter a lower price to wait for it">
+              </label>
+              <label class="manual-field">Stop loss
+                <input type="number" id="manualStop" class="edit-input" min="0" step="0.05" placeholder="optional" style="width:130px;">
+              </label>
+              <label class="manual-field">Target price
+                <input type="number" id="manualTarget" class="edit-input" min="0" step="0.05" placeholder="optional" style="width:130px;">
+              </label>
+            </div>
+            <div class="manual-row" style="margin-top:12px;">
+              <input type="text" id="manualNote" class="edit-input wide" maxlength="100" placeholder="Note (optional)" style="width:240px; text-align:left;">
+              <button type="button" id="manualPlaceBtn" class="edit-save-btn">Place buy order</button>
+              <button type="button" id="manualLevelsBtn" class="manual-sell-btn" style="display:none;">Update stop / target</button>
             </div>
             <div class="manual-est mono" id="manualEst"></div>
+            <div class="manual-est mono" id="manualRR"></div>
             <div class="manual-msg" id="manualMsg"></div>
           </div>
+          <div class="manual-orders" id="manualOrders"></div>
         </div>
       </div>
       {% endif %}
@@ -732,7 +758,7 @@
           <table id="positionsTable">
             <thead>
               <tr>
-                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>{% if is_manual_profile %}<th></th>{% endif %}
+                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>{% if is_manual_profile %}<th>Stop</th><th>Target</th><th></th>{% endif %}
               </tr>
             </thead>
             <tbody id="positionsBody"></tbody>
@@ -1319,7 +1345,7 @@ function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 10 : 9}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 12 : 9}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {
@@ -1338,7 +1364,9 @@ function renderPositions(s) {
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
       <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
-      ${IS_MANUAL ? `<td><button type="button" class="manual-sell-btn" data-symbol="${p.symbol}" data-qty="${p.quantity}">Sell</button></td>` : ""}
+      ${IS_MANUAL ? `<td class="mono down" data-label="Stop">${p.stop_loss ? fmt(p.stop_loss) : "—"}</td>
+      <td class="mono up" data-label="Target">${p.target_price ? fmt(p.target_price) : "—"}</td>
+      <td><button type="button" class="manual-sell-btn" data-symbol="${p.symbol}" data-qty="${p.quantity}">Sell</button></td>` : ""}
     </tr>`;
   }).join("");
 }
@@ -1353,16 +1381,38 @@ function manualMsg(text, cls) {
   el.className = "manual-msg " + (cls || "");
 }
 
+// A blank field is "not set" (null), never 0.
+function manualNum(id) {
+  const raw = manualEl(id).value.trim();
+  if (raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function manualIsLimitEntry() {
+  const entry = manualNum("manualEntry");
+  return manual.side === "BUY" && manual.quote && entry !== null && entry > 0 && entry < manual.quote.ltp * 0.9995;
+}
+
 function manualUpdateEstimate() {
   const est = manualEl("manualEst");
   const q = manual.quote;
   const qty = Math.floor(Number(manualEl("manualQty").value));
-  if (!q || !(qty > 0)) { est.textContent = ""; return; }
+  if (!q || !(qty > 0)) { est.textContent = ""; manualEl("manualRR").textContent = ""; return; }
   if (manual.side === "BUY") {
-    const cost = q.buy_cost_per_share * qty + q.buy_cost_fixed;
+    const entry = manualNum("manualEntry");
+    const price = manualIsLimitEntry() ? entry : q.ltp;
+    const cost = q.buy_cost_per_share * qty * (price / q.ltp) + q.buy_cost_fixed;
     est.textContent = `Approx. cost ${CCY}${fmt(cost)} incl. slippage and charges · cash ${CCY}${fmt(q.cash)}` +
       (q.held_quantity ? ` · you hold ${fmtInt(q.held_quantity)}` : "");
+    const sl = manualNum("manualStop"), tg = manualNum("manualTarget");
+    const parts = [];
+    if (sl > 0 && sl < price) parts.push(`Risk ${CCY}${fmt((price - sl) * qty)} (${((price - sl) / price * 100).toFixed(1)}%)`);
+    if (tg > price) parts.push(`Reward ${CCY}${fmt((tg - price) * qty)} (${((tg - price) / price * 100).toFixed(1)}%)`);
+    if (sl > 0 && sl < price && tg > price) parts.push(`R:R 1 : ${((tg - price) / (price - sl)).toFixed(2)}`);
+    manualEl("manualRR").textContent = parts.join(" · ");
   } else {
+    manualEl("manualRR").textContent = "";
     est.textContent = q.held_quantity
       ? `You hold ${fmtInt(q.held_quantity)} @ avg ${CCY}${fmt(q.held_avg_price)} · selling ${fmtInt(qty)} at about ${CCY}${fmt(q.ltp)}`
       : "You don't hold this stock.";
@@ -1373,8 +1423,16 @@ function manualSetSide(side) {
   manual.side = side;
   manualEl("manualBuyBtn").className = "buy" + (side === "BUY" ? " on" : "");
   manualEl("manualSellBtn").className = "sell" + (side === "SELL" ? " on" : "");
-  manualEl("manualPlaceBtn").textContent = side === "BUY" ? "Place buy order" : "Place sell order";
+  manualEl("manualBuyFields").style.display = side === "BUY" ? "flex" : "none";
+  manualRefreshPlaceButton();
   manualUpdateEstimate();
+}
+
+function manualRefreshPlaceButton() {
+  manualEl("manualPlaceBtn").textContent = manual.side === "SELL" ? "Place sell order"
+    : (manualIsLimitEntry() ? "Place limit buy order" : "Place buy order");
+  const held = manual.quote && manual.quote.held_quantity > 0;
+  manualEl("manualLevelsBtn").style.display = held ? "inline-block" : "none";
 }
 
 async function manualLoadQuote(symbol, name) {
@@ -1399,6 +1457,9 @@ async function manualLoadQuote(symbol, name) {
     const range = q.week52_low !== null && q.week52_high !== null ? ` · 52w ${fmt(q.week52_low)}–${fmt(q.week52_high)}` : "";
     manualEl("manualDay").textContent = (q.prev_close ? `${signed(chg)}% today` : "no previous close") + range +
       (q.market_open ? "" : " · market closed");
+    manualEl("manualEntry").value = q.ltp.toFixed(2);
+    manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
+    manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";
     manualSetSide(manual.side);
   } catch (e) {
     if (mine === manual.quoteSeq) manualMsg("Could not fetch a quote: " + e.message, "err");
@@ -1431,36 +1492,91 @@ async function manualSearch(query) {
   } catch (e) { /* auth redirect or network blip: leave the box as is */ }
 }
 
+async function manualPost(url, body) {
+  const res = await authFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profile: ACTIVE_PROFILE, ...body }),
+  });
+  return res.json();
+}
+
 async function manualPlaceOrder() {
   const qty = Math.floor(Number(manualEl("manualQty").value));
   if (!manual.symbol || !manual.quote) { manualMsg("Pick a stock first.", "err"); return; }
   if (!(qty > 0)) { manualMsg("Enter a whole number of shares.", "err"); return; }
   const price = manual.quote.ltp;
-  if (!window.confirm(`${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`)) return;
+  const buy = manual.side === "BUY";
+  const entry = buy ? manualNum("manualEntry") : null;
+  const stop = buy ? manualNum("manualStop") : null;
+  const target = buy ? manualNum("manualTarget") : null;
+  if ([entry, stop, target].some(Number.isNaN)) { manualMsg("Entry, stop loss and target must be numbers.", "err"); return; }
+  const limit = manualIsLimitEntry();
+  let question = limit
+    ? `Place a limit order to BUY ${qty} × ${manual.symbol} when the price falls to ${CCY}${fmt(entry)}?`
+    : `${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`;
+  if (buy && stop) question += `\nStop loss ${CCY}${fmt(stop)}`;
+  if (buy && target) question += `\nTarget ${CCY}${fmt(target)}`;
+  if (!window.confirm(question)) return;
   const btn = manualEl("manualPlaceBtn");
   btn.disabled = true;
   try {
-    const res = await authFetch("/api/manual/order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        profile: ACTIVE_PROFILE, symbol: manual.symbol, side: manual.side,
-        quantity: qty, note: manualEl("manualNote").value, expected_price: price,
-      }),
+    const out = await manualPost("/api/manual/order", {
+      symbol: manual.symbol, side: manual.side, quantity: qty, note: manualEl("manualNote").value,
+      expected_price: price, entry_price: entry, stop_loss: stop, target_price: target,
     });
-    const out = await res.json();
     if (!out.ok) { manualMsg(out.error || "Order rejected.", "err"); return; }
-    const done = `${out.side === "BUY" ? "Bought" : "Sold"} ${fmtInt(out.quantity)} × ${out.symbol} at ${CCY}${fmt(out.price)}` +
-      (out.realized_pnl !== null && out.realized_pnl !== undefined ? ` · realized ${CCY}${signed(out.realized_pnl)}` : "");
+    let done;
+    if (out.status === "pending") {
+      done = `Limit order placed: buy ${fmtInt(out.quantity)} × ${out.symbol} when the price reaches ${CCY}${fmt(out.limit_price)}`;
+    } else {
+      done = `${out.side === "BUY" ? "Bought" : "Sold"} ${fmtInt(out.quantity)} × ${out.symbol} at ${CCY}${fmt(out.price)}` +
+        (out.realized_pnl !== null && out.realized_pnl !== undefined ? ` · realized ${CCY}${signed(out.realized_pnl)}` : "");
+    }
     manualEl("manualNote").value = "";
     await manualLoadQuote(manual.symbol, manualEl("manualName").textContent);
     manualMsg(done, "ok");  // after the quote reload, which clears the message
+    manualRefreshOrders();
     refresh();
   } catch (e) {
     manualMsg("Order failed: " + e.message, "err");
   } finally {
     btn.disabled = false;
   }
+}
+
+async function manualUpdateLevels() {
+  const stop = manualNum("manualStop"), target = manualNum("manualTarget");
+  if ([stop, target].some(Number.isNaN)) { manualMsg("Stop loss and target must be numbers.", "err"); return; }
+  const out = await manualPost("/api/manual/levels", { symbol: manual.symbol, stop_loss: stop, target_price: target });
+  if (!out.ok) { manualMsg(out.error || "Could not update.", "err"); return; }
+  await manualLoadQuote(manual.symbol, manualEl("manualName").textContent);
+  manualMsg("Levels updated" + (stop ? ` · stop ${CCY}${fmt(stop)}` : "") + (target ? ` · target ${CCY}${fmt(target)}` : "") +
+    (!stop && !target ? " · cleared" : ""), "ok");
+  refresh();
+}
+
+async function manualCancelOrder(orderId) {
+  const out = await manualPost("/api/manual/cancel", { order_id: orderId });
+  if (!out.ok) manualMsg(out.error || "Could not cancel.", "err");
+  manualRefreshOrders();
+}
+
+async function manualRefreshOrders() {
+  const box = manualEl("manualOrders");
+  if (!box) return;
+  try {
+    const res = await authFetch("/api/manual/orders?profile=" + encodeURIComponent(ACTIVE_PROFILE));
+    const data = await res.json();
+    if (!data.ok || !data.orders.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="manual-orders-title">Limit orders</div>` + data.orders.map(o => {
+      const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "");
+      const status = o.status === "pending"
+        ? `<button type="button" class="manual-sell-btn" data-cancel="${o.id}">Cancel</button>`
+        : `<span class="manual-order-status ${o.status}">${escapeText(o.status)} — ${escapeText(o.detail)}</span>`;
+      return `<div class="manual-order"><span class="mono">Buy ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at ≤ ${CCY}${fmt(o.limit_price)}${lv}</span>${status}</div>`;
+    }).join("");
+  } catch (e) { /* transient; the next poll retries */ }
 }
 
 function initManualTicket() {
@@ -1479,8 +1595,14 @@ function initManualTicket() {
   });
   manualEl("manualBuyBtn").addEventListener("click", () => manualSetSide("BUY"));
   manualEl("manualSellBtn").addEventListener("click", () => manualSetSide("SELL"));
-  manualEl("manualQty").addEventListener("input", manualUpdateEstimate);
+  ["manualQty", "manualEntry", "manualStop", "manualTarget"].forEach(id =>
+    manualEl(id).addEventListener("input", () => { manualRefreshPlaceButton(); manualUpdateEstimate(); }));
   manualEl("manualPlaceBtn").addEventListener("click", manualPlaceOrder);
+  manualEl("manualLevelsBtn").addEventListener("click", manualUpdateLevels);
+  manualEl("manualOrders").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-cancel]");
+    if (btn) manualCancelOrder(btn.dataset.cancel);
+  });
   document.getElementById("positionsBody").addEventListener("click", (ev) => {
     const btn = ev.target.closest(".manual-sell-btn");
     if (!btn) return;
@@ -1490,6 +1612,7 @@ function initManualTicket() {
     manualLoadQuote(btn.dataset.symbol, "");
     manualEl("manualPanel").scrollIntoView({ behavior: "smooth", block: "center" });
   });
+  manualRefreshOrders();
 }
 initManualTicket();
 
@@ -2703,6 +2826,7 @@ async function refresh() {
     renderStats(summary);
     renderInsights(summary);
     renderPositions(summary);
+    if (IS_MANUAL) manualRefreshOrders();
     renderTrades(trades);
     renderEquityChart(curve, { perfHtml: perfComparisonHtml(perf), trades: chartTradesCache });
     refreshIndices();

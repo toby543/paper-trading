@@ -56,6 +56,32 @@ CREATE TABLE IF NOT EXISTS equity_curve (
     positions_value REAL NOT NULL,
     total_equity REAL NOT NULL
 );
+
+-- Per-position stop loss / target the user set by hand (manual profiles
+-- only). A separate table so the core positions row is untouched; the row is
+-- removed whenever the position closes.
+CREATE TABLE IF NOT EXISTS position_levels (
+    symbol TEXT PRIMARY KEY,
+    stop_loss REAL,
+    target_price REAL
+);
+
+-- Limit buys waiting for the price to come down to limit_price. Rows are
+-- kept after they resolve (status filled / cancelled, with detail saying why)
+-- so an order never just vanishes.
+CREATE TABLE IF NOT EXISTS pending_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    limit_price REAL NOT NULL,
+    stop_loss REAL,
+    target_price REAL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    detail TEXT NOT NULL DEFAULT '',
+    resolved_at TEXT
+);
 """
 
 
@@ -278,6 +304,63 @@ class Storage:
     def delete_position(self, symbol: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
+            # Levels belong to the position: a later re-entry must not
+            # inherit a stop the user set on the previous one.
+            conn.execute("DELETE FROM position_levels WHERE symbol = ?", (symbol,))
+
+    # ---- manual-trade levels and pending orders -------------------------
+    def get_levels(self) -> dict[str, dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT symbol, stop_loss, target_price FROM position_levels").fetchall()
+        return {r["symbol"]: {"stop_loss": r["stop_loss"], "target_price": r["target_price"]} for r in rows}
+
+    def set_levels(self, symbol: str, stop_loss: float | None, target_price: float | None) -> None:
+        with self._conn() as conn:
+            if stop_loss is None and target_price is None:
+                conn.execute("DELETE FROM position_levels WHERE symbol = ?", (symbol,))
+            else:
+                conn.execute(
+                    """INSERT INTO position_levels (symbol, stop_loss, target_price) VALUES (?, ?, ?)
+                       ON CONFLICT(symbol) DO UPDATE SET
+                         stop_loss=excluded.stop_loss, target_price=excluded.target_price""",
+                    (symbol, stop_loss, target_price),
+                )
+
+    def add_pending_order(self, symbol: str, quantity: float, limit_price: float,
+                          stop_loss: float | None, target_price: float | None, note: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO pending_orders (symbol, quantity, limit_price, stop_loss, target_price, note, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, quantity, limit_price, stop_loss, target_price, note,
+                 datetime.now().isoformat(timespec="seconds")),
+            )
+            return int(cur.lastrowid)
+
+    def get_pending_orders(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM pending_orders WHERE status = 'pending' ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_recent_orders(self, limit: int = 15) -> list[dict]:
+        """Pending orders first, then the most recently resolved ones."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM pending_orders
+                   ORDER BY (status = 'pending') DESC, COALESCE(resolved_at, created_at) DESC, id DESC
+                   LIMIT ?""", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_pending_order(self, order_id: int, status: str, detail: str) -> bool:
+        """Only a still-pending order can be resolved; returns whether this
+        call did it (False if it was already filled or cancelled)."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """UPDATE pending_orders SET status = ?, detail = ?, resolved_at = ?
+                   WHERE id = ? AND status = 'pending'""",
+                (status, detail, datetime.now().isoformat(timespec="seconds"), order_id),
+            )
+            return cur.rowcount > 0
 
     # ---- trades -----------------------------------------------------
     def record_trade(self, trade: Trade) -> None:
