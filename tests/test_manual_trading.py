@@ -203,7 +203,7 @@ def test_manual_profile_file_is_configured_as_manual():
 
     profile = yaml.safe_load(open("profiles/manual_swing.yaml"))
     assert profile["strategy_mode"] == "manual"
-    assert profile["category"] == "swing"
+    assert profile["category"] == "manual"  # its own dashboard tab
 
 
 # --- HTTP API -----------------------------------------------------------------
@@ -344,3 +344,9 @@ def test_api_passes_expected_price_through(client):
     r = client.post("/api/manual/order", json={
         "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 1, "expected_price": 50})
     assert r.status_code == 400 and "price moved" in r.get_json()["error"]
+
+
+def test_manual_profile_gets_its_own_dashboard_tab(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-category="manual"' in html and "Manual Trading" in html
+    assert '"manual_swing": "manual"' in html  # PROFILE_CATEGORIES maps it to that tab

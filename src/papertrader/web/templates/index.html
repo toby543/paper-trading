@@ -568,11 +568,13 @@
        panel below show. Swing profiles existed before this tab system did,
        so a profile with no explicit category defaults to "swing" -- see
        Config.list_profile_categories(). -->
-  {% if profile_categories.values() | unique | list | length > 1 %}
+  {% set tab_categories = profile_categories.values() | list %}
+  {% if tab_categories | unique | list | length > 1 %}
   <div class="tab-bar" id="tradingTabBar">
     <button class="trading-tab" data-category="swing" id="tabSwing">Swing Trading</button>
-    <button class="trading-tab" data-category="long_term" id="tabLongTerm">Long Term Trading</button>
-    <button class="trading-tab" data-category="crypto" id="tabCrypto">Crypto Trading</button>
+    {% if 'long_term' in tab_categories %}<button class="trading-tab" data-category="long_term" id="tabLongTerm">Long Term Trading</button>{% endif %}
+    {% if 'crypto' in tab_categories %}<button class="trading-tab" data-category="crypto" id="tabCrypto">Crypto Trading</button>{% endif %}
+    {% if 'manual' in tab_categories %}<button class="trading-tab" data-category="manual" id="tabManual">Manual Trading</button>{% endif %}
   </div>
   {% endif %}
 

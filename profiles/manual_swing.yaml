@@ -9,4 +9,4 @@ manual:
   allow_when_market_closed: false
 risk:
   max_open_positions: 15
-category: swing
+category: manual
