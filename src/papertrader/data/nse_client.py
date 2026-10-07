@@ -19,6 +19,8 @@ from typing import Optional
 
 import pandas as pd
 import requests
+
+from . import eod_prices
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .crypto_client import BinanceClient, KrakenClient, CryptoDataUnavailableError
@@ -262,7 +264,26 @@ class MarketDataClient:
         try:
             return self._quote_from_yfinance(symbol)
         except Exception as exc:  # noqa: BLE001
+            # Last resort before giving up: the exchange's own end-of-day file.
+            eod = self._quote_from_eod(symbol)
+            if eod is not None:
+                log.warning("Yahoo Finance had no usable price for %s (%s); using the exchange's %s close", symbol, exc, eod.bar_date)
+                return eod
             raise DataUnavailableError(f"No data source available for {symbol}: {exc}") from exc
+
+    def _quote_from_eod(self, symbol: str) -> Quote | None:
+        """The latest official close from NSE's / BSE's daily file. It carries
+        no 52-week range (reported as 0, which every consumer treats as
+        unknown) and is only as fresh as the last published day."""
+        found = eod_prices.latest(symbol, date.today(), timeout=self.timeout)
+        if found is None:
+            return None
+        day, row = found
+        return Quote(
+            symbol=symbol, ltp=row["close"], prev_close=row["prev_close"] if row["prev_close"] > 0 else row["close"],
+            week52_high=0.0, week52_low=0.0, volume=row["volume"],
+            timestamp=datetime.now(), source="eod", bar_date=day,
+        )
 
     def _quote_from_nse(self, symbol: str) -> Quote:
         data = self._nse.get_json(NSE_QUOTE_URL.format(symbol=symbol))
@@ -296,13 +317,26 @@ class MarketDataClient:
         # until the process is restarted by hand. Exactly the failure
         # mode behind an "Engine may have stopped scanning" warning that
         # doesn't resolve on its own.
-        hist = ticker.history(period="1y", interval="1d", timeout=self.timeout)
-        if hist.empty:
+        raw = ticker.history(period="1y", interval="1d", timeout=self.timeout)
+        if raw.empty:
             raise DataUnavailableError(f"yfinance returned no history for {symbol}")
         # Yahoo sometimes ends the series with a half-formed bar: volume but
         # no open/high/low/close (seen on thin NSE stocks). Quoting that bar
-        # gave a NaN price; use the latest bar that actually has one.
-        hist = hist[hist["Close"].notna()]
+        # gave a NaN price. Fill that day from the exchange's own end-of-day
+        # file when it has it; otherwise use the latest bar that has a price.
+        hist = raw[raw["Close"].notna()]
+        if not is_crypto and (hist.empty or raw.index[-1] > hist.index[-1]) and hasattr(raw.index[-1], "date"):
+            day = raw.index[-1].date()
+            row = eod_prices.lookup(symbol, day, timeout=self.timeout)
+            if row:
+                return Quote(
+                    symbol=symbol, ltp=row["close"],
+                    prev_close=row["prev_close"] if row["prev_close"] > 0 else row["close"],
+                    week52_high=max(float(hist["High"].max()) if not hist.empty else 0.0, row["high"]),
+                    week52_low=min(float(hist["Low"].min()) if not hist.empty else row["low"], row["low"]),
+                    volume=row["volume"], timestamp=datetime.now(),
+                    source="yfinance+eod", bar_date=day,
+                )
         if hist.empty:
             raise DataUnavailableError(f"yfinance returned no usable prices for {symbol}")
         last = hist.iloc[-1]

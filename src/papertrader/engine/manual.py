@@ -89,8 +89,9 @@ class ManualTrader:
 
         def finite(value):
             # NaN is not valid JSON, and thin or newly listed stocks do
-            # produce a missing previous close or 52-week figure.
-            return value if value is not None and math.isfinite(value) else None
+            # produce a missing previous close or 52-week figure. A 0 means
+            # "unknown" (the end-of-day fallback has no 52-week range).
+            return value if value is not None and math.isfinite(value) and value > 0 else None
 
         levels = self.storage.get_levels().get(symbol, {}) if held else {}
         return {

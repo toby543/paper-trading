@@ -932,3 +932,129 @@ def test_quote_reports_which_day_its_price_is_from(trader_env):
     assert trader.quote("AAA")["price_date"] is None
     data.bar_date = datetime(2026, 10, 5).date()
     assert trader.quote("AAA")["price_date"] == "2026-10-05"
+
+
+# --- price fallback chain: live NSE -> Yahoo -> exchange end-of-day file ---------------
+
+NSE_FILE = (
+    "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, "
+    "TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER\n"
+    "RPEL, EQ, 06-Oct-2026, 1825.30, 1851.20, 1860.00, 1799.00, 1845.00, 1835.60, 1828.72, 51137, 935.15, 7827, 22826, 44.64\n"
+    "RPEL, BE, 06-Oct-2026, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1, 1, 1, 1, 1\n"
+    "NOCLOSE, EQ, 06-Oct-2026, 10.00, -, -, -, -, -, -, 0, 0, 0, 0, 0\n"
+)
+BSE_FILE = (
+    "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,XpryDt,FininstrmActlXpryDt,StrkPric,OptnTp,"
+    "FinInstrmNm,OpnPric,HghPric,LwPric,ClsPric,LastPric,PrvsClsgPric,UndrlygPric,SttlmPric,OpnIntrst,ChngInOpnIntrst,"
+    "TtlTradgVol,TtlTrfVal,TtlNbOfTxsExctd,SsnId,NewBrdLotQty,Rmks,Rsvd1,Rsvd2,Rsvd3,Rsvd4\n"
+    "2026-10-06,2026-10-06,CM,BSE,STK,500002,INE117A01022,ABB,A,,,,,ABB INDIA LIMITED,7216.95,7300.00,7022.75,7057.90,"
+    "7057.90,7115.00,,7052.88,,,2883,20467777.00,620,F1,1,,,,,\n"
+)
+
+
+def test_end_of_day_files_are_parsed_for_both_exchanges():
+    from papertrader.data import eod_prices
+
+    nse = eod_prices.parse_nse(NSE_FILE)
+    assert nse["RPEL"]["close"] == pytest.approx(1835.60)      # the EQ row, not the BE one
+    assert nse["RPEL"]["prev_close"] == pytest.approx(1825.30)
+    assert "NOCLOSE" not in nse                                # no price, no entry
+    bse = eod_prices.parse_bse(BSE_FILE)
+    assert bse["ABB"]["close"] == pytest.approx(7057.90) and bse["ABB"]["high"] == pytest.approx(7300.00)
+
+
+def test_lookup_routes_bse_symbols_to_the_bse_file(monkeypatch):
+    from papertrader.data import eod_prices
+
+    seen = []
+
+    def load(exchange, day, timeout):
+        seen.append(exchange)
+        return {"ABB": {"close": 1.0}} if exchange == "BSE" else {"RPEL": {"close": 2.0}}
+
+    monkeypatch.setattr(eod_prices, "_load", load)
+    assert eod_prices.lookup("ABB.BO", datetime(2026, 10, 6).date())["close"] == 1.0
+    assert eod_prices.lookup("RPEL", datetime(2026, 10, 6).date())["close"] == 2.0
+    assert seen == ["BSE", "NSE"]
+
+
+def test_latest_walks_back_over_weekends_and_unpublished_days(monkeypatch):
+    from papertrader.data import eod_prices
+
+    published = {datetime(2026, 10, 5).date()}   # Monday only; Tuesday-Thursday not published
+
+    monkeypatch.setattr(eod_prices, "_load",
+                        lambda ex, day, t: {"RPEL": {"close": 9.0}} if day in published else None)
+    day, row = eod_prices.latest("RPEL", datetime(2026, 10, 8).date())
+    assert day == datetime(2026, 10, 5).date() and row["close"] == 9.0
+    assert eod_prices.latest("NOSUCH", datetime(2026, 10, 8).date()) is None
+
+
+def _patch_yahoo(monkeypatch, frame):
+    class _Ticker:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            return frame
+
+    monkeypatch.setattr("yfinance.Ticker", _Ticker)
+
+
+def test_an_empty_trailing_yahoo_bar_is_filled_from_the_exchange_file(monkeypatch):
+    """The RPEL case: Yahoo had no prices for 6 Oct, NSE's file has them."""
+    from papertrader.data import eod_prices
+    from papertrader.data.nse_client import MarketDataClient
+
+    nan = float("nan")
+    _patch_yahoo(monkeypatch, _bars([("2026-10-01", 1818.9, 100), ("2026-10-05", 1825.3, 83), ("2026-10-06", nan, 51)]))
+    table = eod_prices.parse_nse(NSE_FILE)
+    monkeypatch.setattr(eod_prices, "_load", lambda ex, day, t: table if str(day) == "2026-10-06" else None)
+
+    q = MarketDataClient()._quote_from_yfinance("RPEL")
+    assert q.ltp == pytest.approx(1835.60) and q.prev_close == pytest.approx(1825.30)
+    assert str(q.bar_date) == "2026-10-06" and q.source == "yfinance+eod"
+    assert q.week52_high >= 1860.0                             # the day's high is included
+
+
+def test_get_quote_falls_back_to_the_exchange_file_when_yahoo_has_nothing(monkeypatch):
+    from papertrader.data import eod_prices
+    from papertrader.data.nse_client import MarketDataClient
+
+    class _Dead:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            raise RuntimeError("yahoo is down")
+
+    monkeypatch.setattr("yfinance.Ticker", _Dead)
+    table = eod_prices.parse_nse(NSE_FILE)
+    monkeypatch.setattr(eod_prices, "_load", lambda ex, day, t: table)
+
+    client = MarketDataClient(preferred="yfinance")
+    q = client.get_quote("RPEL")
+    assert q.source == "eod" and q.ltp == pytest.approx(1835.60)
+    assert q.week52_high == 0.0                                # unknown, not invented
+
+
+def test_get_quote_still_raises_when_every_source_fails(monkeypatch):
+    from papertrader.data.nse_client import MarketDataClient
+
+    class _Dead:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            raise RuntimeError("yahoo is down")
+
+    monkeypatch.setattr("yfinance.Ticker", _Dead)
+    with pytest.raises(DataUnavailableError):
+        MarketDataClient(preferred="yfinance").get_quote("RPEL")
+
+
+def test_manual_quote_treats_the_unknown_52_week_range_as_missing(trader_env):
+    trader, _, data, _ = trader_env
+    data.get_quote = lambda s: Quote(s, 100.0, 99.0, 0.0, 0.0, 1.0, datetime.now(), "eod", None)
+    q = trader.quote("AAA")
+    assert q["week52_high"] is None and q["week52_low"] is None
