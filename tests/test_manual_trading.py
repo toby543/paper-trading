@@ -861,3 +861,74 @@ def test_scheduled_buy_without_an_entry_price_still_runs_at_the_open(closed):
     _open_market(state, data, price=106.0)
     trader.run_automation()
     assert "AAA" in broker.positions()
+
+
+# --- a half-formed last bar from Yahoo (the RPEL case) ---------------------------------
+
+def _bars(rows):
+    import pandas as pd
+
+    idx = pd.to_datetime([r[0] for r in rows])
+    return pd.DataFrame(
+        {"Open": [r[1] for r in rows], "High": [r[1] for r in rows], "Low": [r[1] for r in rows],
+         "Close": [r[1] for r in rows], "Volume": [r[2] for r in rows]}, index=idx)
+
+
+def test_quote_skips_a_last_bar_that_has_volume_but_no_prices(monkeypatch):
+    """Yahoo ended RPEL's history with a row of NaN prices and a volume. The
+    quote took that row's close, so the ticket said "No valid price"."""
+    import math
+
+    from papertrader.data.nse_client import MarketDataClient
+
+    nan = float("nan")
+    frame = _bars([("2026-10-01", 1818.9, 100), ("2026-10-05", 1825.3, 83), ("2026-10-06", nan, 51)])
+
+    class _Ticker:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            return frame
+
+    monkeypatch.setattr("yfinance.Ticker", _Ticker)
+    q = MarketDataClient()._quote_from_yfinance("RPEL")
+    assert q.ltp == pytest.approx(1825.3) and not math.isnan(q.ltp)
+    assert q.prev_close == pytest.approx(1818.9)
+    assert str(q.bar_date) == "2026-10-05"
+
+
+def test_quote_with_no_usable_price_at_all_is_unavailable(monkeypatch):
+    from papertrader.data.nse_client import MarketDataClient
+
+    frame = _bars([("2026-10-06", float("nan"), 51)])
+
+    class _Ticker:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            return frame
+
+    monkeypatch.setattr("yfinance.Ticker", _Ticker)
+    with pytest.raises(DataUnavailableError, match="no usable prices"):
+        MarketDataClient()._quote_from_yfinance("RPEL")
+
+
+def test_an_immediate_order_will_not_fill_on_an_earlier_days_price(trader_env):
+    from datetime import timedelta
+
+    trader, broker, data, _ = trader_env
+    data.bar_date = datetime.now().date() - timedelta(days=2)
+    with pytest.raises(ManualOrderError, match="not today"):
+        trader.place_order("AAA", "BUY", 1)
+    assert not broker.positions()
+    trader.allow_when_market_closed = True        # after-hours testing mode skips the check
+    assert trader.place_order("AAA", "BUY", 1)["status"] == "filled"
+
+
+def test_quote_reports_which_day_its_price_is_from(trader_env):
+    trader, _, data, _ = trader_env
+    assert trader.quote("AAA")["price_date"] is None
+    data.bar_date = datetime(2026, 10, 5).date()
+    assert trader.quote("AAA")["price_date"] == "2026-10-05"

@@ -299,6 +299,12 @@ class MarketDataClient:
         hist = ticker.history(period="1y", interval="1d", timeout=self.timeout)
         if hist.empty:
             raise DataUnavailableError(f"yfinance returned no history for {symbol}")
+        # Yahoo sometimes ends the series with a half-formed bar: volume but
+        # no open/high/low/close (seen on thin NSE stocks). Quoting that bar
+        # gave a NaN price; use the latest bar that actually has one.
+        hist = hist[hist["Close"].notna()]
+        if hist.empty:
+            raise DataUnavailableError(f"yfinance returned no usable prices for {symbol}")
         last = hist.iloc[-1]
         prev = hist.iloc[-2] if len(hist) > 1 else last
         return Quote(

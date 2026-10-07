@@ -1470,8 +1470,11 @@ async function manualLoadQuote(symbol, name) {
     manualEl("manualPrice").textContent = CCY + fmt(q.ltp);
     const chg = q.prev_close ? (q.ltp - q.prev_close) / q.prev_close * 100 : 0;
     const range = q.week52_low !== null && q.week52_high !== null ? ` · 52w ${fmt(q.week52_low)}–${fmt(q.week52_high)}` : "";
+    const olderPrice = q.price_date && q.price_date !== new Date().toLocaleDateString("en-CA")
+      ? " · price is from " + new Date(q.price_date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+      : "";
     manualEl("manualDay").textContent = (q.prev_close ? `${signed(chg)}% today` : "no previous close") + range +
-      (q.market_open ? "" : " · market closed");
+      (q.market_open ? "" : " · market closed") + olderPrice;
     manualEl("manualEntry").value = q.ltp.toFixed(2);
     manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
     manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";

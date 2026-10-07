@@ -100,6 +100,7 @@ class ManualTrader:
             "week52_high": finite(q.week52_high),
             "week52_low": finite(q.week52_low),
             "source": q.source,
+            "price_date": q.bar_date.isoformat() if getattr(q, "bar_date", None) else None,
             "market_open": bool(self.is_market_open()),
             "queue_when_closed": not self.allow_when_market_closed,
             "cash": self.broker.cash(),
@@ -150,6 +151,10 @@ class ManualTrader:
             if not market_open:
                 return self._schedule_for_open(symbol, side, qty, entry, sl, target, note, held)
             q = self._live_price(symbol)
+            if not self.allow_when_market_closed and not self._is_fresh(q):
+                raise ManualOrderError(
+                    f"The latest price available for {symbol} is from {q.bar_date:%d %b}, not today, "
+                    "so it can't be traded on yet. Try again in a minute, or schedule the order.")
             self._check_price_protection(q.ltp, expected_price)
 
             if side == "SELL":
