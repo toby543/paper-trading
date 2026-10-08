@@ -1464,3 +1464,37 @@ def test_an_automated_profile_has_no_commitments_but_still_reports_invested(tmp_
     engine.data = _FakeData(ltp=100.0)
     summary = build_summary(engine)
     assert summary["commitments"] is None and summary["invested"] == 0
+
+
+# --- scripts/check_capital.py --------------------------------------------------------
+
+def _check_capital_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_capital", "scripts/check_capital.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_check_capital_classifies_each_ledger(tmp_path):
+    describe = _check_capital_module().describe
+    assert describe(str(tmp_path / "missing.db"), 500_000.0)["status"] == "no_ledger"
+
+    untouched = Storage(str(tmp_path / "a.db"), 100_000.0)
+    assert describe(untouched.db_path, 100_000.0)["status"] == "ok"
+    assert describe(untouched.db_path, 500_000.0)["status"] == "will_update"
+
+    traded = Storage(str(tmp_path / "b.db"), 100_000.0)
+    PaperBroker(traded, slippage_bps=0.0, flat_charges_inr=10.0, fee_pct=0.0).buy("AAA", 1, 100.0, "t")
+    info = describe(traded.db_path, 500_000.0)
+    assert info["status"] == "locked" and info["trades"] == 1 and info["positions"] == 1
+    assert describe(traded.db_path, 100_000.0)["status"] == "ok"
+
+
+def test_applying_what_check_capital_reports_brings_the_ledger_to_ok(tmp_path):
+    describe = _check_capital_module().describe
+    storage = Storage(str(tmp_path / "a.db"), 100_000.0)
+    assert describe(storage.db_path, 500_000.0)["status"] == "will_update"
+    Storage(storage.db_path, 500_000.0).adopt_starting_capital_if_untouched(500_000.0)
+    assert describe(storage.db_path, 500_000.0)["status"] == "ok"
