@@ -333,9 +333,12 @@
   .index-card canvas { width: 100%; height: 64px; display: block; }
   .index-sub { font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; }
   @media (max-width: 640px) {
-    .indices-grid { grid-template-columns: 1fr; }
-    .index-card { border-right: none; border-bottom: 1px solid var(--border); }
-    .index-card:last-child { border-bottom: none; }
+    .index-card { padding: 10px 8px; }
+    .index-head { flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 4px; }
+    .index-label { font-size: 11.5px; }
+    .index-ret { font-size: 11px; }
+    .index-card canvas { height: 44px; }
+    .index-sub { font-size: 9.5px; margin-top: 4px; }
   }
 
   /* ---------- tables ---------- */
@@ -497,6 +500,13 @@
     .shell { padding: 0 14px 40px; }
     .topbar { padding: 14px; flex-wrap: wrap; row-gap: 10px; }
     .brand { flex-wrap: wrap; row-gap: 4px; }
+  }
+  /* The right-hand group (status pills, clock, profile picker, Sign out) is
+     wider than a phone: let it wrap rather than push the page sideways. */
+  @media (max-width: 640px) {
+    .topbar-right { flex-wrap: wrap; gap: 8px 10px; min-width: 0; max-width: 100%; }
+    .topbar-right .pill { white-space: nowrap; }
+    .topbar-right .profile-select { max-width: 100%; }
   }
 
   /* ---------- tables -> cards on narrow screens ---------- */
@@ -681,6 +691,19 @@
     /* Ticket first, then what you hold; charts below. */
     .col-main > #manualPanel { order: -2; }
     .col-main > #positionsPanel { order: -1; }
+    @media (max-width: 900px) {
+      /* Flatten the layout so the ticket can sit right under the header
+         instead of below two screens of stat cards and charts. */
+      .shell { display: flex; flex-direction: column; }
+      .shell > * { order: 10; }
+      .grid, .col-main { display: contents; }
+      #tradingTabBar, .profile-banner { order: 0; }
+      .col-main > #manualPanel { order: 1; }
+      .col-main > #positionsPanel { order: 2; }
+      #stats { order: 3; }
+      #indicesPanel { order: 4; }
+      .col-main > .panel, .grid > .panel { order: 10; margin-bottom: 20px; align-self: stretch !important; }
+    }
   </style>
   {% endif %}
 
