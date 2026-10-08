@@ -689,6 +689,13 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
                 node = node.setdefault(key, {})
             node[path[-1]] = value
 
+        # A changed starting capital reaches a ledger that has not traded yet
+        # straight away (one that has traded keeps its original capital).
+        if any(path == ["profiles", active_profile, "starting_capital"] for path, _ in coerced):
+            for engine in engines.values():
+                if engine.profile_name == active_profile:
+                    engine.sync_untouched_capital()
+
         return jsonify({"ok": True, "restart_required": True})
 
     @app.post("/api/reload-config")

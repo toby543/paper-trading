@@ -295,6 +295,28 @@ class Storage:
             row = conn.execute("SELECT starting_capital FROM account WHERE id = 1").fetchone()
             return float(row["starting_capital"])
 
+    def adopt_starting_capital_if_untouched(self, capital: float) -> bool:
+        """Re-seed this ledger with `capital` -- but only while it has never
+        traded (no trades, no open positions). The starting capital is fixed
+        when a ledger is created so that an edit can't silently recompute an
+        existing track record against a different baseline; a ledger with no
+        track record has nothing to protect, so a changed setting should just
+        take effect. Its equity history (flat snapshots of the old amount) is
+        cleared so the curve doesn't show a jump. Returns whether it changed."""
+        if capital is None or capital <= 0:
+            return False
+        with self._conn() as conn:
+            used = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM trades) + (SELECT COUNT(*) FROM positions)").fetchone()[0]
+            if used:
+                return False
+            row = conn.execute("SELECT cash, starting_capital FROM account WHERE id = 1").fetchone()
+            if row is not None and row["cash"] == capital and row["starting_capital"] == capital:
+                return False
+            conn.execute("UPDATE account SET cash = ?, starting_capital = ? WHERE id = 1", (capital, capital))
+            conn.execute("DELETE FROM equity_curve")
+        return True
+
     def get_last_scan_at(self) -> str | None:
         with self._conn() as conn:
             row = conn.execute("SELECT last_scan_at FROM account WHERE id = 1").fetchone()

@@ -1298,3 +1298,75 @@ def test_api_gtt_create_list_cancel(client):
         "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 3, "trigger_price": 100})
     assert bad.status_code == 400
     assert client.get("/api/manual/gtt?profile=auto").status_code == 400
+
+
+# --- starting capital follows the setting until the first trade -----------------------
+
+def _fresh_ledger(tmp_path, capital=100_000.0):
+    return Storage(str(tmp_path / "ledger.db"), capital)
+
+
+def test_an_untouched_ledger_adopts_a_changed_starting_capital(tmp_path):
+    storage = _fresh_ledger(tmp_path)
+    storage.record_equity(100_000.0, 0.0)                    # a flat snapshot of the old amount
+    assert storage.adopt_starting_capital_if_untouched(500_000.0) is True
+    assert storage.get_cash() == 500_000.0 and storage.get_starting_capital() == 500_000.0
+    assert storage.get_equity_curve(limit=10) == []          # no jump on the curve
+    assert storage.adopt_starting_capital_if_untouched(500_000.0) is False   # nothing left to change
+
+
+def test_a_ledger_that_has_traded_keeps_its_original_capital(tmp_path):
+    storage = _fresh_ledger(tmp_path)
+    broker = PaperBroker(storage, slippage_bps=0.0, flat_charges_inr=10.0, fee_pct=0.0)
+    broker.buy("AAA", 5, 100.0, "t")
+    cash = storage.get_cash()
+    assert storage.adopt_starting_capital_if_untouched(500_000.0) is False
+    assert storage.get_starting_capital() == 100_000.0 and storage.get_cash() == cash
+
+
+def test_a_closed_out_ledger_is_still_a_track_record(tmp_path):
+    storage = _fresh_ledger(tmp_path)
+    broker = PaperBroker(storage, slippage_bps=0.0, flat_charges_inr=10.0, fee_pct=0.0)
+    broker.buy("AAA", 5, 100.0, "t")
+    broker.sell("AAA", 5, 100.0, "t")                        # no open position, but it has traded
+    assert storage.adopt_starting_capital_if_untouched(500_000.0) is False
+    assert storage.get_starting_capital() == 100_000.0
+
+
+@pytest.mark.parametrize("bad", [0, -5, None])
+def test_a_missing_or_nonpositive_capital_is_ignored(tmp_path, bad):
+    storage = _fresh_ledger(tmp_path)
+    assert storage.adopt_starting_capital_if_untouched(bad) is False
+    assert storage.get_cash() == 100_000.0
+
+
+def test_pending_orders_and_gtts_do_not_count_as_trading(tmp_path):
+    storage = _fresh_ledger(tmp_path)
+    storage.add_pending_order("AAA", 1, 90.0, None, None, "")
+    assert storage.adopt_starting_capital_if_untouched(250_000.0) is True
+    assert len(storage.get_pending_orders()) == 1            # kept: still valid orders
+
+
+def test_engine_picks_up_a_changed_capital_for_an_untouched_manual_ledger(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+
+    cfg = Config.load()
+    state = str(tmp_path / "manual.db")
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: state)
+    monkeypatch.setattr(cfg, "get_profile_starting_capital", lambda name=None: 100_000.0)
+    engine = TradingEngine(cfg, profile_name="manual_swing")
+    assert engine.broker.cash() == 100_000.0
+
+    monkeypatch.setattr(cfg, "get_profile_starting_capital", lambda name=None: 500_000.0)
+    engine.sync_untouched_capital()                          # what the loop and the settings save call
+    assert engine.broker.cash() == 500_000.0
+    assert engine.storage.get_starting_capital() == 500_000.0
+
+    restarted = TradingEngine(cfg, profile_name="manual_swing")   # a restart keeps it
+    assert restarted.broker.cash() == 500_000.0
+
+    restarted.broker.buy("AAA", 1, 100.0, "manual")          # after the first trade it is fixed
+    monkeypatch.setattr(cfg, "get_profile_starting_capital", lambda name=None: 900_000.0)
+    restarted.sync_untouched_capital()
+    assert restarted.storage.get_starting_capital() == 500_000.0

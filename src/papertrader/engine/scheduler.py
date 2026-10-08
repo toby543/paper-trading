@@ -88,6 +88,7 @@ class TradingEngine:
         self.quote_currency = cfg.get_profile_quote_currency(self.profile_name)
         starting_capital = cfg.get_profile_starting_capital(self.profile_name)
         self.storage = Storage(cfg.get_profile_state_file(self.profile_name), starting_capital)
+        self.sync_untouched_capital()
         # Profile-scoped, not the bare global execution: block -- a
         # crypto profile prices fills with a percentage exchange fee,
         # an equity profile with flat NSE brokerage. See
@@ -133,6 +134,14 @@ class TradingEngine:
         self.risk_cfg = profile_risk_cfg
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
         self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
+
+    def sync_untouched_capital(self) -> None:
+        """A ledger that has never traded takes the profile's configured
+        starting capital, so changing it in Edit Settings works until the
+        first trade (after that the capital is fixed -- see Storage)."""
+        capital = self.cfg.get_profile_starting_capital(self.profile_name)
+        if self.storage.adopt_starting_capital_if_untouched(capital):
+            log.info("Profile %s has not traded: starting capital set to %.2f", self.profile_name, capital)
 
     @property
     def is_manual(self) -> bool:
@@ -1184,6 +1193,7 @@ class TradingEngine:
                     self.risk.position_size_pct_of_equity = risk_cfg.get("position_size_pct_of_equity", 8.0)
                     self.risk.max_cash_deployed_per_scan_pct = risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0)
                     self.risk.fractional_quantities = self.cfg.get_profile_fractional_quantities(self.profile_name)
+                    self.sync_untouched_capital()
                     # Broker's own execution-cost settings -- fee_pct etc.
                     # are editable via Edit Settings, and nothing here used
                     # to apply a changed value to the running broker, so it

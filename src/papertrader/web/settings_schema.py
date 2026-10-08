@@ -304,8 +304,9 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Logging", "label": "Log level", "unit": "", "desc": ""},
     {"path": ("account", "starting_capital"), "type": "float", "min": 0,
      "group": "Account", "label": "Starting capital", "unit": "₹",
-     "desc": "This profile's own starting capital. Only applies the first time its ledger "
-             "database is created -- has no effect on a profile that's already traded."},
+     "desc": "This profile's own starting capital. Applies while the profile has not traded "
+             "(no trades and no open positions); once it has, its capital is fixed so past "
+             "results are not recalculated against a different baseline."},
 ]
 
 _BY_PATH = {tuple(entry["path"]): entry for entry in EDITABLE_SETTINGS}
