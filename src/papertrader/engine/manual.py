@@ -13,7 +13,7 @@ import logging
 import math
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from ..data.nse_client import DataUnavailableError
@@ -29,6 +29,10 @@ MAX_NOTE_LENGTH = 100
 PRICE_TOLERANCE_PCT = 2.0
 # An entry price this close to (or above) the live price is just a market buy.
 MARKET_ENTRY_TOLERANCE = 0.0005
+# GTT orders live this long (Zerodha's limit), and a trigger this close to the
+# current price would fire at once, which is what a regular order is for.
+GTT_VALIDITY_DAYS = 365
+GTT_MIN_DISTANCE = 0.0005
 
 
 class ManualOrderError(ValueError):
@@ -221,6 +225,170 @@ class ManualTrader:
                 "cash": self.broker.cash()}
 
     # ------------------------------------------------------------------
+    # GTT: good till triggered
+    def create_gtt(self, symbol: str, side: str, quantity, trigger_price=None, limit_price=None,
+                   note: str = "", stop_loss=None, target_price=None, oco: bool = False,
+                   target_trigger=None) -> dict:
+        """A single-trigger GTT (buy or sell once the price falls or rises to
+        trigger_price, optionally capped by limit_price), or with oco=True a
+        two-leg sell of a holding: trigger_price is the stop loss and
+        target_trigger the target, and whichever is reached first sells while
+        the other is dropped. Valid for GTT_VALIDITY_DAYS. Nothing is bought,
+        sold or reserved until it triggers."""
+        symbol = (symbol or "").strip().upper()
+        side = (side or "").strip().upper()
+        if side not in ("BUY", "SELL"):
+            raise ManualOrderError("Side must be BUY or SELL.")
+        qty = self._whole_quantity(quantity)
+        trigger = _optional_price(trigger_price, "Trigger price")
+        if trigger is None:
+            raise ManualOrderError("Enter a trigger price.")
+        limit = _optional_price(limit_price, "Limit price")
+        target_trig = _optional_price(target_trigger, "Target trigger")
+        sl = _optional_price(stop_loss, "Stop loss")
+        target = _optional_price(target_price, "Target price")
+        note = " ".join((note or "").split())[:MAX_NOTE_LENGTH]
+        if oco and side != "SELL":
+            raise ManualOrderError("A two-leg GTT (stop loss + target) is for selling a holding.")
+        if oco and target_trig is None:
+            raise ManualOrderError("Enter the target trigger for the second leg.")
+        if oco and limit is not None:
+            raise ManualOrderError("Two-leg GTT legs sell at the market price when triggered; leave the limit price blank.")
+        if side == "SELL" and (sl is not None or target is not None):
+            raise ManualOrderError("Stop loss and target apply to buys; a sell GTT closes shares.")
+
+        with self.lock:
+            positions = self.broker.positions()
+            held = positions.get(symbol)
+            if side == "BUY":
+                if not held and not self._symbol_exists(symbol):
+                    raise ManualOrderError(f"Unknown symbol: {symbol or '(empty)'}")
+            else:
+                if not held:
+                    raise ManualOrderError(f"You don't hold {symbol}.")
+                if qty > held.quantity:
+                    raise ManualOrderError(f"You only hold {held.quantity:g} of {symbol}.")
+            last = self._live_price(symbol).ltp
+            tol = GTT_MIN_DISTANCE
+
+            if oco:
+                if not trigger < last * (1 - tol):
+                    raise ManualOrderError(f"The stop-loss trigger must be below the current price ({last:,.2f}).")
+                if not target_trig > last * (1 + tol):
+                    raise ManualOrderError(f"The target trigger must be above the current price ({last:,.2f}).")
+                direction = "down"
+            else:
+                if trigger < last * (1 - tol):
+                    direction = "down"
+                elif trigger > last * (1 + tol):
+                    direction = "up"
+                else:
+                    raise ManualOrderError(
+                        f"The trigger is at the current price ({last:,.2f}); place a regular order instead.")
+                if limit is not None:
+                    if side == "BUY" and limit < trigger:
+                        raise ManualOrderError("A buy's limit price must be at or above its trigger, or it could never fill.")
+                    if side == "SELL" and limit > trigger:
+                        raise ManualOrderError("A sell's limit price must be at or below its trigger, or it could never fill.")
+                if side == "BUY":
+                    self._check_levels(limit if limit is not None else trigger, sl, target, "trigger price")
+
+            expires = (datetime.now() + timedelta(days=GTT_VALIDITY_DAYS)).isoformat(timespec="seconds")
+            gtt_id = self.storage.add_gtt(
+                symbol=symbol, side=side, kind="oco" if oco else "single", quantity=qty,
+                trigger_price=trigger, direction=direction, limit_price=limit,
+                target_trigger=target_trig if oco else None, stop_loss=sl, target_price=target,
+                note=note, expires_at=expires)
+            return {"gtt_id": gtt_id, "symbol": symbol, "side": side, "kind": "oco" if oco else "single",
+                    "quantity": qty, "trigger_price": trigger, "direction": direction, "limit_price": limit,
+                    "target_trigger": target_trig if oco else None, "expires_at": expires, "last_price": last}
+
+    def cancel_gtt(self, gtt_id) -> dict:
+        try:
+            gid = int(gtt_id)
+        except (TypeError, ValueError):
+            raise ManualOrderError("Unknown GTT.") from None
+        with self.lock:
+            if not self.storage.resolve_gtt(gid, "cancelled", "cancelled by you"):
+                raise ManualOrderError("That GTT is no longer active.")
+        return {"gtt_id": gid, "status": "cancelled"}
+
+    def gtts(self) -> list[dict]:
+        return self.storage.get_recent_gtts(15)
+
+    @staticmethod
+    def _whole_quantity(quantity) -> int:
+        try:
+            qty = float(quantity)
+        except (TypeError, ValueError):
+            raise ManualOrderError("Quantity must be a number.") from None
+        if not math.isfinite(qty) or qty <= 0 or qty != int(qty):
+            raise ManualOrderError("Quantity must be a whole number of shares, at least 1.")
+        return int(qty)
+
+    def _process_gtts(self) -> None:
+        now = datetime.now()
+        for g in self.storage.get_active_gtts():
+            try:
+                if g["expires_at"] and datetime.fromisoformat(g["expires_at"]) < now:
+                    self.storage.resolve_gtt(g["id"], "expired", "expired after one year without triggering")
+                    continue
+                q = self._live_price(g["symbol"])
+            except ManualOrderError:
+                continue
+            if not self._is_fresh(q):
+                continue
+            if g["kind"] == "oco":
+                if q.ltp <= g["trigger_price"]:
+                    self._fire_gtt(g, q, f"stop-loss trigger {g['trigger_price']:,.2f}")
+                elif q.ltp >= g["target_trigger"]:
+                    self._fire_gtt(g, q, f"target trigger {g['target_trigger']:,.2f}")
+            elif (g["direction"] == "down" and q.ltp <= g["trigger_price"]) or \
+                    (g["direction"] == "up" and q.ltp >= g["trigger_price"]):
+                self._fire_gtt(g, q, f"trigger {g['trigger_price']:,.2f}")
+
+    def _fire_gtt(self, g: dict, q, why: str) -> None:
+        symbol, side, qty = g["symbol"], g["side"], g["quantity"]
+
+        def finish(status: str, detail: str) -> None:
+            self.storage.resolve_gtt(g["id"], status, detail)
+
+        limit = g["limit_price"]
+        if limit is not None and ((side == "BUY" and q.ltp > limit) or (side == "SELL" and q.ltp < limit)):
+            finish("triggered", f"{why} reached at {q.ltp:,.2f}, but that is beyond your limit price "
+                                f"({limit:,.2f}); no order was placed")
+            return
+        positions = self.broker.positions()
+        if side == "SELL":
+            held = positions.get(symbol)
+            if held is None:
+                finish("cancelled", "you no longer hold this stock")
+                return
+            qty = min(qty, held.quantity)
+        else:
+            if symbol not in positions and self.risk.room_for_new_positions(len(positions)) <= 0:
+                finish("triggered", f"{why} reached, but the maximum open positions is reached; no order placed")
+                return
+        kind = "gtt " + ("stop-loss" if g["kind"] == "oco" and q.ltp <= g["trigger_price"]
+                         else "target" if g["kind"] == "oco" else side.lower())
+        reason = f"manual {kind} ({why})" + (f": {g['note']}" if g["note"] else "")
+        try:
+            with self.storage.transaction():
+                # Claim first: a failure below rolls the claim back, so a GTT
+                # can never place its order twice.
+                if not self.storage.resolve_gtt(
+                        g["id"], "triggered", f"{why} reached; {side.lower()} {qty:g} at {q.ltp:,.2f}"):
+                    return
+                self._fill(symbol, side, qty, q.ltp, reason)
+                if side == "BUY":
+                    self._apply_levels(symbol, g["stop_loss"], g["target_price"])
+            log.info("GTT #%s triggered: %s %s", g["id"], side, symbol)
+        except ManualOrderError as exc:
+            finish("triggered", f"{why} reached, but the order failed: {exc}")
+        except Exception:  # noqa: BLE001 - one bad GTT must not stop the others
+            log.exception("Could not run GTT #%s", g["id"])
+
+    # ------------------------------------------------------------------
     def set_levels(self, symbol: str, stop_loss, target_price) -> dict:
         """Replace the stop loss / target of a position already held. A
         blank value clears that level."""
@@ -279,6 +447,7 @@ class ManualTrader:
 
         for order in self.storage.get_pending_orders():
             self._try_fill_order(order)
+        self._process_gtts()
 
     @staticmethod
     def _is_fresh(quote) -> bool:

@@ -1058,3 +1058,243 @@ def test_manual_quote_treats_the_unknown_52_week_range_as_missing(trader_env):
     data.get_quote = lambda s: Quote(s, 100.0, 99.0, 0.0, 0.0, 1.0, datetime.now(), "eod", None)
     q = trader.quote("AAA")
     assert q["week52_high"] is None and q["week52_low"] is None
+
+
+# --- GTT: good till triggered -----------------------------------------------------------
+
+def _gtts(broker):
+    return broker.storage.get_active_gtts()
+
+
+def test_a_single_gtt_waits_without_touching_cash_or_positions(trader_env):
+    trader, broker, _, _ = trader_env
+    cash = broker.cash()
+    out = trader.create_gtt("AAA", "BUY", 10, trigger_price=90)
+    assert out["direction"] == "down" and out["kind"] == "single"
+    assert not broker.positions() and broker.cash() == cash
+    assert len(_gtts(broker)) == 1
+
+
+def test_trigger_direction_follows_where_it_sits_against_the_current_price(trader_env):
+    trader, _, _, _ = trader_env
+    assert trader.create_gtt("AAA", "BUY", 1, trigger_price=90)["direction"] == "down"   # price is 100
+    assert trader.create_gtt("BBB", "BUY", 1, trigger_price=110)["direction"] == "up"    # a breakout buy
+
+
+def test_a_trigger_at_the_current_price_is_refused(trader_env):
+    trader, broker, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match="regular order"):
+        trader.create_gtt("AAA", "BUY", 1, trigger_price=100.0)
+    assert not _gtts(broker)
+
+
+def test_a_breakout_gtt_buys_when_the_price_rises_to_the_trigger(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 10, trigger_price=110, stop_loss=104, target_price=130, note="breakout")
+    data.ltp = 108.0
+    trader.run_automation()
+    assert not broker.positions()
+    data.ltp = 111.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 10
+    assert broker.storage.get_levels()["AAA"] == {"stop_loss": 104.0, "target_price": 130.0}
+    gtt = broker.storage.get_recent_gtts()[0]
+    assert gtt["status"] == "triggered" and "111.00" in gtt["detail"]
+    assert broker.storage.get_trades(limit=1)[0].reason.startswith("manual gtt buy (trigger 110.00): breakout")
+
+
+def test_a_buy_the_dip_gtt_fires_when_the_price_falls_to_the_trigger(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5, trigger_price=90)
+    data.ltp = 95.0
+    trader.run_automation()
+    assert not broker.positions()
+    data.ltp = 89.0
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_a_gtt_fires_only_once(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5, trigger_price=90)
+    data.ltp = 85.0
+    trader.run_automation()
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 5
+
+
+def test_a_limit_price_stops_the_order_when_the_price_gaps_past_it(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5, trigger_price=110, limit_price=112)
+    data.ltp = 118.0                                   # jumped through both
+    trader.run_automation()
+    assert not broker.positions()
+    gtt = broker.storage.get_recent_gtts()[0]
+    assert gtt["status"] == "triggered" and "beyond your limit" in gtt["detail"]
+
+
+def test_limit_price_rules(trader_env):
+    trader, _, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match="at or above its trigger"):
+        trader.create_gtt("AAA", "BUY", 1, trigger_price=110, limit_price=108)
+    trader.place_order("BBB", "BUY", 5)
+    with pytest.raises(ManualOrderError, match="at or below its trigger"):
+        trader.create_gtt("BBB", "SELL", 5, trigger_price=110, limit_price=112)
+
+
+def test_a_sell_gtt_needs_the_shares_and_runs_on_its_trigger(trader_env):
+    trader, broker, data, _ = trader_env
+    with pytest.raises(ManualOrderError, match="don't hold"):
+        trader.create_gtt("AAA", "SELL", 1, trigger_price=120)
+    trader.place_order("AAA", "BUY", 10)
+    with pytest.raises(ManualOrderError, match="only hold"):
+        trader.create_gtt("AAA", "SELL", 11, trigger_price=120)
+    trader.create_gtt("AAA", "SELL", 4, trigger_price=120)
+    data.ltp = 121.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 6
+
+
+def test_two_leg_gtt_sells_at_the_stop_and_drops_the_target(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10)
+    out = trader.create_gtt("AAA", "SELL", 6, trigger_price=95, oco=True, target_trigger=120)
+    assert out["kind"] == "oco"
+    data.ltp = 96.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 10          # between the two legs: nothing yet
+    data.ltp = 94.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 4
+    assert "gtt stop-loss" in broker.storage.get_trades(limit=1)[0].reason
+    data.ltp = 130.0
+    trader.run_automation()
+    assert broker.positions()["AAA"].quantity == 4           # the target leg died with the stop leg
+
+
+def test_two_leg_gtt_sells_at_the_target(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 10)
+    trader.create_gtt("AAA", "SELL", 10, trigger_price=95, oco=True, target_trigger=120)
+    data.ltp = 121.0
+    trader.run_automation()
+    assert "AAA" not in broker.positions()
+    assert "gtt target" in broker.storage.get_trades(limit=1)[0].reason
+
+
+def test_two_leg_gtt_validation(trader_env):
+    trader, _, _, _ = trader_env
+    trader.place_order("AAA", "BUY", 10)
+    with pytest.raises(ManualOrderError, match="stop-loss trigger must be below"):
+        trader.create_gtt("AAA", "SELL", 5, trigger_price=105, oco=True, target_trigger=120)
+    with pytest.raises(ManualOrderError, match="target trigger must be above"):
+        trader.create_gtt("AAA", "SELL", 5, trigger_price=95, oco=True, target_trigger=99)
+    with pytest.raises(ManualOrderError, match="Enter the target trigger"):
+        trader.create_gtt("AAA", "SELL", 5, trigger_price=95, oco=True)
+    with pytest.raises(ManualOrderError, match="leave the limit price blank"):
+        trader.create_gtt("AAA", "SELL", 5, trigger_price=95, oco=True, target_trigger=120, limit_price=94)
+    with pytest.raises(ManualOrderError, match="for selling a holding"):
+        trader.create_gtt("BBB", "BUY", 5, trigger_price=95, oco=True, target_trigger=120)
+
+
+def test_a_gtt_whose_shares_are_already_gone_is_cancelled_not_oversold(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 5)
+    trader.create_gtt("AAA", "SELL", 5, trigger_price=120)
+    trader.place_order("AAA", "SELL", 5)
+    data.ltp = 125.0
+    trader.run_automation()
+    assert broker.storage.get_recent_gtts()[0]["status"] == "cancelled"
+
+
+def test_a_gtt_buy_that_cannot_be_afforded_resolves_with_the_reason(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5_000, trigger_price=90)
+    data.ltp = 85.0
+    trader.run_automation()
+    gtt = broker.storage.get_recent_gtts()[0]
+    assert gtt["status"] == "triggered" and "order failed" in gtt["detail"]
+    assert not broker.positions()
+
+
+def test_gtt_waits_while_the_price_is_still_yesterdays(trader_env):
+    from datetime import timedelta
+
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5, trigger_price=90)
+    data.ltp = 80.0
+    data.bar_date = datetime.now().date() - timedelta(days=1)
+    trader.run_automation()
+    assert not broker.positions()
+    data.bar_date = datetime.now().date()
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_a_gtt_expires_after_a_year(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 5, trigger_price=90)
+    gid = _gtts(broker)[0]["id"]
+    import sqlite3
+
+    conn = sqlite3.connect(broker.storage.db_path)
+    conn.execute("UPDATE gtt_orders SET expires_at = '2020-01-01T00:00:00' WHERE id = ?", (gid,))
+    conn.commit()
+    conn.close()
+    data.ltp = 50.0                                  # would have triggered
+    trader.run_automation()
+    assert broker.storage.get_recent_gtts()[0]["status"] == "expired" and not broker.positions()
+
+
+def test_gtt_is_valid_for_a_year(trader_env):
+    trader, _, _, _ = trader_env
+    expires = datetime.fromisoformat(trader.create_gtt("AAA", "BUY", 1, trigger_price=90)["expires_at"])
+    assert 364 <= (expires - datetime.now()).days <= 365
+
+
+def test_cancel_gtt(trader_env):
+    trader, broker, data, _ = trader_env
+    gid = trader.create_gtt("AAA", "BUY", 5, trigger_price=90)["gtt_id"]
+    assert trader.cancel_gtt(gid)["status"] == "cancelled"
+    data.ltp = 50.0
+    trader.run_automation()
+    assert not broker.positions()
+    with pytest.raises(ManualOrderError, match="no longer active"):
+        trader.cancel_gtt(gid)
+
+
+def test_gtt_input_validation(trader_env):
+    trader, broker, _, _ = trader_env
+    with pytest.raises(ManualOrderError, match="trigger price"):
+        trader.create_gtt("AAA", "BUY", 1)
+    with pytest.raises(ManualOrderError, match="Unknown symbol"):
+        trader.create_gtt("ZZZ", "BUY", 1, trigger_price=90)
+    with pytest.raises(ManualOrderError, match="whole number"):
+        trader.create_gtt("AAA", "BUY", 1.5, trigger_price=90)
+    with pytest.raises(ManualOrderError, match="Stop loss must be below"):
+        trader.create_gtt("AAA", "BUY", 1, trigger_price=90, stop_loss=95)
+    assert not _gtts(broker)
+
+
+def test_gtt_can_be_created_while_the_market_is_closed(trader_env):
+    trader, broker, data, state = trader_env
+    state["open"] = False
+    assert trader.create_gtt("AAA", "BUY", 5, trigger_price=90)["gtt_id"]
+    state["open"] = True
+    data.ltp = 85.0
+    trader.run_automation()
+    assert "AAA" in broker.positions()
+
+
+def test_api_gtt_create_list_cancel(client):
+    made = client.post("/api/manual/gtt", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 3, "trigger_price": 90}).get_json()
+    assert made["ok"] and made["direction"] == "down"
+    listed = client.get("/api/manual/gtt?profile=manual_swing").get_json()["gtts"]
+    assert [g["symbol"] for g in listed] == ["AAA"] and listed[0]["status"] == "active"
+    assert client.post("/api/manual/gtt/cancel", json={
+        "profile": "manual_swing", "gtt_id": made["gtt_id"]}).get_json()["ok"]
+    bad = client.post("/api/manual/gtt", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 3, "trigger_price": 100})
+    assert bad.status_code == 400
+    assert client.get("/api/manual/gtt?profile=auto").status_code == 400

@@ -214,6 +214,8 @@
   .manual-msg { margin-top: 10px; font-size: 13px; }
   .manual-msg.err { color: var(--down, #d4574a); }
   .manual-msg.ok { color: var(--up, #2e9d6b); }
+  .manual-side button.mode.on { background: var(--accent); color: #fff; }
+  .manual-check { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-dim); cursor: pointer; }
   .manual-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; }
   .manual-orders { margin-top: 16px; }
   .manual-orders-title { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
@@ -724,8 +726,29 @@
                 <input type="number" id="manualQty" class="edit-input" min="1" step="1" value="1" style="width:110px;">
               </label>
             </div>
+            <div class="manual-row" style="margin-top:12px;">
+              <span class="manual-side">
+                <button type="button" id="manualModeRegular" class="mode on">Regular</button>
+                <button type="button" id="manualModeGtt" class="mode" title="Good till triggered: waits up to a year for a trigger price">GTT</button>
+              </span>
+              <label class="manual-check" id="manualOcoWrap" style="display:none;">
+                <input type="checkbox" id="manualOco"> Two-leg: stop loss + target
+              </label>
+            </div>
+            <div class="manual-row" id="manualGttFields" style="margin-top:12px; display:none;">
+              <label class="manual-field"><span id="manualGttTriggerLabel">Trigger price</span>
+                <input type="number" id="manualGttTrigger" class="edit-input" min="0" step="0.05" style="width:130px;">
+              </label>
+              <label class="manual-field" id="manualGttLimitWrap">Limit price
+                <input type="number" id="manualGttLimit" class="edit-input" min="0" step="0.05" placeholder="optional" style="width:130px;">
+              </label>
+              <label class="manual-field" id="manualGttTargetWrap" style="display:none;">Target trigger
+                <input type="number" id="manualGttTarget" class="edit-input" min="0" step="0.05" style="width:130px;">
+              </label>
+            </div>
+            <div class="manual-est mono" id="manualGttHint"></div>
             <div class="manual-row" id="manualBuyFields" style="margin-top:12px;">
-              <label class="manual-field">Entry price
+              <label class="manual-field" id="manualEntryWrap">Entry price
                 <input type="number" id="manualEntry" class="edit-input" min="0" step="0.05" style="width:130px;"
                        title="Leave at the live price to buy now, or enter a lower price to wait for it">
               </label>
@@ -746,6 +769,7 @@
             <div class="manual-msg" id="manualMsg"></div>
           </div>
           <div class="manual-orders" id="manualOrders"></div>
+          <div class="manual-orders" id="manualGtts"></div>
         </div>
       </div>
       {% endif %}
@@ -1373,7 +1397,7 @@ function renderPositions(s) {
 }
 
 // ---------- manual trade ticket (manual profiles only) ----------
-const manual = { symbol: null, side: "BUY", quote: null, searchTimer: null, seq: 0, quoteSeq: 0 };
+const manual = { symbol: null, side: "BUY", mode: "regular", quote: null, searchTimer: null, seq: 0, quoteSeq: 0 };
 
 function manualEl(id) { return document.getElementById(id); }
 function manualMsg(text, cls) {
@@ -1408,7 +1432,7 @@ function manualUpdateEstimate() {
   const est = manualEl("manualEst");
   const q = manual.quote;
   const qty = Math.floor(Number(manualEl("manualQty").value));
-  if (!q || !(qty > 0)) { est.textContent = ""; manualEl("manualRR").textContent = ""; return; }
+  if (!q || !(qty > 0) || manual.mode === "gtt") { est.textContent = ""; manualEl("manualRR").textContent = ""; return; }
   if (manual.side === "BUY") {
     const entry = manualNum("manualEntry");
     const price = manualIsLimitEntry() ? entry : q.ltp;
@@ -1435,19 +1459,137 @@ function manualSetSide(side) {
   manual.side = side;
   manualEl("manualBuyBtn").className = "buy" + (side === "BUY" ? " on" : "");
   manualEl("manualSellBtn").className = "sell" + (side === "SELL" ? " on" : "");
-  manualEl("manualBuyFields").style.display = side === "BUY" ? "flex" : "none";
+  manualApplyMode();
+}
+
+// Regular orders vs GTT (good till triggered): which fields show, and what
+// the button says. The stop loss / target inputs stay for a GTT buy, where
+// they become the new position's levels once it triggers.
+function manualApplyMode() {
+  const gtt = manual.mode === "gtt";
+  const buy = manual.side === "BUY";
+  const held = !!(manual.quote && manual.quote.held_quantity > 0);
+  const ocoPossible = gtt && !buy && held;
+  manualEl("manualModeRegular").className = "mode" + (gtt ? "" : " on");
+  manualEl("manualModeGtt").className = "mode" + (gtt ? " on" : "");
+  manualEl("manualOcoWrap").style.display = ocoPossible ? "inline-flex" : "none";
+  if (!ocoPossible) manualEl("manualOco").checked = false;
+  const oco = ocoPossible && manualEl("manualOco").checked;
+  manualEl("manualGttFields").style.display = gtt ? "flex" : "none";
+  manualEl("manualBuyFields").style.display = buy ? "flex" : "none";
+  manualEl("manualEntryWrap").style.display = gtt ? "none" : "";
+  manualEl("manualGttLimitWrap").style.display = oco ? "none" : "";
+  manualEl("manualGttTargetWrap").style.display = oco ? "" : "none";
+  manualEl("manualGttTriggerLabel").textContent = oco ? "Stop-loss trigger" : "Trigger price";
   manualRefreshPlaceButton();
   manualUpdateEstimate();
+  manualUpdateGttHint();
 }
 
 function manualRefreshPlaceButton() {
-  manualEl("manualPlaceBtn").textContent = manual.side === "SELL"
+  const gtt = manual.mode === "gtt";
+  manualEl("manualPlaceBtn").textContent = gtt ? "Create GTT" : (manual.side === "SELL"
     ? (manualQueues() ? "Schedule sell for market open" : "Place sell order")
     : (manualIsLimitEntry()
        ? (manualQueues() ? `Schedule buy at ${CCY}${fmt(manualNum("manualEntry"))}` : "Place limit buy order")
-       : (manualQueues() ? "Schedule buy for market open" : "Place buy order"));
+       : (manualQueues() ? "Schedule buy for market open" : "Place buy order")));
   const held = manual.quote && manual.quote.held_quantity > 0;
-  manualEl("manualLevelsBtn").style.display = held ? "inline-block" : "none";
+  manualEl("manualLevelsBtn").style.display = held && !gtt ? "inline-block" : "none";
+}
+
+function manualUpdateGttHint() {
+  const hint = manualEl("manualGttHint");
+  hint.textContent = "";
+  if (manual.mode !== "gtt" || !manual.quote) return;
+  const q = manual.quote;
+  const qty = Math.floor(Number(manualEl("manualQty").value));
+  if (manualEl("manualOco").checked && manual.side === "SELL") {
+    hint.textContent = `Sells ${qty > 0 ? fmtInt(qty) : "your"} shares when the price falls to the stop or rises to the target, ` +
+      "whichever comes first; the other leg is then cancelled. Valid for one year.";
+    return;
+  }
+  const trigger = manualNum("manualGttTrigger");
+  if (!(trigger > 0)) {
+    hint.textContent = "Waits up to one year for the price to reach the trigger, then places the order. " +
+      "Nothing is bought, sold or reserved until then.";
+    return;
+  }
+  const dir = trigger < q.ltp * 0.9995 ? "falls" : (trigger > q.ltp * 1.0005 ? "rises" : null);
+  hint.textContent = dir
+    ? `Fires when the price ${dir} to ${CCY}${fmt(trigger)} (now ${CCY}${fmt(q.ltp)}). Valid for one year.`
+    : "That trigger is at the current price; use a regular order instead.";
+}
+
+async function manualCreateGtt() {
+  const qty = Math.floor(Number(manualEl("manualQty").value));
+  if (!manual.symbol || !manual.quote) { manualMsg("Pick a stock first.", "err"); return; }
+  if (!(qty > 0)) { manualMsg("Enter a whole number of shares.", "err"); return; }
+  const buy = manual.side === "BUY";
+  const oco = !buy && manualEl("manualOco").checked;
+  const trigger = manualNum("manualGttTrigger");
+  const limit = oco ? null : manualNum("manualGttLimit");
+  const targetTrigger = oco ? manualNum("manualGttTarget") : null;
+  const stop = buy ? manualNum("manualStop") : null;
+  const target = buy ? manualNum("manualTarget") : null;
+  if (!(trigger > 0)) { manualMsg(oco ? "Enter the stop-loss trigger." : "Enter a trigger price.", "err"); return; }
+  if ([limit, targetTrigger, stop, target].some(Number.isNaN)) { manualMsg("Prices must be numbers.", "err"); return; }
+  let question;
+  if (oco) {
+    question = `Create a two-leg GTT to SELL ${qty} × ${manual.symbol}?\nStop-loss trigger ${CCY}${fmt(trigger)}\nTarget trigger ${CCY}${fmt(targetTrigger)}\nThe first one reached sells at the market price and cancels the other. Valid for one year.`;
+  } else {
+    const dir = trigger < manual.quote.ltp ? "falls to" : "rises to";
+    question = `Create a GTT to ${manual.side} ${qty} × ${manual.symbol} when the price ${dir} ${CCY}${fmt(trigger)}?` +
+      (limit ? `\nLimit price ${CCY}${fmt(limit)}` : "\nAt the market price when triggered") +
+      (stop ? `\nThen stop loss ${CCY}${fmt(stop)}` : "") + (target ? `\nThen target ${CCY}${fmt(target)}` : "") +
+      "\nValid for one year. Nothing is bought or reserved until it triggers.";
+  }
+  if (!window.confirm(question)) return;
+  const btn = manualEl("manualPlaceBtn");
+  btn.disabled = true;
+  try {
+    const out = await manualPost("/api/manual/gtt", {
+      symbol: manual.symbol, side: manual.side, quantity: qty, note: manualEl("manualNote").value, oco,
+      trigger_price: trigger, limit_price: limit, target_trigger: targetTrigger, stop_loss: stop, target_price: target,
+    });
+    if (!out.ok) { manualMsg(out.error || "GTT rejected.", "err"); return; }
+    manualMsg(oco ? `GTT created: sell ${fmtInt(out.quantity)} × ${out.symbol} at the stop or target`
+      : `GTT created: ${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} when the price ${out.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(out.trigger_price)}`, "ok");
+    ["manualGttTrigger", "manualGttLimit", "manualGttTarget", "manualNote"].forEach(id => { manualEl(id).value = ""; });
+    manualRefreshGtts();
+  } catch (e) {
+    manualMsg("GTT failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function manualCancelGtt(gttId) {
+  const out = await manualPost("/api/manual/gtt/cancel", { gtt_id: gttId });
+  if (!out.ok) manualMsg(out.error || "Could not cancel.", "err");
+  manualRefreshGtts();
+}
+
+async function manualRefreshGtts() {
+  const box = manualEl("manualGtts");
+  if (!box) return;
+  try {
+    const res = await authFetch("/api/manual/gtt?profile=" + encodeURIComponent(ACTIVE_PROFILE));
+    const data = await res.json();
+    if (!data.ok || !data.gtts.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="manual-orders-title">GTT orders</div>` + data.gtts.map(g => {
+      const side = g.side === "SELL" ? "Sell" : "Buy";
+      const what = g.kind === "oco"
+        ? `Sell ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} · stop ${CCY}${fmt(g.trigger_price)} · target ${CCY}${fmt(g.target_trigger)}`
+        : `${side} ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} when price ${g.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(g.trigger_price)}` +
+          (g.limit_price ? ` (limit ${CCY}${fmt(g.limit_price)})` : "") +
+          (g.stop_loss ? ` · stop ${CCY}${fmt(g.stop_loss)}` : "") + (g.target_price ? ` · target ${CCY}${fmt(g.target_price)}` : "");
+      const until = new Date(g.expires_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      const status = g.status === "active"
+        ? `<span class="manual-order-status">valid till ${until} <button type="button" class="manual-sell-btn" data-cancel-gtt="${g.id}">Cancel</button></span>`
+        : `<span class="manual-order-status ${g.status === "triggered" ? "filled" : "cancelled"}">${escapeText(g.status)} — ${escapeText(g.detail)}</span>`;
+      return `<div class="manual-order"><span class="mono">${what}</span>${status}</div>`;
+    }).join("");
+  } catch (e) { /* transient; the next poll retries */ }
 }
 
 async function manualLoadQuote(symbol, name) {
@@ -1477,6 +1619,7 @@ async function manualLoadQuote(symbol, name) {
     manualEl("manualDay").textContent = (q.prev_close ? `${signed(chg)}% today` : "no previous close") + range +
       (q.market_open ? "" : " · market closed") + olderPrice;
     manualEl("manualEntry").value = q.ltp.toFixed(2);
+    ["manualGttTrigger", "manualGttLimit", "manualGttTarget"].forEach(id => { manualEl(id).value = ""; });
     manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
     manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";
     manualSetSide(manual.side);
@@ -1522,6 +1665,7 @@ async function manualPost(url, body) {
 
 async function manualPlaceOrder() {
   const qty = Math.floor(Number(manualEl("manualQty").value));
+  if (manual.mode === "gtt") { return manualCreateGtt(); }
   if (!manual.symbol || !manual.quote) { manualMsg("Pick a stock first.", "err"); return; }
   if (!(qty > 0)) { manualMsg("Enter a whole number of shares.", "err"); return; }
   const price = manual.quote.ltp;
@@ -1591,6 +1735,7 @@ async function manualCancelOrder(orderId) {
 }
 
 async function manualRefreshOrders() {
+  manualRefreshGtts();
   const box = manualEl("manualOrders");
   if (!box) return;
   try {
@@ -1627,8 +1772,17 @@ function initManualTicket() {
   manualEl("manualBuyBtn").addEventListener("click", () => manualSetSide("BUY"));
   manualEl("manualSellBtn").addEventListener("click", () => manualSetSide("SELL"));
   ["manualQty", "manualEntry", "manualStop", "manualTarget"].forEach(id =>
-    manualEl(id).addEventListener("input", () => { manualRefreshPlaceButton(); manualUpdateEstimate(); }));
+    manualEl(id).addEventListener("input", () => { manualRefreshPlaceButton(); manualUpdateEstimate(); manualUpdateGttHint(); }));
   manualEl("manualPlaceBtn").addEventListener("click", manualPlaceOrder);
+  manualEl("manualModeRegular").addEventListener("click", () => { manual.mode = "regular"; manualApplyMode(); });
+  manualEl("manualModeGtt").addEventListener("click", () => { manual.mode = "gtt"; manualApplyMode(); });
+  manualEl("manualOco").addEventListener("change", manualApplyMode);
+  ["manualGttTrigger", "manualGttLimit", "manualGttTarget"].forEach(id =>
+    manualEl(id).addEventListener("input", manualUpdateGttHint));
+  manualEl("manualGtts").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-cancel-gtt]");
+    if (btn) manualCancelGtt(btn.dataset.cancelGtt);
+  });
   manualEl("manualLevelsBtn").addEventListener("click", manualUpdateLevels);
   manualEl("manualOrders").addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-cancel]");

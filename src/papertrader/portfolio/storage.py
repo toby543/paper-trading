@@ -66,6 +66,31 @@ CREATE TABLE IF NOT EXISTS position_levels (
     target_price REAL
 );
 
+-- GTT ("good till triggered") orders: wait up to a year for the price to
+-- reach a trigger, then place an order. kind "single" fires once when the
+-- price falls ('down') or rises ('up') to trigger_price; kind "oco" is a
+-- two-leg sell, stop trigger_price and target target_trigger, one cancels the
+-- other. Rows are kept once resolved so a GTT never just vanishes.
+CREATE TABLE IF NOT EXISTS gtt_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'single',
+    quantity REAL NOT NULL,
+    trigger_price REAL NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'down',
+    limit_price REAL,
+    target_trigger REAL,
+    stop_loss REAL,
+    target_price REAL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    detail TEXT NOT NULL DEFAULT '',
+    resolved_at TEXT
+);
+
 -- Limit buys waiting for the price to come down to limit_price. Rows are
 -- kept after they resolve (status filled / cancelled, with detail saying why)
 -- so an order never just vanishes.
@@ -361,6 +386,44 @@ class Storage:
                    ORDER BY (status = 'pending') DESC, COALESCE(resolved_at, created_at) DESC, id DESC
                    LIMIT ?""", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ---- GTT orders -----------------------------------------------------
+    def add_gtt(self, *, symbol: str, side: str, kind: str, quantity: float, trigger_price: float,
+                direction: str, limit_price: float | None, target_trigger: float | None,
+                stop_loss: float | None, target_price: float | None, note: str, expires_at: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO gtt_orders (symbol, side, kind, quantity, trigger_price, direction, limit_price,
+                       target_trigger, stop_loss, target_price, note, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (symbol, side, kind, quantity, trigger_price, direction, limit_price, target_trigger,
+                 stop_loss, target_price, note, datetime.now().isoformat(timespec="seconds"), expires_at),
+            )
+            return int(cur.lastrowid)
+
+    def get_active_gtts(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM gtt_orders WHERE status = 'active' ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_recent_gtts(self, limit: int = 15) -> list[dict]:
+        """Active GTTs first, then the most recently resolved ones."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM gtt_orders
+                   ORDER BY (status = 'active') DESC, COALESCE(resolved_at, created_at) DESC, id DESC
+                   LIMIT ?""", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_gtt(self, gtt_id: int, status: str, detail: str) -> bool:
+        """Only an active GTT can be resolved; returns whether this call did it."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """UPDATE gtt_orders SET status = ?, detail = ?, resolved_at = ?
+                   WHERE id = ? AND status = 'active'""",
+                (status, detail, datetime.now().isoformat(timespec="seconds"), gtt_id),
+            )
+            return cur.rowcount > 0
 
     def resolve_pending_order(self, order_id: int, status: str, detail: str) -> bool:
         """Only a still-pending order can be resolved; returns whether this

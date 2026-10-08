@@ -451,6 +451,27 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     def api_manual_cancel():
         return _manual_json_action(lambda t, p: t.cancel_order(p.get("order_id")))
 
+    @app.post("/api/manual/gtt")
+    @api_login_required
+    def api_manual_gtt_create():
+        return _manual_json_action(lambda t, p: t.create_gtt(
+            p.get("symbol"), p.get("side"), p.get("quantity"), trigger_price=p.get("trigger_price"),
+            limit_price=p.get("limit_price"), note=p.get("note", ""), stop_loss=p.get("stop_loss"),
+            target_price=p.get("target_price"), oco=bool(p.get("oco")), target_trigger=p.get("target_trigger")))
+
+    @app.post("/api/manual/gtt/cancel")
+    @api_login_required
+    def api_manual_gtt_cancel():
+        return _manual_json_action(lambda t, p: t.cancel_gtt(p.get("gtt_id")))
+
+    @app.get("/api/manual/gtt")
+    @api_login_required
+    def api_manual_gtt_list():
+        engine = _manual_engine(request.args.get("profile"))
+        if engine is None:
+            return jsonify({"ok": False, "error": "Not a manual profile."}), 400
+        return jsonify({"ok": True, "gtts": engine.manual_trader().gtts()})
+
     @app.get("/api/manual/orders")
     @api_login_required
     def api_manual_orders():
