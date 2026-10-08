@@ -1370,3 +1370,97 @@ def test_engine_picks_up_a_changed_capital_for_an_untouched_manual_ledger(tmp_pa
     monkeypatch.setattr(cfg, "get_profile_starting_capital", lambda name=None: 900_000.0)
     restarted.sync_untouched_capital()
     assert restarted.storage.get_starting_capital() == 500_000.0
+
+
+# --- what is invested, counting the waiting buys and GTTs ------------------------------
+
+def test_commitments_are_empty_with_nothing_waiting(trader_env):
+    trader, _, _, _ = trader_env
+    c = trader.commitments()
+    assert c["total"] == 0 and c["count"] == 0 and c["cash_after"] == trader.broker.cash()
+
+
+def test_commitments_cost_each_kind_of_waiting_buy(trader_env):
+    trader, broker, data, state = trader_env
+    state["open"] = False
+    trader.place_order("AAA", "BUY", 10, entry_price=90)            # limit order, 90 each
+    trader.place_order("BBB", "BUY", 5)                              # scheduled at the open, last price 100
+    trader.create_gtt("CCC", "BUY", 4, trigger_price=110)            # breakout GTT, 110 each
+    trader.create_gtt("CCC", "BUY", 2, trigger_price=80, limit_price=82)   # GTT with a limit: costed at 82
+
+    c = trader.commitments()
+    assert c["limit_orders"] == pytest.approx(broker.estimated_buy_cost(90, 10), abs=0.01)
+    assert c["scheduled_buys"] == pytest.approx(broker.estimated_buy_cost(100, 5), abs=0.01)
+    assert c["gtt_buys"] == pytest.approx(
+        broker.estimated_buy_cost(110, 4) + broker.estimated_buy_cost(82, 2), abs=0.01)
+    assert c["count"] == 4 and c["unpriced"] == 0
+    assert c["total"] == pytest.approx(c["limit_orders"] + c["scheduled_buys"] + c["gtt_buys"], abs=0.02)
+    assert c["cash_after"] == pytest.approx(broker.cash() - c["total"], abs=0.02)
+
+
+def test_sells_free_money_so_they_are_not_counted(trader_env):
+    trader, _, _, state = trader_env
+    trader.place_order("AAA", "BUY", 10)
+    state["open"] = False
+    trader.place_order("AAA", "SELL", 5)                             # scheduled sell
+    trader.create_gtt("AAA", "SELL", 5, trigger_price=120)
+    trader.create_gtt("AAA", "SELL", 5, trigger_price=95, oco=True, target_trigger=130)
+    assert trader.commitments()["total"] == 0
+
+
+def test_resolved_orders_stop_counting(trader_env):
+    trader, broker, data, state = trader_env
+    trader.place_order("AAA", "BUY", 10, entry_price=90)
+    gid = trader.create_gtt("BBB", "BUY", 5, trigger_price=110)["gtt_id"]
+    assert trader.commitments()["count"] == 2
+    trader.cancel_gtt(gid)
+    data.ltp = 85.0
+    trader.run_automation()                                          # the limit order fills
+    assert trader.commitments()["count"] == 0
+
+
+def test_an_unpriceable_scheduled_buy_is_counted_but_flagged(trader_env):
+    trader, _, data, state = trader_env
+    state["open"] = False
+    trader.place_order("AAA", "BUY", 5)
+    data.fail = True
+    c = trader.commitments()
+    assert c["count"] == 1 and c["unpriced"] == 1 and c["scheduled_buys"] == 0
+
+
+def test_cash_after_goes_negative_when_waiting_buys_exceed_cash(trader_env):
+    trader, _, _, _ = trader_env
+    trader.create_gtt("AAA", "BUY", 600, trigger_price=110)          # about 66,000
+    trader.create_gtt("BBB", "BUY", 600, trigger_price=90)           # about 54,000: 120,000 > 100,000 cash
+    assert trader.commitments()["cash_after"] < 0
+
+
+def test_summary_reports_invested_and_commitments_for_a_manual_profile(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+    from papertrader.web.data_api import build_summary
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "manual.db"))
+    engine = TradingEngine(cfg, profile_name="manual_swing")
+    engine.data = _FakeData(ltp=100.0)
+    engine.broker.buy("AAA", 10, 100.0, "manual")
+    engine.storage.add_gtt(symbol="BBB", side="BUY", kind="single", quantity=5, trigger_price=110.0,
+                           direction="up", limit_price=None, target_trigger=None, stop_loss=None,
+                           target_price=None, note="", expires_at="2099-01-01T00:00:00")
+    summary = build_summary(engine)
+    assert summary["invested"] == pytest.approx(10 * 100.0, abs=1.0)
+    assert summary["commitments"]["count"] == 1 and summary["commitments"]["gtt_buys"] > 5 * 110 - 1
+
+
+def test_an_automated_profile_has_no_commitments_but_still_reports_invested(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+    from papertrader.web.data_api import build_summary
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "auto.db"))
+    engine = TradingEngine(cfg, profile_name="trend_pullback")
+    engine.data = _FakeData(ltp=100.0)
+    summary = build_summary(engine)
+    assert summary["commitments"] is None and summary["invested"] == 0

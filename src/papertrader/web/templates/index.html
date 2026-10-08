@@ -1361,12 +1361,12 @@ function renderStats(s) {
     { label: "Realized P&L", value: (s.total_realized_pnl >= 0 ? "+" : "") + CCY + fmt(s.total_realized_pnl), sub: "from closed sells (" + (s.total_realized_pnl_pct >= 0 ? "+" : "") + s.total_realized_pnl_pct + "%)", subCls: pnlClass(s.total_realized_pnl), valueCls: pnlClass(s.total_realized_pnl) },
     { label: "Open Positions", value: s.open_positions + ' <span style="color:var(--ink-faint); font-weight:400;">/ ' + s.max_positions + '</span>', sub: "risk budget available" },
     IS_MANUAL
-      ? { label: "Tradable", value: "NSE + BSE", sub: "search any listed stock" }
+      ? manualInvestedCard(s)
       : { label: "Universe Scanned", value: fmtInt(s.universe_size),
           sub: s.last_scan_at ? "scanned " + shortDate(s.last_scan_at) + ", " + timeOf(s.last_scan_at) : "not yet scanned" },
   ];
   document.getElementById("stats").innerHTML = cards.map(c => `
-    <div class="stat ${c.hero ? "hero" : ""}">
+    <div class="stat ${c.hero ? "hero" : ""}" title="${escapeText(c.title || "")}">
       <div class="label">${c.label}</div>
       <div class="value mono ${c.valueCls || ""}">${c.value}</div>
       <div class="sub mono ${c.subCls || ""}">${c.sub}</div>
@@ -1387,6 +1387,25 @@ function renderStats(s) {
     document.getElementById("regimePillText").textContent =
       (r.status === "up" ? "Uptrend" : "Downtrend") + " · " + r.index_symbol.replace("^", "");
   }
+}
+
+// Manual profile: what is invested now, and what the waiting buys (limit
+// orders, scheduled buys, GTT buys) would add if every one of them filled.
+function manualInvestedCard(s) {
+  const cap = s.starting_capital || 0;
+  const pct = (n) => cap ? (n / cap * 100).toFixed(1) + "%" : "—";
+  const c = s.commitments;
+  const card = { label: "Invested", value: CCY + fmt(s.invested), sub: pct(s.invested) + " of capital" };
+  if (!c || !c.count) return card;
+  const total = s.invested + c.total;
+  card.sub = `+${CCY}${fmt(c.total)} in ${c.count} pending → ${CCY}${fmt(total)} (${pct(total)} of capital)`;
+  card.title = `Limit orders ${CCY}${fmt(c.limit_orders)} · Scheduled buys ${CCY}${fmt(c.scheduled_buys)} · GTT buys ${CCY}${fmt(c.gtt_buys)}` +
+    ` · Nothing is reserved until an order fills.`;
+  if (c.cash_after < 0) {
+    card.sub += ` · ${CCY}${fmt(-c.cash_after)} more than your cash`;
+    card.subCls = "down";
+  }
+  return card;
 }
 
 function renderPositions(s) {

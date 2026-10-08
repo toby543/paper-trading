@@ -316,6 +316,39 @@ class ManualTrader:
     def gtts(self) -> list[dict]:
         return self.storage.get_recent_gtts(15)
 
+    def commitments(self) -> dict:
+        """What the waiting buys would cost if every one filled: limit
+        orders at their limit price, scheduled buys at the last price, and
+        GTT buys at their limit (else trigger) price, each with the broker's
+        slippage and charges. Sells are ignored (they free money, they don't
+        use it). Nothing is reserved -- this is the exposure if they all fire."""
+        limit = scheduled = gtt = 0.0
+        count = unpriced = 0
+        for o in self.storage.get_pending_orders():
+            if o.get("side", "BUY") != "BUY":
+                continue
+            if o.get("order_type", "limit") == "limit":
+                limit += self.broker.estimated_buy_cost(o["limit_price"], o["quantity"])
+            else:
+                try:
+                    price = self._live_price(o["symbol"]).ltp
+                except ManualOrderError:
+                    unpriced += 1
+                    count += 1
+                    continue
+                scheduled += self.broker.estimated_buy_cost(price, o["quantity"])
+            count += 1
+        for g in self.storage.get_active_gtts():
+            if g["side"] != "BUY":
+                continue
+            price = g["limit_price"] or g["trigger_price"]
+            gtt += self.broker.estimated_buy_cost(price, g["quantity"])
+            count += 1
+        total = limit + scheduled + gtt
+        return {"limit_orders": round(limit, 2), "scheduled_buys": round(scheduled, 2), "gtt_buys": round(gtt, 2),
+                "total": round(total, 2), "count": count, "unpriced": unpriced,
+                "cash_after": round(self.broker.cash() - total, 2)}
+
     @staticmethod
     def _whole_quantity(quantity) -> int:
         try:

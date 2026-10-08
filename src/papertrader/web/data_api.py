@@ -381,8 +381,23 @@ def build_summary(engine) -> dict:
         "max_positions": engine.risk.max_open_positions,
         "universe_size": len(engine.universe),
         "last_scan_at": last_scan_at,
+        # Capital currently in positions, at cost (what was paid for them).
+        "invested": round(sum(p.cost_basis for p in positions.values()), 2),
+        "commitments": _manual_commitments(engine),
         "positions": sorted_positions,
     }
+
+
+def _manual_commitments(engine):
+    """What a manual profile's waiting buys (limit orders, scheduled buys, GTT
+    buys) would add if they all filled; None for every other profile."""
+    if not getattr(engine, "is_manual", False):
+        return None
+    try:
+        return engine.manual_trader().commitments()
+    except Exception:  # noqa: BLE001 - a side figure must never break the summary
+        log.exception("Could not work out the manual profile's pending commitments")
+        return None
 
 
 def build_trades(engine, limit: int = 100) -> list[dict]:
