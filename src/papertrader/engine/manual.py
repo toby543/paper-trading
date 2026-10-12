@@ -330,9 +330,8 @@ class ManualTrader:
             if o.get("order_type", "limit") == "limit":
                 limit += self.broker.estimated_buy_cost(o["limit_price"], o["quantity"])
             else:
-                try:
-                    price = self._live_price(o["symbol"]).ltp
-                except ManualOrderError:
+                price = self._recent_close(o["symbol"])
+                if price is None:
                     unpriced += 1
                     count += 1
                     continue
@@ -348,6 +347,21 @@ class ManualTrader:
         return {"limit_orders": round(limit, 2), "scheduled_buys": round(scheduled, 2), "gtt_buys": round(gtt, 2),
                 "total": round(total, 2), "count": count, "unpriced": unpriced,
                 "cash_after": round(self.broker.cash() - total, 2)}
+
+    def _recent_close(self, symbol: str) -> float | None:
+        """A price for estimating, without a network call on every dashboard
+        refresh: the latest close from the data client's history cache
+        (refreshed every 15 minutes), else a live quote."""
+        try:
+            closes = self.data.get_history(symbol, period="1mo")["Close"].dropna()
+            if len(closes):
+                return float(closes.iloc[-1])
+        except Exception:  # noqa: BLE001 - no history: fall back to a quote
+            pass
+        try:
+            return self._live_price(symbol).ltp
+        except ManualOrderError:
+            return None
 
     @staticmethod
     def _whole_quantity(quantity) -> int:

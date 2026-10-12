@@ -1498,3 +1498,23 @@ def test_applying_what_check_capital_reports_brings_the_ledger_to_ok(tmp_path):
     assert describe(storage.db_path, 500_000.0)["status"] == "will_update"
     Storage(storage.db_path, 500_000.0).adopt_starting_capital_if_untouched(500_000.0)
     assert describe(storage.db_path, 500_000.0)["status"] == "ok"
+
+
+def test_commitments_price_scheduled_buys_from_cached_history_not_a_live_quote(trader_env):
+    import pandas as pd
+
+    trader, broker, data, state = trader_env
+    state["open"] = False
+    trader.place_order("AAA", "BUY", 5)
+    calls = {"quote": 0}
+    real_quote = data.get_quote
+
+    def counting_quote(symbol):
+        calls["quote"] += 1
+        return real_quote(symbol)
+
+    data.get_quote = counting_quote
+    data.get_history = lambda symbol, period="1y": pd.DataFrame({"Close": [95.0, 96.0, float("nan")]})
+    c = trader.commitments()
+    assert calls["quote"] == 0                                   # no network call per dashboard refresh
+    assert c["scheduled_buys"] == pytest.approx(broker.estimated_buy_cost(96.0, 5), abs=0.01)

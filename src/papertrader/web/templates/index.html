@@ -1661,6 +1661,7 @@ async function manualLoadQuote(symbol, name) {
     manualEl("manualDay").textContent = (q.prev_close ? `${signed(chg)}% today` : "no previous close") + range +
       (q.market_open ? "" : " · market closed") + olderPrice;
     manualEl("manualEntry").value = q.ltp.toFixed(2);
+    manual.entryPrefill = manualEl("manualEntry").value;
     ["manualGttTrigger", "manualGttLimit", "manualGttTarget"].forEach(id => { manualEl(id).value = ""; });
     manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
     manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";
@@ -1712,7 +1713,12 @@ async function manualPlaceOrder() {
   if (!(qty > 0)) { manualMsg("Enter a whole number of shares.", "err"); return; }
   const price = manual.quote.ltp;
   const buy = manual.side === "BUY";
-  const entry = buy ? manualNum("manualEntry") : null;
+  // The entry box starts at the price when the stock was picked. Left as is
+  // while the market is open it means "buy now": the price may have risen a
+  // little since, which would otherwise turn the order into a waiting limit
+  // order the confirmation never mentioned. (The 2% price check still applies.)
+  const untouchedEntry = buy && !manualQueues() && manualEl("manualEntry").value.trim() === manual.entryPrefill;
+  const entry = buy && !untouchedEntry ? manualNum("manualEntry") : null;
   const stop = buy ? manualNum("manualStop") : null;
   const target = buy ? manualNum("manualTarget") : null;
   if ([entry, stop, target].some(Number.isNaN)) { manualMsg("Entry, stop loss and target must be numbers.", "err"); return; }
@@ -1835,6 +1841,7 @@ function initManualTicket() {
     if (!btn) return;
     manualEl("manualSearch").value = btn.dataset.symbol;
     manualEl("manualQty").value = btn.dataset.qty;
+    manual.mode = "regular";  // "Sell" on a position is a sale now, not a GTT
     manualSetSide("SELL");
     manualLoadQuote(btn.dataset.symbol, "");
     manualEl("manualPanel").scrollIntoView({ behavior: "smooth", block: "center" });
