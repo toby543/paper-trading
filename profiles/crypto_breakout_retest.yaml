@@ -5,13 +5,21 @@ starting_capital: 100000.0
 strategy_mode: crypto_breakout_retest
 # Crypto-only universe.
 universe_file: data/universe_crypto.csv
+# Long-only, so new buys are held off while Bitcoin is below its 100-day
+# average: back-tested over a year in which BTC fell 28%, this beat no filter
+# for every trend/breakout profile (50 days helped none; 200 was weaker than 100).
+# Exits still run normally whatever the regime.
 regime:
-  enabled: false
+  enabled: true
   index_symbol: "BTC-USD"
+  ma_days: 100
 strategy:
   min_avg_daily_turnover_inr: 480000000
   max_new_positions_per_scan: 3
   crypto_breakout_retest:
+    # Exit only when price is 5% below the breakout level: at 0 any dip
+    # under it sold, and 29 of 32 live trades were shaken out within hours.
+    retest_exit_buffer_pct: 5.0
     base_lookback_days: 20
     retest_window_days: 10
     # 3% above the base to count as a genuine breakout (not just noise).

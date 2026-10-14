@@ -119,8 +119,10 @@ def test_retest_level_does_not_slide_forward_while_held(days_held):
 def test_retest_still_exits_when_price_breaks_the_entry_level():
     cfg, closes = _retest_entry()
     position = Position("X-USD", 1.0, 101.5, ENTRY_DAY.isoformat(), 101.5)
-    hist = _frame(closes + [101.5] * 3 + [98.0], ENTRY_DAY + pd.Timedelta(days=4))
-    exited, reason = brt.check_exit(position, _quote(98.0), hist, cfg)
+    # Below the level by more than the profile's retest_exit_buffer_pct (5%);
+    # a shallower dip is now ridden out (and 8% below entry is the stop instead).
+    hist = _frame(closes + [101.5] * 3 + [94.5], ENTRY_DAY + pd.Timedelta(days=4))
+    exited, reason = brt.check_exit(position, _quote(94.5), hist, cfg)
     assert exited and "retest_failed" in reason, reason
 
 

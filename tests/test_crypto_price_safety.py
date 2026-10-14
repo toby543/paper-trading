@@ -204,3 +204,56 @@ def test_a_dry_run_changes_nothing(tmp_path):
     mod.plan(storage.db_path, sell.id, 19.40, 0.1, 0.0)
     assert storage.get_cash() == cash
     assert [t for t in storage.get_trades(limit=5) if t.side == "SELL"][0].price == pytest.approx(0.06)
+
+
+# --- strategy fixes -------------------------------------------------------------------
+
+def test_breakout_retest_exit_waits_for_the_buffer(monkeypatch):
+    from papertrader.data.nse_client import Quote
+    from papertrader.portfolio.models import Position
+    from papertrader.strategy import crypto_breakout_retest as br
+
+    monkeypatch.setattr(br, "_history_as_of", lambda history, when: pd.DataFrame({"Close": [1.0]}))
+    monkeypatch.setattr(br, "_find_base_and_breakout", lambda *a, **k: 100.0)   # the entry's breakout level
+    pos = Position(symbol="X-USD", quantity=1, avg_price=101.0, entry_date="2026-10-01T00:00:00",
+                   highest_close_since_entry=101.0)
+
+    def exit_at(price, buffer):
+        q = Quote("X-USD", price, 100.0, 120.0, 80.0, 1.0, datetime.now(), "test")
+        cfg = {"stop_loss_pct": 50, "trailing_stop_pct": 50,
+               "crypto_breakout_retest": {"retest_exit_buffer_pct": buffer}}
+        return br.check_exit(pos, q, pd.DataFrame(), cfg)
+
+    assert exit_at(98.0, 0)[0]                         # old behaviour: any dip under the level sells
+    assert not exit_at(98.0, 5)[0]                     # a 2% wick is now ridden out
+    sold, reason = exit_at(94.0, 5)
+    assert sold and "by more than 5%" in reason
+
+
+def test_crypto_trend_profiles_use_the_bitcoin_filter_and_the_tested_settings():
+    import yaml
+
+    def load(name):
+        return yaml.safe_load(open(f"profiles/{name}.yaml", encoding="utf-8"))
+
+    for name in ("crypto_trend_pullback", "crypto_momentum", "crypto_breakout", "crypto_breakout_retest"):
+        assert load(name)["regime"] == {"enabled": True, "index_symbol": "BTC-USD", "ma_days": 100}, name
+    for name in ("crypto_mean_reversion", "crypto_pairs_trading"):   # buy-the-dip / market-neutral
+        assert load(name)["regime"]["enabled"] is False, name
+    assert load("crypto_trend_pullback")["risk"]["take_profit_pct"] == 20.0
+    assert load("crypto_breakout_retest")["strategy"]["crypto_breakout_retest"]["retest_exit_buffer_pct"] == 5.0
+
+
+def test_the_live_engine_blocks_crypto_buys_while_bitcoin_is_below_its_100_day_average(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "m.db"))
+    engine = TradingEngine(cfg, profile_name="crypto_momentum")
+    falling = pd.DataFrame({"Close": [200.0 - i for i in range(150)]})      # ends well below its 100-day mean
+    rising = pd.DataFrame({"Close": [50.0 + i for i in range(150)]})
+    engine.data.get_index_history = lambda symbol, *a, **k: falling
+    assert engine.market_regime_ok() is False
+    engine.data.get_index_history = lambda symbol, *a, **k: rising
+    assert engine.market_regime_ok() is True

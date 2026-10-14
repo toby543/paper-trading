@@ -170,6 +170,10 @@ EDITABLE_SETTINGS: list[dict] = [
      "group": "Crypto Trend Pullback", "label": "Max pullback", "unit": "%",
      "desc": "How far below the recent high price can be before the pullback is considered too deep -- the uptrend may already be broken. Only applies when strategy mode is crypto_trend_pullback."},
 
+    {"path": ("strategy", "crypto_breakout_retest", "retest_exit_buffer_pct"), "type": "float", "min": 0, "max": 25,
+     "group": "Breakout Retest", "label": "Retest exit buffer", "unit": "%",
+     "desc": "How far below the breakout level price must fall before the trade counts as a failed retest. "
+             "0 exits on any dip below the level."},
     {"path": ("strategy", "crypto_breakout_retest", "base_lookback_days"), "type": "int", "min": 5, "max": 90,
      "group": "Breakout Retest", "label": "Base lookback", "unit": "days",
      "desc": "Window used to establish the base/resistance level a breakout is measured against. Only applies when strategy mode is crypto_breakout_retest."},

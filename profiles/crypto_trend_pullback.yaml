@@ -6,9 +6,14 @@ strategy_mode: crypto_trend_pullback
 # Crypto-only universe.
 universe_file: data/universe_crypto.csv
 # Crypto trades 24/7, no NSE session gate. Benchmark is BTC-USD.
+# Long-only, so new buys are held off while Bitcoin is below its 100-day
+# average: back-tested over a year in which BTC fell 28%, this beat no filter
+# for every trend/breakout profile (50 days helped none; 200 was weaker than 100).
+# Exits still run normally whatever the regime.
 regime:
-  enabled: false
+  enabled: true
   index_symbol: "BTC-USD"
+  ma_days: 100
 strategy:
   # 20/50 for crypto, matching the other crypto strategies' convention
   # (not the equity default of 50/200).
@@ -27,7 +32,9 @@ strategy:
 risk:
   stop_loss_pct: 8.0
   trailing_stop_pct: 12.0
-  take_profit_pct: 0
+  # 2.5x the 8% stop. At 10% it needed a ~45% win rate just to break even;
+  # back-tested 20% beat 10%, 16% and no target over the year and recent weeks.
+  take_profit_pct: 20.0
   position_size_pct_of_equity: 6.0
   max_open_positions: 10
   max_cash_deployed_per_scan_pct: 40.0

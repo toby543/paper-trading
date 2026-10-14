@@ -231,12 +231,19 @@ def check_exit(
     retest_window_days = int(br_cfg.get("retest_window_days", 10))
     breakout_confirm_pct = br_cfg.get("breakout_confirm_pct", 3.0)
 
+    # How far below the level counts as failing. At 0, any dip under the
+    # level sold: crypto routinely wicks a few percent through support
+    # within hours, so on the Pi 29 of 32 trades were shaken out this way,
+    # with a median hold under eight hours.
+    exit_buffer_pct = float(br_cfg.get("retest_exit_buffer_pct", 0.0))
+
     history_at_entry = _history_as_of(history, position.entry_date)
     if history_at_entry is not None:
         level = _find_base_and_breakout(
             history_at_entry, base_lookback_days, retest_window_days, breakout_confirm_pct,
         )
-        if level is not None and level > 0 and quote.ltp < level:
-            return True, f"retest_failed (below entry level {level:.2f})"
+        if level is not None and level > 0 and quote.ltp < level * (1 - exit_buffer_pct / 100.0):
+            return True, (f"retest_failed (below entry level {level:.2f}"
+                          + (f" by more than {exit_buffer_pct:g}%)" if exit_buffer_pct else ")"))
 
     return False, ""

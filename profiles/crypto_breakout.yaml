@@ -5,10 +5,14 @@ starting_capital: 100000.0
 strategy_mode: crypto_breakout
 # Crypto-only universe. Nothing here touches the NSE equity lists.
 universe_file: data/universe_crypto.csv
-# No equity regime filter -- see crypto_momentum.yaml.
+# Long-only, so new buys are held off while Bitcoin is below its 100-day
+# average: back-tested over a year in which BTC fell 28%, this beat no filter
+# for every trend/breakout profile (50 days helped none; 200 was weaker than 100).
+# Exits still run normally whatever the regime.
 regime:
-  enabled: false
+  enabled: true
   index_symbol: "BTC-USD"
+  ma_days: 100
 strategy:
   momentum_lookback_days: 21
   min_momentum_return_pct: 3.0
