@@ -111,7 +111,49 @@ def to_binance_pair(symbol: str) -> str:
     return f"{asset}USDT"
 
 
-class BinanceClient:
+# Yahoo Finance lists some coins under a non-obvious ticker, and its plain
+# "<COIN>-USD" can be a DIFFERENT coin entirely: "ARB-USD" on Yahoo is
+# "ARbit" (~$0.0006), not Arbitrum (~$0.20). Priced from the wrong coin,
+# Arbitrum looked like it had crashed 99.7% and a stop-loss sold it.
+YAHOO_CRYPTO_TICKERS = {
+    "ARB-USD": "ARB11841-USD",
+    "UNI-USD": "UNI7083-USD",
+    "PEPE-USD": "PEPE24478-USD",
+    "GMX-USD": "GMX11857-USD",
+    "POL-USD": "POL28321-USD",
+}
+
+# How long an exchange is skipped after it fails. It used to be skipped for
+# the rest of the process: on a box that runs for days, one hiccup moved every
+# crypto price onto the weakest fallback until someone restarted the app.
+BREAKER_COOLDOWN_SECONDS = 600
+
+
+class _CircuitBreaker:
+    """`broken` is true for BREAKER_COOLDOWN_SECONDS after it is tripped."""
+    _broken_until: float = 0.0
+
+    @property
+    def broken(self) -> bool:
+        return time.time() < self._broken_until
+
+    @broken.setter
+    def broken(self, value: bool) -> None:
+        self._broken_until = time.time() + BREAKER_COOLDOWN_SECONDS if value else 0.0
+
+    def _trip(self, exc: Exception) -> None:
+        """Skip this exchange for a while -- unless the error is about one
+        symbol (HTTP 400/404: unknown or delisted pair), which says nothing
+        about the exchange's health for every other symbol."""
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (400, 404):
+            return
+        log.warning("%s unavailable (%s); skipping it for %d minutes",
+                    type(self).__name__, exc, BREAKER_COOLDOWN_SECONDS // 60)
+        self.broken = True
+
+
+class BinanceClient(_CircuitBreaker):
     """Thin wrapper around Binance's public (unauthenticated) market-data
     REST endpoints. Read-only -- never places orders; this project's
     paper trading simulates fills internally against these quotes."""
@@ -168,7 +210,7 @@ class BinanceClient:
         try:
             data = self._get_json(BINANCE_TICKER_24H_URL, params={"symbol": pair})
         except Exception as exc:  # noqa: BLE001
-            self.broken = True
+            self._trip(exc)
             raise CryptoDataUnavailableError(f"Binance ticker unavailable for {symbol}: {exc}") from exc
         # The 24hr ticker only carries a 24h high/low, not a true 52-week
         # range. Reuse the (likely already-cached, from momentum/MA calcs)
@@ -204,7 +246,7 @@ class BinanceClient:
                 params={"symbol": pair, "interval": "1d", "limit": min(days, 1000)},
             )
         except Exception as exc:  # noqa: BLE001
-            self.broken = True
+            self._trip(exc)
             raise CryptoDataUnavailableError(f"Binance klines unavailable for {symbol}: {exc}") from exc
         if not raw:
             raise CryptoDataUnavailableError(f"Binance returned no klines for {symbol}")
@@ -232,7 +274,7 @@ def to_kraken_pair(symbol: str) -> str:
     return f"{asset}USD"
 
 
-class KrakenClient:
+class KrakenClient(_CircuitBreaker):
     """Second-exchange fallback, tried after Binance and before Yahoo
     Finance. Same shape as BinanceClient so MarketDataClient can treat
     them interchangeably."""

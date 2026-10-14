@@ -24,6 +24,7 @@ from . import eod_prices
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .crypto_client import BinanceClient, KrakenClient, CryptoDataUnavailableError
+from .crypto_client import YAHOO_CRYPTO_TICKERS
 
 log = logging.getLogger(__name__)
 
@@ -52,9 +53,12 @@ def is_bse_symbol(symbol: str) -> bool:
 
 
 def yahoo_ticker(symbol: str) -> str:
-    """Yahoo Finance ticker for a universe symbol: BSE ("ABB.BO") and crypto
-    ("BTC-USD") symbols are already full tickers, NSE symbols get ".NS"."""
-    return symbol if is_bse_symbol(symbol) or is_crypto_symbol(symbol) else symbol + ".NS"
+    """Yahoo Finance ticker for a universe symbol: BSE ("ABB.BO") symbols are
+    already full tickers, crypto ones are too except where Yahoo uses another
+    name for the coin (see YAHOO_CRYPTO_TICKERS), NSE symbols get ".NS"."""
+    if is_crypto_symbol(symbol):
+        return YAHOO_CRYPTO_TICKERS.get(symbol.upper(), symbol)
+    return symbol if is_bse_symbol(symbol) else symbol + ".NS"
 
 
 class DataUnavailableError(RuntimeError):
@@ -174,6 +178,8 @@ class MarketDataClient:
         # minutes, so trip a circuit breaker and go straight to the
         # fallback for the remainder of this process's lifetime.
         self._nse_broken = False
+        # symbol -> (last USD price from an exchange, when); see _check_fallback_plausible
+        self._last_exchange_price: dict[str, tuple[float, float]] = {}
 
     def _crypto_fx_rate(self) -> float:
         """Multiplier from a crypto pair's USD quote into this book's own
@@ -232,6 +238,7 @@ class MarketDataClient:
                     continue
                 try:
                     cq = client.get_quote(symbol)
+                    self._last_exchange_price[symbol] = (cq.ltp, time.time())
                     return Quote(
                         symbol=cq.symbol,
                         ltp=cq.ltp * fx,
@@ -248,6 +255,7 @@ class MarketDataClient:
                 quote = self._quote_from_yfinance(symbol, is_crypto=True)
             except Exception as exc:  # noqa: BLE001
                 raise DataUnavailableError(f"No data source available for {symbol}: {exc}") from exc
+            self._check_fallback_plausible(symbol, quote.ltp)
             if fx != 1.0:
                 quote.ltp *= fx
                 quote.prev_close *= fx
@@ -300,11 +308,27 @@ class MarketDataClient:
             source="nse",
         )
 
+    # A fallback price this far from the last price an exchange gave for the
+    # same coin is a data error (a wrong ticker, a bad print), not a move:
+    # acting on it is how a stop-loss fired on a coin that had not moved.
+    _FALLBACK_MAX_RATIO = 1.5
+    _FALLBACK_REFERENCE_MAX_AGE_SECONDS = 3 * 86400
+
+    def _check_fallback_plausible(self, symbol: str, usd_price: float) -> None:
+        ref = self._last_exchange_price.get(symbol)
+        if not ref or time.time() - ref[1] > self._FALLBACK_REFERENCE_MAX_AGE_SECONDS or ref[0] <= 0:
+            return
+        ratio = usd_price / ref[0]
+        if not (1 / self._FALLBACK_MAX_RATIO <= ratio <= self._FALLBACK_MAX_RATIO):
+            raise DataUnavailableError(
+                f"Fallback price for {symbol} ({usd_price:.6g}) is implausible against the last "
+                f"exchange price ({ref[0]:.6g}); not using it")
+
     def _quote_from_yfinance(self, symbol: str, is_crypto: bool = False) -> Quote:
         import yfinance as yf
 
         self._throttle_yfinance()
-        ticker_symbol = symbol if is_crypto else yahoo_ticker(symbol)
+        ticker_symbol = yahoo_ticker(symbol)
         ticker = yf.Ticker(ticker_symbol)
         # `timeout` bounds the underlying HTTP call the same way self.timeout
         # already bounds every NSE request -- without it, a stalled
