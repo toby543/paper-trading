@@ -20,6 +20,7 @@ import os
 import pandas as pd
 
 from ..config import REPO_ROOT
+from .crypto_client import YAHOO_CRYPTO_TICKERS
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ CACHE_DIR = os.path.join(REPO_ROOT, "data", "price_cache")
 
 
 def _cache_path(symbol: str) -> str:
+    # Keyed by the Yahoo ticker actually fetched where it differs from the
+    # symbol, so history cached before a ticker was corrected -- for ARB-USD,
+    # a different coin's prices -- is never read back as this coin's.
+    symbol = YAHOO_CRYPTO_TICKERS.get(symbol.upper(), symbol)
     # Index symbols like "^NSEI" contain characters that aren't safe in
     # filenames on Windows -- replace them rather than reject them.
     safe = symbol.replace("^", "_idx_").replace("/", "_")

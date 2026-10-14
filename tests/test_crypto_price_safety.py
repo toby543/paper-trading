@@ -257,3 +257,56 @@ def test_the_live_engine_blocks_crypto_buys_while_bitcoin_is_below_its_100_day_a
     assert engine.market_regime_ok() is False
     engine.data.get_index_history = lambda symbol, *a, **k: rising
     assert engine.market_regime_ok() is True
+
+
+def test_correction_also_shifts_the_equity_curve_from_the_sale_on(tmp_path):
+    import sqlite3
+
+    mod = _correct_module()
+    storage, _, sell = _bad_arb_ledger(tmp_path)
+    conn = sqlite3.connect(storage.db_path)
+    with conn:
+        conn.executemany("INSERT INTO equity_curve VALUES (?, ?, ?, ?)", [
+            ("2000-01-01T00:00:00", 100_000.0, 0.0, 100_000.0),                    # before the sale: untouched
+            ("2999-01-01T00:00:00", 94_000.0, 0.0, 94_000.0),                      # after it: shifted
+        ])
+    conn.close()
+    p = mod.plan(storage.db_path, sell.id, 19.40, 0.1, 0.0)
+    mod.apply(storage.db_path, p)
+    curve = {r["timestamp"]: r["total_equity"] for r in storage.get_equity_curve(limit=10)}
+    assert curve["2000-01-01T00:00:00"] == pytest.approx(100_000.0)
+    assert curve["2999-01-01T00:00:00"] == pytest.approx(94_000.0 + p["cash_delta"])
+
+
+def test_curve_repair_for_a_trade_corrected_by_the_earlier_script(tmp_path):
+    """The Pi's ARB trade was re-priced before the script shifted the curve."""
+    import sqlite3
+
+    mod = _correct_module()
+    storage, _, sell = _bad_arb_ledger(tmp_path)
+    p = mod.plan(storage.db_path, sell.id, 19.40, 0.1, 0.0)
+    # what the earlier version did: trade and cash only, no curve shift, no curve mark
+    conn = sqlite3.connect(storage.db_path)
+    with conn:
+        conn.execute("UPDATE trades SET price = ?, charges = ?, realized_pnl = ?, reason = ? WHERE id = ?",
+                     (p["new_price"], p["new_charges"], p["new_realized"],
+                      p["new_reason"].replace(mod.CURVE_MARK, ""), sell.id))
+        conn.execute("UPDATE account SET cash = cash + ?", (p["cash_delta"],))
+        conn.execute("INSERT INTO equity_curve VALUES ('2999-01-01T00:00:00', 94000.0, 0.0, 94000.0)")
+    conn.close()
+
+    r = mod.plan_curve_repair(storage.db_path, sell.id, 0.1, 0.0)
+    assert r["cash_delta"] == pytest.approx(p["cash_delta"], abs=0.01)     # recovered from the reason text
+    mod.apply_curve_repair(storage.db_path, r)
+    assert storage.get_equity_curve(limit=1)[0]["total_equity"] == pytest.approx(94_000.0 + p["cash_delta"], abs=0.01)
+    with pytest.raises(ValueError, match="already been adjusted"):
+        mod.plan_curve_repair(storage.db_path, sell.id, 0.1, 0.0)
+
+
+def test_price_cache_never_reuses_history_cached_under_the_wrong_coin(tmp_path, monkeypatch):
+    from papertrader.data import price_cache
+
+    monkeypatch.setattr(price_cache, "CACHE_DIR", str(tmp_path))
+    assert price_cache._cache_path("ARB-USD").endswith("ARB11841-USD.csv")
+    assert price_cache._cache_path("BTC-USD").endswith("BTC-USD.csv")
+    assert price_cache._cache_path("RELIANCE").endswith("RELIANCE.csv")
