@@ -223,6 +223,10 @@
   .manual-order-status { color: var(--ink-dim); font-size: 12px; text-align: right; }
   .manual-order-status.filled { color: var(--up, #2e9d6b); }
   .manual-order-status.cancelled { color: var(--ink-faint); }
+  .manual-remove-btn { background: transparent; border: 0; color: var(--ink-faint); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; margin-left: 4px; }
+  .manual-remove-btn:hover { color: var(--down, #d4574a); }
+  .manual-clear-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-dim); border-radius: 6px; padding: 2px 8px; margin-left: 10px; cursor: pointer; font-size: 10.5px; text-transform: none; letter-spacing: 0; }
+  .manual-clear-btn:hover { border-color: var(--down, #d4574a); color: var(--down, #d4574a); }
   .manual-sell-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-dim); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
   .manual-sell-btn:hover { border-color: var(--down, #d4574a); color: var(--down, #d4574a); }
   .period-select {
@@ -1605,6 +1609,16 @@ async function manualCreateGtt() {
   }
 }
 
+function manualClearButton(show) {
+  return show ? ` <button type="button" class="manual-clear-btn" data-clear-finished>Clear finished</button>` : "";
+}
+
+async function manualRemoveFinished(url, body) {
+  const out = await manualPost(url, body);
+  if (!out.ok) manualMsg(out.error || "Could not remove.", "err");
+  manualRefreshOrders();  // also refreshes the GTT list
+}
+
 async function manualCancelGtt(gttId) {
   const out = await manualPost("/api/manual/gtt/cancel", { gtt_id: gttId });
   if (!out.ok) manualMsg(out.error || "Could not cancel.", "err");
@@ -1618,7 +1632,7 @@ async function manualRefreshGtts() {
     const res = await authFetch("/api/manual/gtt?profile=" + encodeURIComponent(ACTIVE_PROFILE));
     const data = await res.json();
     if (!data.ok || !data.gtts.length) { box.innerHTML = ""; return; }
-    box.innerHTML = `<div class="manual-orders-title">GTT orders</div>` + data.gtts.map(g => {
+    box.innerHTML = `<div class="manual-orders-title">GTT orders${manualClearButton(data.gtts.some(g => g.status !== "active"))}</div>` + data.gtts.map(g => {
       const side = g.side === "SELL" ? "Sell" : "Buy";
       const what = g.kind === "oco"
         ? `Sell ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} · stop ${CCY}${fmt(g.trigger_price)} · target ${CCY}${fmt(g.target_trigger)}`
@@ -1628,7 +1642,8 @@ async function manualRefreshGtts() {
       const until = new Date(g.expires_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
       const status = g.status === "active"
         ? `<span class="manual-order-status">valid till ${until} <button type="button" class="manual-sell-btn" data-cancel-gtt="${g.id}">Cancel</button></span>`
-        : `<span class="manual-order-status ${g.status === "triggered" ? "filled" : "cancelled"}">${escapeText(g.status)} — ${escapeText(g.detail)}</span>`;
+        : `<span class="manual-order-status ${g.status === "triggered" ? "filled" : "cancelled"}">${escapeText(g.status)} — ${escapeText(g.detail)}
+             <button type="button" class="manual-remove-btn" data-delete-gtt="${g.id}" title="Remove from this list" aria-label="Remove">&times;</button></span>`;
       return `<div class="manual-order"><span class="mono">${what}</span>${status}</div>`;
     }).join("");
   } catch (e) { /* transient; the next poll retries */ }
@@ -1790,11 +1805,12 @@ async function manualRefreshOrders() {
     const res = await authFetch("/api/manual/orders?profile=" + encodeURIComponent(ACTIVE_PROFILE));
     const data = await res.json();
     if (!data.ok || !data.orders.length) { box.innerHTML = ""; return; }
-    box.innerHTML = `<div class="manual-orders-title">Pending and recent orders</div>` + data.orders.map(o => {
+    box.innerHTML = `<div class="manual-orders-title">Pending and recent orders${manualClearButton(data.orders.some(o => o.status !== "pending"))}</div>` + data.orders.map(o => {
       const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "");
       const status = o.status === "pending"
         ? `<button type="button" class="manual-sell-btn" data-cancel="${o.id}">Cancel</button>`
-        : `<span class="manual-order-status ${o.status}">${escapeText(o.status)} — ${escapeText(o.detail)}</span>`;
+        : `<span class="manual-order-status ${o.status}">${escapeText(o.status)} — ${escapeText(o.detail)}
+             <button type="button" class="manual-remove-btn" data-delete-order="${o.id}" title="Remove from this list" aria-label="Remove">&times;</button></span>`;
       const what = o.order_type === "market_open"
         ? `${o.side === "SELL" ? "Sell" : "Buy"} ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at market open`
         : `Buy ${fmtInt(o.quantity)} × ${escapeText(o.symbol)} at ≤ ${CCY}${fmt(o.limit_price)}`;
@@ -1827,10 +1843,17 @@ function initManualTicket() {
   manualEl("manualOco").addEventListener("change", manualApplyMode);
   ["manualGttTrigger", "manualGttLimit", "manualGttTarget"].forEach(id =>
     manualEl(id).addEventListener("input", manualUpdateGttHint));
-  manualEl("manualGtts").addEventListener("click", (ev) => {
-    const btn = ev.target.closest("[data-cancel-gtt]");
-    if (btn) manualCancelGtt(btn.dataset.cancelGtt);
-  });
+  // One delegated listener for both lists: cancel (waiting), remove (finished), clear all finished.
+  [manualEl("manualGtts"), manualEl("manualOrders")].forEach(box => box.addEventListener("click", (ev) => {
+    const t = ev.target;
+    const cancelGtt = t.closest("[data-cancel-gtt]");
+    if (cancelGtt) return manualCancelGtt(cancelGtt.dataset.cancelGtt);
+    const delGtt = t.closest("[data-delete-gtt]");
+    if (delGtt) return manualRemoveFinished("/api/manual/gtt/delete", { gtt_id: delGtt.dataset.deleteGtt });
+    const delOrder = t.closest("[data-delete-order]");
+    if (delOrder) return manualRemoveFinished("/api/manual/orders/delete", { order_id: delOrder.dataset.deleteOrder });
+    if (t.closest("[data-clear-finished]")) return manualRemoveFinished("/api/manual/clear-finished", {});
+  }));
   manualEl("manualLevelsBtn").addEventListener("click", manualUpdateLevels);
   manualEl("manualOrders").addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-cancel]");

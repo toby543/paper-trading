@@ -441,6 +441,24 @@ class Storage:
                    LIMIT ?""", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def delete_resolved_gtt(self, gtt_id: int) -> bool:
+        """Remove a finished GTT from the list. An active one is never deleted."""
+        with self._conn() as conn:
+            return conn.execute("DELETE FROM gtt_orders WHERE id = ? AND status != 'active'", (gtt_id,)).rowcount > 0
+
+    def delete_resolved_order(self, order_id: int) -> bool:
+        """Remove a finished (filled or cancelled) order from the list. A pending one is never deleted."""
+        with self._conn() as conn:
+            return conn.execute(
+                "DELETE FROM pending_orders WHERE id = ? AND status != 'pending'", (order_id,)).rowcount > 0
+
+    def clear_resolved_orders(self) -> dict:
+        """Remove every finished order and GTT; those still waiting are kept."""
+        with self._conn() as conn:
+            orders = conn.execute("DELETE FROM pending_orders WHERE status != 'pending'").rowcount
+            gtts = conn.execute("DELETE FROM gtt_orders WHERE status != 'active'").rowcount
+        return {"orders": orders, "gtts": gtts}
+
     def resolve_gtt(self, gtt_id: int, status: str, detail: str) -> bool:
         """Only an active GTT can be resolved; returns whether this call did it."""
         with self._conn() as conn:

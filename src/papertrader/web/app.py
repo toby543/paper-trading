@@ -464,6 +464,21 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     def api_manual_gtt_cancel():
         return _manual_json_action(lambda t, p: t.cancel_gtt(p.get("gtt_id")))
 
+    @app.post("/api/manual/gtt/delete")
+    @api_login_required
+    def api_manual_gtt_delete():
+        return _manual_json_action(lambda t, p: t.delete_gtt(p.get("gtt_id")))
+
+    @app.post("/api/manual/orders/delete")
+    @api_login_required
+    def api_manual_order_delete():
+        return _manual_json_action(lambda t, p: t.delete_order(p.get("order_id")))
+
+    @app.post("/api/manual/clear-finished")
+    @api_login_required
+    def api_manual_clear_finished():
+        return _manual_json_action(lambda t, p: t.clear_finished())
+
     @app.get("/api/manual/gtt")
     @api_login_required
     def api_manual_gtt_list():

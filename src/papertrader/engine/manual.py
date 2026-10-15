@@ -315,6 +315,31 @@ class ManualTrader:
                 raise ManualOrderError("That GTT is no longer active.")
         return {"gtt_id": gid, "status": "cancelled"}
 
+    def delete_gtt(self, gtt_id) -> dict:
+        """Remove a finished GTT from the list (an active one must be cancelled first)."""
+        try:
+            gid = int(gtt_id)
+        except (TypeError, ValueError):
+            raise ManualOrderError("Unknown GTT.") from None
+        with self.lock:
+            if not self.storage.delete_resolved_gtt(gid):
+                raise ManualOrderError("Only a finished GTT can be removed; cancel an active one first.")
+        return {"gtt_id": gid, "deleted": True}
+
+    def delete_order(self, order_id) -> dict:
+        try:
+            oid = int(order_id)
+        except (TypeError, ValueError):
+            raise ManualOrderError("Unknown order.") from None
+        with self.lock:
+            if not self.storage.delete_resolved_order(oid):
+                raise ManualOrderError("Only a finished order can be removed; cancel a pending one first.")
+        return {"order_id": oid, "deleted": True}
+
+    def clear_finished(self) -> dict:
+        with self.lock:
+            return self.storage.clear_resolved_orders()
+
     def gtts(self) -> list[dict]:
         return self.storage.get_recent_gtts(15)
 

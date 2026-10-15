@@ -1530,3 +1530,68 @@ def test_a_resting_limit_order_is_not_refused_because_the_price_moved(trader_env
     assert out["status"] == "pending"                        # a limit order doesn't depend on today's price
     with pytest.raises(ManualOrderError, match="price moved"):
         trader.place_order("AAA", "BUY", 5, expected_price=100.0)   # a buy-now still is protected
+
+
+# --- removing finished orders from the lists ----------------------------------------------
+
+def _finished_and_waiting(trader):
+    """One finished and one waiting item of each kind."""
+    done_gtt = trader.create_gtt("AAA", "BUY", 1, trigger_price=90)["gtt_id"]
+    trader.cancel_gtt(done_gtt)
+    live_gtt = trader.create_gtt("BBB", "BUY", 1, trigger_price=90)["gtt_id"]
+    done_order = trader.place_order("AAA", "BUY", 1, entry_price=90)["order_id"]
+    trader.cancel_order(done_order)
+    live_order = trader.place_order("BBB", "BUY", 1, entry_price=90)["order_id"]
+    return done_gtt, live_gtt, done_order, live_order
+
+
+def test_a_finished_gtt_or_order_can_be_removed(trader_env):
+    trader, broker, _, _ = trader_env
+    done_gtt, _, done_order, _ = _finished_and_waiting(trader)
+    assert trader.delete_gtt(done_gtt)["deleted"] and trader.delete_order(done_order)["deleted"]
+    assert done_gtt not in [g["id"] for g in broker.storage.get_recent_gtts()]
+    assert done_order not in [o["id"] for o in broker.storage.get_recent_orders()]
+
+
+def test_a_waiting_gtt_or_order_cannot_be_deleted_only_cancelled(trader_env):
+    trader, broker, _, _ = trader_env
+    _, live_gtt, _, live_order = _finished_and_waiting(trader)
+    with pytest.raises(ManualOrderError, match="cancel an active one"):
+        trader.delete_gtt(live_gtt)
+    with pytest.raises(ManualOrderError, match="cancel a pending one"):
+        trader.delete_order(live_order)
+    assert len(broker.storage.get_active_gtts()) == 1 and len(broker.storage.get_pending_orders()) == 1
+
+
+def test_clear_finished_keeps_everything_still_waiting(trader_env):
+    trader, broker, _, _ = trader_env
+    _, live_gtt, _, live_order = _finished_and_waiting(trader)
+    assert trader.clear_finished() == {"orders": 1, "gtts": 1}
+    assert [g["id"] for g in broker.storage.get_recent_gtts()] == [live_gtt]
+    assert [o["id"] for o in broker.storage.get_recent_orders()] == [live_order]
+    assert trader.clear_finished() == {"orders": 0, "gtts": 0}
+
+
+def test_removing_finished_orders_never_touches_the_trade_log(trader_env):
+    trader, broker, data, _ = trader_env
+    trader.place_order("AAA", "BUY", 5, entry_price=90)
+    data.ltp = 85.0
+    trader.run_automation()                                   # the limit order fills: a trade is recorded
+    assert len(broker.storage.get_trades(limit=10)) == 1
+    trader.clear_finished()
+    assert len(broker.storage.get_trades(limit=10)) == 1 and "AAA" in broker.positions()
+
+
+def test_api_delete_and_clear(client):
+    made = client.post("/api/manual/gtt", json={
+        "profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 1, "trigger_price": 90}).get_json()
+    assert client.post("/api/manual/gtt/delete", json={
+        "profile": "manual_swing", "gtt_id": made["gtt_id"]}).status_code == 400      # still active
+    client.post("/api/manual/gtt/cancel", json={"profile": "manual_swing", "gtt_id": made["gtt_id"]})
+    assert client.post("/api/manual/gtt/delete", json={
+        "profile": "manual_swing", "gtt_id": made["gtt_id"]}).get_json()["ok"]
+    client.post("/api/manual/gtt", json={
+        "profile": "manual_swing", "symbol": "BBB", "side": "BUY", "quantity": 1, "trigger_price": 90})
+    cleared = client.post("/api/manual/clear-finished", json={"profile": "manual_swing"}).get_json()
+    assert cleared["ok"] and cleared["gtts"] == 0                                    # the waiting one stays
+    assert client.post("/api/manual/clear-finished", json={"profile": "auto"}).status_code == 400
