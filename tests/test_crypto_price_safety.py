@@ -310,3 +310,109 @@ def test_price_cache_never_reuses_history_cached_under_the_wrong_coin(tmp_path, 
     assert price_cache._cache_path("ARB-USD").endswith("ARB11841-USD.csv")
     assert price_cache._cache_path("BTC-USD").endswith("BTC-USD.csv")
     assert price_cache._cache_path("RELIANCE").endswith("RELIANCE.csv")
+
+
+# --- fixes from the advanced review ------------------------------------------------------
+
+def test_the_nse_api_comes_back_after_its_cooldown(monkeypatch):
+    from papertrader.data import nse_client
+
+    client = MarketDataClient()
+    now = [1_000_000.0]
+    monkeypatch.setattr(nse_client.time, "time", lambda: now[0])
+    client._nse_broken = True
+    assert client._nse_broken
+    now[0] += client._NSE_COOLDOWN_SECONDS + 1
+    assert not client._nse_broken                            # no longer "for the rest of this run"
+
+
+def test_history_drops_a_trailing_bar_that_has_no_prices(monkeypatch):
+    nan = float("nan")
+    frame = pd.DataFrame(
+        {"Open": [1.0, 2.0, nan], "High": [1.0, 2.0, nan], "Low": [1.0, 2.0, nan], "Close": [1.0, 2.0, nan],
+         "Volume": [10.0, 10.0, 5.0]}, index=pd.to_datetime(["2026-10-01", "2026-10-05", "2026-10-06"]))
+
+    class _Ticker:
+        def __init__(self, *a, **k):
+            pass
+
+        def history(self, *a, **k):
+            return frame
+
+    monkeypatch.setattr("yfinance.Ticker", _Ticker)
+    df = MarketDataClient().get_history("RPEL")
+    assert list(df["Close"]) == [1.0, 2.0]
+
+
+def _stale_quote_engine(tmp_path, monkeypatch, profile):
+    from datetime import timedelta
+    from papertrader.config import Config
+    from papertrader.data.nse_client import Quote
+    from papertrader.engine.scheduler import TradingEngine
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "e.db"))
+    engine = TradingEngine(cfg, profile_name=profile)
+    yesterday = datetime.now().date() - timedelta(days=1)
+
+    class _Data:
+        allow_eod_fallback = False
+
+        def get_quote(self, symbol):
+            return Quote(symbol, 50.0, 100.0, 120.0, 40.0, 1.0, datetime.now(), "yfinance", yesterday)
+
+        def get_history(self, symbol, period="1y"):
+            return pd.DataFrame({"Close": [100.0] * 60, "High": [101.0] * 60, "Low": [99.0] * 60,
+                                 "Open": [100.0] * 60, "Volume": [1e6] * 60},
+                                index=pd.date_range(end="2026-10-05", periods=60))
+
+    engine.data = _Data()
+    return engine
+
+
+def test_an_automated_stop_does_not_fire_on_an_earlier_days_price(tmp_path, monkeypatch):
+    engine = _stale_quote_engine(tmp_path, monkeypatch, "trend_pullback")
+    engine.trades_24_7 = False
+    engine.broker.buy("AAA", 10, 100.0, "entry")             # a 50 quote is far below the 8% stop
+    engine.check_exits()
+    assert "AAA" in engine.broker.positions()                # skipped: the price is from yesterday
+
+
+def test_manual_stops_do_not_fire_on_an_earlier_days_price(tmp_path, monkeypatch):
+    engine = _stale_quote_engine(tmp_path, monkeypatch, "manual_swing")
+    engine.broker.buy("AAA", 10, 100.0, "manual")
+    engine.storage.set_levels("AAA", 95.0, 130.0)
+    engine.check_exits()
+    assert "AAA" in engine.broker.positions()
+
+
+def test_only_a_manual_engine_opts_into_the_end_of_day_fallback(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "x.db"))
+    assert TradingEngine(cfg, profile_name="manual_swing").data.allow_eod_fallback is True
+    assert TradingEngine(cfg, profile_name="trend_pullback").data.allow_eod_fallback is False
+
+
+def test_settings_save_takes_the_engine_lock_for_the_capital_sync():
+    source = open("src/papertrader/web/app.py", encoding="utf-8").read()
+    assert "with engine._state_lock:\n                        engine.sync_untouched_capital()" in source
+
+
+def test_capital_adoption_takes_the_write_lock_before_it_looks(tmp_path):
+    import sqlite3
+
+    from papertrader.portfolio.storage import Storage
+
+    storage = Storage(str(tmp_path / "w.db"), 100_000.0)
+    blocker = sqlite3.connect(storage.db_path, timeout=0.2)
+    blocker.execute("BEGIN IMMEDIATE")                       # another process holds the write lock
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            storage.adopt_starting_capital_if_untouched(500_000.0)   # waits for it, instead of racing it
+    finally:
+        blocker.rollback()
+        blocker.close()
+    assert storage.adopt_starting_capital_if_untouched(500_000.0) is True

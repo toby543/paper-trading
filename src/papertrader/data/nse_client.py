@@ -167,6 +167,9 @@ class MarketDataClient:
         self.fallback = fallback
         self.timeout = timeout
         self.quote_currency = (quote_currency or "INR").upper()
+        # The exchange end-of-day file as a last-resort quote can be days old.
+        # Off by default: an automated profile would act on it as if live.
+        self.allow_eod_fallback = False
         self._nse = NSESession(timeout=timeout, max_attempts=max_retries)
         self._binance = BinanceClient(timeout=timeout)
         self._kraken = KrakenClient(timeout=timeout)
@@ -177,9 +180,22 @@ class MarketDataClient:
         # (with backoff) across a large universe is what makes scans take
         # minutes, so trip a circuit breaker and go straight to the
         # fallback for the remainder of this process's lifetime.
-        self._nse_broken = False
+        self._nse_broken_until = 0.0
         # symbol -> (last USD price from an exchange, when); see _check_fallback_plausible
         self._last_exchange_price: dict[str, tuple[float, float]] = {}
+
+    # One failed NSE call used to switch the NSE API off until the process was
+    # restarted; on a Pi that runs for days that meant every quote came from the
+    # Yahoo fallback indefinitely. It is skipped for a while, then tried again.
+    _NSE_COOLDOWN_SECONDS = 600
+
+    @property
+    def _nse_broken(self) -> bool:
+        return time.time() < self._nse_broken_until
+
+    @_nse_broken.setter
+    def _nse_broken(self, value: bool) -> None:
+        self._nse_broken_until = time.time() + self._NSE_COOLDOWN_SECONDS if value else 0.0
 
     def _crypto_fx_rate(self) -> float:
         """Multiplier from a crypto pair's USD quote into this book's own
@@ -267,13 +283,14 @@ class MarketDataClient:
             try:
                 return self._quote_from_nse(symbol)
             except Exception as exc:  # noqa: BLE001 - deliberately broad, we fall back
-                log.warning("NSE quote failed for %s (%s); falling back to yfinance for the rest of this run", symbol, exc)
+                log.warning("NSE quote failed for %s (%s); using yfinance for the next %d minutes", symbol, exc,
+                            self._NSE_COOLDOWN_SECONDS // 60)
                 self._nse_broken = True
         try:
             return self._quote_from_yfinance(symbol)
         except Exception as exc:  # noqa: BLE001
             # Last resort before giving up: the exchange's own end-of-day file.
-            eod = self._quote_from_eod(symbol)
+            eod = self._quote_from_eod(symbol) if self.allow_eod_fallback else None
             if eod is not None:
                 log.warning("Yahoo Finance had no usable price for %s (%s); using the exchange's %s close", symbol, exc, eod.bar_date)
                 return eod
@@ -424,6 +441,11 @@ class MarketDataClient:
             raise DataUnavailableError(f"No history for {symbol}: {exc}") from exc
         if df.empty:
             raise DataUnavailableError(f"No history for {symbol}")
+        # A trailing bar with volume but no prices (see _quote_from_yfinance) would
+        # hand every indicator a NaN "latest close".
+        df = df[df["Close"].notna()]
+        if df.empty:
+            raise DataUnavailableError(f"No usable prices in the history for {symbol}")
         # Same USD->book-currency conversion the exchange path above does,
         # for the case where both exchanges were unavailable and Yahoo's
         # (also USD-quoted) crypto ticker served the history instead.

@@ -1033,6 +1033,9 @@ def test_get_quote_falls_back_to_the_exchange_file_when_yahoo_has_nothing(monkey
     monkeypatch.setattr(eod_prices, "_load", lambda ex, day, t: table)
 
     client = MarketDataClient(preferred="yfinance")
+    with pytest.raises(DataUnavailableError):               # automated profiles never get a days-old close
+        client.get_quote("RPEL")
+    client.allow_eod_fallback = True                        # a manual profile opts in
     q = client.get_quote("RPEL")
     assert q.source == "eod" and q.ltp == pytest.approx(1835.60)
     assert q.week52_high == 0.0                                # unknown, not invented
@@ -1518,3 +1521,12 @@ def test_commitments_price_scheduled_buys_from_cached_history_not_a_live_quote(t
     c = trader.commitments()
     assert calls["quote"] == 0                                   # no network call per dashboard refresh
     assert c["scheduled_buys"] == pytest.approx(broker.estimated_buy_cost(96.0, 5), abs=0.01)
+
+
+def test_a_resting_limit_order_is_not_refused_because_the_price_moved(trader_env):
+    trader, broker, data, _ = trader_env
+    data.ltp = 108.0                                         # 8% above the 100 the page showed
+    out = trader.place_order("AAA", "BUY", 5, entry_price=90, expected_price=100.0)
+    assert out["status"] == "pending"                        # a limit order doesn't depend on today's price
+    with pytest.raises(ManualOrderError, match="price moved"):
+        trader.place_order("AAA", "BUY", 5, expected_price=100.0)   # a buy-now still is protected

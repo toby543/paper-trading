@@ -306,6 +306,10 @@ class Storage:
         if capital is None or capital <= 0:
             return False
         with self._conn() as conn:
+            # Take the write lock before looking: another process (check_capital.py
+            # --apply while the app runs) could otherwise record a first trade
+            # between the check below and the UPDATE.
+            conn.execute("BEGIN IMMEDIATE")
             used = conn.execute(
                 "SELECT (SELECT COUNT(*) FROM trades) + (SELECT COUNT(*) FROM positions)").fetchone()[0]
             if used:

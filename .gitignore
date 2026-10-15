@@ -30,3 +30,5 @@ profiles/*.tmp
 .env
 
 data/*.bak-entry-charges
+data/*.bak-trade-*
+data/*.bak-curve-*

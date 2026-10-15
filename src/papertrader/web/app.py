@@ -694,7 +694,10 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         if any(path == ["profiles", active_profile, "starting_capital"] for path, _ in coerced):
             for engine in engines.values():
                 if engine.profile_name == active_profile:
-                    engine.sync_untouched_capital()
+                    # Under the engine lock, like every other writer of this ledger: a
+                    # first trade being recorded at the same moment must not be wiped.
+                    with engine._state_lock:
+                        engine.sync_untouched_capital()
 
         return jsonify({"ok": True, "restart_required": True})
 

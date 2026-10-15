@@ -70,7 +70,10 @@ def main() -> int:
         if info["status"] == "no_ledger":
             print(f"{line}  no ledger yet -- it will be created with this capital")
             continue
-        line += f" | ledger cash {info['cash']:>12,.2f}, capital {info['starting_capital']:>12,.2f}" \
+        def money(v):
+            return f"{v:>12,.2f}" if v is not None else f"{'(none)':>12}"
+
+        line += f" | ledger cash {money(info['cash'])}, capital {money(info['starting_capital'])}" \
                 f" | {info['trades']} trades, {info['positions']} positions"
         if info["status"] == "ok":
             print(f"{line}  OK")

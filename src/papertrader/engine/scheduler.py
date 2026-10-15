@@ -134,6 +134,7 @@ class TradingEngine:
         self.risk_cfg = profile_risk_cfg
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
         self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
+        self.data.allow_eod_fallback = self.is_manual
 
     def sync_untouched_capital(self) -> None:
         """A ledger that has never traded takes the profile's configured
@@ -276,6 +277,13 @@ class TradingEngine:
                 history = self.data.get_history(symbol, period="1y")
             except DataUnavailableError as exc:
                 log.warning("Skipping exit-check for %s: %s", symbol, exc)
+                continue
+            bar = getattr(quote, "bar_date", None)
+            if bar is not None and not self.trades_24_7 and bar < datetime.now().date():
+                # The latest price is an earlier day's close (Yahoo has not produced
+                # today's bar): a stop or target judged on it could fire on a
+                # price the stock is no longer trading at.
+                log.warning("Skipping exit-check for %s: latest price is from %s, not today", symbol, bar)
                 continue
 
             self.broker.update_trailing_high(symbol, quote.ltp)
@@ -1206,6 +1214,7 @@ class TradingEngine:
                     self.universe = load_universe(self.cfg.get_profile_universe_file(self.profile_name))
                     self.trades_24_7 = self.cfg.get_profile_trades_24_7(self.profile_name)
                     self.data.timeout = self.cfg.get("data_source", "request_timeout_seconds", default=10)
+                    self.data.allow_eod_fallback = self.is_manual
                     # scan_interval/exit_interval are local to this loop,
                     # read once before it started -- without re-reading them
                     # here, engine.scan_interval_minutes/

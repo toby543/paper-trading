@@ -154,19 +154,21 @@ class ManualTrader:
                 if qty > held.quantity:
                     raise ManualOrderError(f"You only hold {held.quantity:g} of {symbol}.")
             if not market_open:
-                return self._schedule_for_open(symbol, side, qty, entry, sl, target, note, held)
+                return self._schedule_for_open(symbol, side, qty, entry, sl, target, note)
             q = self._live_price(symbol)
             if not self.allow_when_market_closed and not self._is_fresh(q):
                 raise ManualOrderError(
                     f"The latest price available for {symbol} is from {q.bar_date:%d %b}, not today, "
                     "so it can't be traded on yet. Try again in a minute, or schedule the order.")
-            self._check_price_protection(q.ltp, expected_price)
 
             if side == "SELL":
+                self._check_price_protection(q.ltp, expected_price)
                 trade = self._fill(symbol, "SELL", qty, q.ltp, "manual" + (f": {note}" if note else ""))
                 return self._result(symbol, "SELL", qty, trade)
 
             limit_order = entry is not None and entry < q.ltp * (1 - MARKET_ENTRY_TOLERANCE)
+            if not limit_order:
+                self._check_price_protection(q.ltp, expected_price)
             reference = entry if limit_order else q.ltp
             self._check_levels(reference, sl, target, "entry price" if limit_order else "current price")
 
@@ -189,7 +191,7 @@ class ManualTrader:
             out["stop_loss"], out["target_price"] = sl, target
             return out
 
-    def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note, held) -> dict:
+    def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note) -> dict:
         """The market is closed: queue the order. A buy with an entry price
         buys at that price or better and never above it: it fills once the
         market is open and the price is at or below the entry, however far
@@ -477,6 +479,8 @@ class ManualTrader:
             except ManualOrderError as exc:
                 log.warning("Skipping manual level check for %s: %s", symbol, exc)
                 continue
+            if not self._is_fresh(q):
+                continue  # an earlier day's close must not trigger a stop or target
             self.broker.update_trailing_high(symbol, q.ltp)
             lv = levels.get(symbol) or {}
             stop, target = lv.get("stop_loss"), lv.get("target_price")
