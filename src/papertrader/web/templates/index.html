@@ -789,6 +789,7 @@
             <div class="manual-row" style="margin-top:12px;">
               <input type="text" id="manualNote" class="edit-input wide" maxlength="100" placeholder="Note (optional)" style="width:240px; text-align:left;">
               <button type="button" id="manualPlaceBtn" class="edit-save-btn">Place buy order</button>
+              <button type="button" id="manualEditCancel" class="manual-sell-btn" style="display:none;">Cancel edit</button>
               <button type="button" id="manualLevelsBtn" class="manual-sell-btn" style="display:none;">Update stop / target</button>
             </div>
             <div class="manual-est mono" id="manualEst"></div>
@@ -1443,7 +1444,8 @@ function renderPositions(s) {
 }
 
 // ---------- manual trade ticket (manual profiles only) ----------
-const manual = { symbol: null, side: "BUY", mode: "regular", quote: null, searchTimer: null, seq: 0, quoteSeq: 0 };
+const manual = { symbol: null, side: "BUY", mode: "regular", quote: null, searchTimer: null, seq: 0, quoteSeq: 0,
+                 editGtt: null, pendingEdit: null, gtts: {} };
 
 function manualEl(id) { return document.getElementById(id); }
 function manualMsg(text, cls) {
@@ -1534,7 +1536,7 @@ function manualApplyMode() {
 
 function manualRefreshPlaceButton() {
   const gtt = manual.mode === "gtt";
-  manualEl("manualPlaceBtn").textContent = gtt ? "Create GTT" : (manual.side === "SELL"
+  manualEl("manualPlaceBtn").textContent = gtt ? (manual.editGtt ? "Save changes" : "Create GTT") : (manual.side === "SELL"
     ? (manualQueues() ? "Schedule sell for market open" : "Place sell order")
     : (manualIsLimitEntry()
        ? (manualQueues() ? `Schedule buy at ${CCY}${fmt(manualNum("manualEntry"))}` : "Place limit buy order")
@@ -1597,7 +1599,7 @@ async function manualCreateGtt() {
     question = `Create a two-leg GTT to SELL ${qty} × ${manual.symbol}?\nStop-loss trigger ${CCY}${fmt(trigger)}\nTarget trigger ${CCY}${fmt(targetTrigger)}\nThe first one reached sells at the market price and cancels the other. Valid for one year.`;
   } else {
     const dir = trigger < manual.quote.ltp ? "falls to" : "rises to";
-    question = `Create a GTT to ${manual.side} ${qty} × ${manual.symbol} when the price ${dir} ${CCY}${fmt(trigger)}?` +
+    question = `${manual.editGtt ? "Replace GTT #" + manual.editGtt + " with this one:\n" : ""}Create a GTT to ${manual.side} ${qty} × ${manual.symbol} when the price ${dir} ${CCY}${fmt(trigger)}?` +
       (limit ? `\nLimit price ${CCY}${fmt(limit)}` : "\nAt the market price when triggered") +
       (stop ? `\nThen stop loss ${CCY}${fmt(stop)}` : "") + (target ? `\nThen target ${CCY}${fmt(target)}` : "") +
       "\nValid for one year. Nothing is bought or reserved until it triggers.";
@@ -1609,10 +1611,13 @@ async function manualCreateGtt() {
     const out = await manualPost("/api/manual/gtt", {
       symbol: manual.symbol, side: manual.side, quantity: qty, note: manualEl("manualNote").value, oco,
       trigger_price: trigger, limit_price: limit, target_trigger: targetTrigger, stop_loss: stop, target_price: target,
+      replace_id: manual.editGtt,
     });
     if (!out.ok) { manualMsg(out.error || "GTT rejected.", "err"); return; }
-    manualMsg(oco ? `GTT created: sell ${fmtInt(out.quantity)} × ${out.symbol} at the stop or target`
-      : `GTT created: ${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} when the price ${out.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(out.trigger_price)}`, "ok");
+    const edited = !!manual.editGtt;
+    manualEndEdit();
+    manualMsg((edited ? "GTT updated: " : "") + (oco ? `GTT created: sell ${fmtInt(out.quantity)} × ${out.symbol} at the stop or target`
+      : `GTT created: ${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} when the price ${out.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(out.trigger_price)}`), "ok");
     ["manualGttTrigger", "manualGttLimit", "manualGttTarget", "manualNote"].forEach(id => { manualEl(id).value = ""; });
     manualRefreshGtts();
   } catch (e) {
@@ -1620,6 +1625,45 @@ async function manualCreateGtt() {
   } finally {
     btn.disabled = false;
   }
+}
+
+function manualEndEdit() {
+  manual.editGtt = null;
+  manual.pendingEdit = null;
+  const b = manualEl("manualEditCancel");
+  if (b) b.style.display = "none";
+  manualRefreshPlaceButton();
+}
+
+// Load a waiting GTT back into the ticket; saving replaces it.
+async function manualStartEditGtt(id) {
+  const g = manual.gtts[id];
+  if (!g) return;
+  manual.editGtt = g.id;
+  manual.pendingEdit = g;
+  manual.side = g.side;
+  manual.mode = "gtt";
+  manualEl("manualSearch").value = g.symbol;
+  manualEl("manualEditCancel").style.display = "";
+  manualMsg(`Editing GTT #${g.id}: change the values and press Save changes.`);
+  await manualLoadQuote(g.symbol);
+  manualEl("manualTicket").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function manualApplyPendingEdit() {
+  const g = manual.pendingEdit;
+  if (!g) return;
+  manual.pendingEdit = null;
+  manualEl("manualQty").value = g.quantity;
+  manualEl("manualGttTrigger").value = g.trigger_price;
+  manualEl("manualGttLimit").value = g.limit_price || "";
+  manualEl("manualGttTarget").value = g.target_trigger || "";
+  manualEl("manualStop").value = g.stop_loss || "";
+  manualEl("manualTarget").value = g.target_price || "";
+  manualEl("manualNote").value = g.note || "";
+  manualSetSide(g.side);          // shows the right fields first, so the OCO box exists
+  manualEl("manualOco").checked = g.kind === "oco";
+  manualApplyMode();
 }
 
 function manualClearButton(show) {
@@ -1633,6 +1677,7 @@ async function manualRemoveFinished(url, body) {
 }
 
 async function manualCancelGtt(gttId) {
+  if (String(manual.editGtt) === String(gttId)) manualEndEdit();
   const out = await manualPost("/api/manual/gtt/cancel", { gtt_id: gttId });
   if (!out.ok) manualMsg(out.error || "Could not cancel.", "err");
   manualRefreshGtts();
@@ -1645,6 +1690,8 @@ async function manualRefreshGtts() {
     const res = await authFetch("/api/manual/gtt?profile=" + encodeURIComponent(ACTIVE_PROFILE));
     const data = await res.json();
     if (!data.ok || !data.gtts.length) { box.innerHTML = ""; return; }
+    manual.gtts = {};
+    data.gtts.forEach(g => { manual.gtts[g.id] = g; });
     box.innerHTML = `<div class="manual-orders-title">GTT orders${manualClearButton(data.gtts.some(g => g.status !== "active"))}</div>` + data.gtts.map(g => {
       const side = g.side === "SELL" ? "Sell" : "Buy";
       const what = g.kind === "oco"
@@ -1654,7 +1701,7 @@ async function manualRefreshGtts() {
           (g.stop_loss ? ` · stop ${CCY}${fmt(g.stop_loss)}` : "") + (g.target_price ? ` · target ${CCY}${fmt(g.target_price)}` : "");
       const until = new Date(g.expires_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
       const status = g.status === "active"
-        ? `<span class="manual-order-status">valid till ${until} <button type="button" class="manual-sell-btn" data-cancel-gtt="${g.id}">Cancel</button></span>`
+        ? `<span class="manual-order-status">valid till ${until} <button type="button" class="manual-sell-btn" data-edit-gtt="${g.id}">Edit</button> <button type="button" class="manual-sell-btn" data-cancel-gtt="${g.id}">Cancel</button></span>`
         : `<span class="manual-order-status ${g.status === "triggered" ? "filled" : "cancelled"}">${escapeText(g.status)} — ${escapeText(g.detail)}
              <button type="button" class="manual-remove-btn" data-delete-gtt="${g.id}" title="Remove from this list" aria-label="Remove">&times;</button></span>`;
       return `<div class="manual-order"><span class="mono">${what}</span>${status}</div>`;
@@ -1694,12 +1741,14 @@ async function manualLoadQuote(symbol, name) {
     manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
     manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";
     manualSetSide(manual.side);
+    manualApplyPendingEdit();
   } catch (e) {
     if (mine === manual.quoteSeq) manualMsg("Could not fetch a quote: " + e.message, "err");
   }
 }
 
 function manualSelect(symbol, name) {
+  if (manual.editGtt) manualEndEdit();
   manualEl("manualResults").classList.remove("open");
   manualEl("manualSearch").value = symbol;
   manualLoadQuote(symbol, name);
@@ -1851,6 +1900,7 @@ function initManualTicket() {
   ["manualQty", "manualEntry", "manualStop", "manualTarget"].forEach(id =>
     manualEl(id).addEventListener("input", () => { manualRefreshPlaceButton(); manualUpdateEstimate(); manualUpdateGttHint(); }));
   manualEl("manualPlaceBtn").addEventListener("click", manualPlaceOrder);
+  manualEl("manualEditCancel").addEventListener("click", () => { manualEndEdit(); manualMsg("Edit cancelled; the GTT is unchanged."); });
   manualEl("manualModeRegular").addEventListener("click", () => { manual.mode = "regular"; manualApplyMode(); });
   manualEl("manualModeGtt").addEventListener("click", () => { manual.mode = "gtt"; manualApplyMode(); });
   manualEl("manualOco").addEventListener("change", manualApplyMode);
@@ -1859,6 +1909,8 @@ function initManualTicket() {
   // One delegated listener for both lists: cancel (waiting), remove (finished), clear all finished.
   [manualEl("manualGtts"), manualEl("manualOrders")].forEach(box => box.addEventListener("click", (ev) => {
     const t = ev.target;
+    const editGtt = t.closest("[data-edit-gtt]");
+    if (editGtt) return manualStartEditGtt(editGtt.dataset.editGtt);
     const cancelGtt = t.closest("[data-cancel-gtt]");
     if (cancelGtt) return manualCancelGtt(cancelGtt.dataset.cancelGtt);
     const delGtt = t.closest("[data-delete-gtt]");

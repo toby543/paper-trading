@@ -1595,3 +1595,27 @@ def test_api_delete_and_clear(client):
     cleared = client.post("/api/manual/clear-finished", json={"profile": "manual_swing"}).get_json()
     assert cleared["ok"] and cleared["gtts"] == 0                                    # the waiting one stays
     assert client.post("/api/manual/clear-finished", json={"profile": "auto"}).status_code == 400
+
+
+def test_editing_a_gtt_replaces_it_and_a_bad_edit_leaves_it_alone(trader_env):
+    trader, broker, _, _ = trader_env
+    old = trader.create_gtt("AAA", "BUY", 10, trigger_price=90, stop_loss=80)["gtt_id"]
+    with pytest.raises(ManualOrderError, match="regular order"):
+        trader.create_gtt("AAA", "BUY", 10, trigger_price=100.0, replace_id=old)
+    assert [g["id"] for g in broker.storage.get_active_gtts()] == [old]      # untouched
+
+    new = trader.create_gtt("AAA", "BUY", 20, trigger_price=85, replace_id=old)["gtt_id"]
+    active = broker.storage.get_active_gtts()
+    assert [(g["id"], g["quantity"], g["trigger_price"]) for g in active] == [(new, 20, 85)]
+    row = next(g for g in trader.gtts() if g["id"] == old)
+    assert row["status"] == "cancelled" and "edited" in row["detail"]
+
+
+def test_only_a_waiting_gtt_for_the_same_stock_can_be_edited(trader_env):
+    trader, _, _, _ = trader_env
+    gid = trader.create_gtt("AAA", "BUY", 1, trigger_price=90)["gtt_id"]
+    with pytest.raises(ManualOrderError, match="change the stock"):
+        trader.create_gtt("BBB", "BUY", 1, trigger_price=90, replace_id=gid)
+    trader.cancel_gtt(gid)
+    with pytest.raises(ManualOrderError, match="no longer active"):
+        trader.create_gtt("AAA", "BUY", 1, trigger_price=85, replace_id=gid)

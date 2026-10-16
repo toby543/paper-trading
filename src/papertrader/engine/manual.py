@@ -230,8 +230,12 @@ class ManualTrader:
     # GTT: good till triggered
     def create_gtt(self, symbol: str, side: str, quantity, trigger_price=None, limit_price=None,
                    note: str = "", stop_loss=None, target_price=None, oco: bool = False,
-                   target_trigger=None) -> dict:
-        """A single-trigger GTT (buy or sell once the price falls or rises to
+                   target_trigger=None, replace_id=None) -> dict:
+        """With replace_id, edit that waiting GTT: the new one is validated like any
+        other and only then does the old one close (as cancelled, "edited"), so a
+        rejected edit leaves the original untouched.
+
+        A single-trigger GTT (buy or sell once the price falls or rises to
         trigger_price, optionally capped by limit_price), or with oco=True a
         two-leg sell of a holding: trigger_price is the stop loss and
         target_trigger the target, and whichever is reached first sells while
@@ -260,6 +264,15 @@ class ManualTrader:
             raise ManualOrderError("Stop loss and target apply to buys; a sell GTT closes shares.")
 
         with self.lock:
+            if replace_id is not None:
+                try:
+                    old = next((g for g in self.storage.get_active_gtts() if g["id"] == int(replace_id)), None)
+                except (TypeError, ValueError):
+                    old = None
+                if old is None:
+                    raise ManualOrderError("That GTT is no longer active, so it can't be edited.")
+                if old["symbol"] != symbol:
+                    raise ManualOrderError("An edit can't change the stock; create a new GTT instead.")
             positions = self.broker.positions()
             held = positions.get(symbol)
             if side == "BUY":
@@ -301,6 +314,8 @@ class ManualTrader:
                 trigger_price=trigger, direction=direction, limit_price=limit,
                 target_trigger=target_trig if oco else None, stop_loss=sl, target_price=target,
                 note=note, expires_at=expires)
+            if replace_id is not None:
+                self.storage.resolve_gtt(int(replace_id), "cancelled", f"edited; replaced by GTT #{gtt_id}")
             return {"gtt_id": gtt_id, "symbol": symbol, "side": side, "kind": "oco" if oco else "single",
                     "quantity": qty, "trigger_price": trigger, "direction": direction, "limit_price": limit,
                     "target_trigger": target_trig if oco else None, "expires_at": expires, "last_price": last}

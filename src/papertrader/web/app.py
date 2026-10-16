@@ -457,7 +457,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         return _manual_json_action(lambda t, p: t.create_gtt(
             p.get("symbol"), p.get("side"), p.get("quantity"), trigger_price=p.get("trigger_price"),
             limit_price=p.get("limit_price"), note=p.get("note", ""), stop_loss=p.get("stop_loss"),
-            target_price=p.get("target_price"), oco=bool(p.get("oco")), target_trigger=p.get("target_trigger")))
+            target_price=p.get("target_price"), oco=bool(p.get("oco")), target_trigger=p.get("target_trigger"),
+            replace_id=p.get("replace_id")))
 
     @app.post("/api/manual/gtt/cancel")
     @api_login_required
