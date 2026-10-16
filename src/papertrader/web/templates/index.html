@@ -773,7 +773,7 @@
                 <input type="number" id="manualGttTarget" class="edit-input" min="0" step="0.05" style="width:130px;">
               </label>
             </div>
-            <div class="manual-est mono" id="manualGttHint"></div>
+            <div class="manual-est mono" style="white-space:pre-line;" id="manualGttHint"></div>
             <div class="manual-row" id="manualBuyFields" style="margin-top:12px;">
               <label class="manual-field" id="manualEntryWrap">Entry price
                 <input type="number" id="manualEntry" class="edit-input" min="0" step="0.05" style="width:130px;"
@@ -1564,6 +1564,19 @@ function manualUpdateGttHint() {
   hint.textContent = dir
     ? `Fires when the price ${dir} to ${CCY}${fmt(trigger)} (now ${CCY}${fmt(q.ltp)}). Valid for one year.`
     : "That trigger is at the current price; use a regular order instead.";
+  if (dir && qty > 0) {
+    // At most the limit price when one is set, otherwise about the trigger price.
+    const limit = manualNum("manualGttLimit");
+    const price = limit > 0 ? limit : trigger;
+    if (manual.side === "BUY") {
+      const cost = q.buy_cost_per_share * qty * (price / q.ltp) + q.buy_cost_fixed;
+      hint.textContent += `
+If it triggers you spend about ${CCY}${fmt(cost)} (${fmtInt(qty)} × ${CCY}${fmt(price)} incl. charges) · cash ${CCY}${fmt(q.cash)}. Nothing is reserved until then.`;
+    } else {
+      hint.textContent += `
+If it triggers you receive about ${CCY}${fmt(price * qty)} (${fmtInt(qty)} × ${CCY}${fmt(price)}) before charges.`;
+    }
+  }
 }
 
 async function manualCreateGtt() {
