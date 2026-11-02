@@ -1619,3 +1619,25 @@ def test_only_a_waiting_gtt_for_the_same_stock_can_be_edited(trader_env):
     trader.cancel_gtt(gid)
     with pytest.raises(ManualOrderError, match="no longer active"):
         trader.create_gtt("AAA", "BUY", 1, trigger_price=85, replace_id=gid)
+
+
+def test_clear_finished_can_target_one_list(trader_env):
+    trader, broker, _, _ = trader_env
+    done_gtt, live_gtt, done_order, live_order = _finished_and_waiting(trader)
+    assert trader.clear_finished("gtts") == {"orders": 0, "gtts": 1}
+    assert done_order in [o["id"] for o in broker.storage.get_recent_orders()]   # other list untouched
+    assert trader.clear_finished("orders") == {"orders": 1, "gtts": 0}
+    with pytest.raises(ManualOrderError, match="orders, gtts or all"):
+        trader.clear_finished("everything")
+
+
+def test_a_failed_edit_rolls_back_the_new_gtt(trader_env, monkeypatch):
+    trader, broker, _, _ = trader_env
+    old = trader.create_gtt("AAA", "BUY", 10, trigger_price=90)["gtt_id"]
+
+    def boom(*a, **k):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(broker.storage, "resolve_gtt", boom)
+    with pytest.raises(RuntimeError):
+        trader.create_gtt("AAA", "BUY", 20, trigger_price=85, replace_id=old)
+    assert [g["id"] for g in broker.storage.get_active_gtts()] == [old]     # never two active

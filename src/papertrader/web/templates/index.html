@@ -1389,8 +1389,9 @@ function renderStats(s) {
   } else {
     regimePill.style.display = "inline-flex";
     regimePill.className = "pill " + (r.status === "up" ? "up" : "down");
-    document.getElementById("regimePillText").textContent =
-      (r.status === "up" ? "Uptrend" : "Downtrend") + " · " + r.index_symbol.replace("^", "");
+    document.getElementById("regimePillText").textContent = r.label ||
+      ((r.status === "up" ? "Uptrend" : "Downtrend") + " · " + r.index_symbol.replace("^", ""));
+    regimePill.title = r.reason || "";
   }
 }
 
@@ -1616,8 +1617,8 @@ async function manualCreateGtt() {
     if (!out.ok) { manualMsg(out.error || "GTT rejected.", "err"); return; }
     const edited = !!manual.editGtt;
     manualEndEdit();
-    manualMsg((edited ? "GTT updated: " : "") + (oco ? `GTT created: sell ${fmtInt(out.quantity)} × ${out.symbol} at the stop or target`
-      : `GTT created: ${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} when the price ${out.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(out.trigger_price)}`), "ok");
+    manualMsg((edited ? "GTT updated: " : "GTT created: ") + (oco ? `sell ${fmtInt(out.quantity)} × ${out.symbol} at the stop or target`
+      : `${out.side.toLowerCase()} ${fmtInt(out.quantity)} × ${out.symbol} when the price ${out.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(out.trigger_price)}`), "ok");
     ["manualGttTrigger", "manualGttLimit", "manualGttTarget", "manualNote"].forEach(id => { manualEl(id).value = ""; });
     manualRefreshGtts();
   } catch (e) {
@@ -1645,8 +1646,8 @@ async function manualStartEditGtt(id) {
   manual.mode = "gtt";
   manualEl("manualSearch").value = g.symbol;
   manualEl("manualEditCancel").style.display = "";
-  manualMsg(`Editing GTT #${g.id}: change the values and press Save changes.`);
-  await manualLoadQuote(g.symbol);
+  await manualLoadQuote(g.symbol);  // clears the message line, so the note goes after it
+  if (manual.editGtt === g.id) manualMsg(`Editing GTT #${g.id}: change the values and press Save changes.`);
   manualEl("manualTicket").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -1666,13 +1667,17 @@ function manualApplyPendingEdit() {
   manualApplyMode();
 }
 
-function manualClearButton(show) {
-  return show ? ` <button type="button" class="manual-clear-btn" data-clear-finished>Clear finished</button>` : "";
+function manualClearButton(show, which) {
+  return show ? ` <button type="button" class="manual-clear-btn" data-clear-finished="${which}">Clear finished</button>` : "";
 }
 
 async function manualRemoveFinished(url, body) {
-  const out = await manualPost(url, body);
-  if (!out.ok) manualMsg(out.error || "Could not remove.", "err");
+  try {
+    const out = await manualPost(url, body);
+    if (!out.ok) manualMsg(out.error || "Could not remove.", "err");
+  } catch (e) {
+    manualMsg("Could not remove: " + e.message, "err");
+  }
   manualRefreshOrders();  // also refreshes the GTT list
 }
 
@@ -1692,7 +1697,7 @@ async function manualRefreshGtts() {
     if (!data.ok || !data.gtts.length) { box.innerHTML = ""; return; }
     manual.gtts = {};
     data.gtts.forEach(g => { manual.gtts[g.id] = g; });
-    box.innerHTML = `<div class="manual-orders-title">GTT orders${manualClearButton(data.gtts.some(g => g.status !== "active"))}</div>` + data.gtts.map(g => {
+    box.innerHTML = `<div class="manual-orders-title">GTT orders${manualClearButton(data.gtts.some(g => g.status !== "active"), "gtts")}</div>` + data.gtts.map(g => {
       const side = g.side === "SELL" ? "Sell" : "Buy";
       const what = g.kind === "oco"
         ? `Sell ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} · stop ${CCY}${fmt(g.trigger_price)} · target ${CCY}${fmt(g.target_trigger)}`
@@ -1867,7 +1872,7 @@ async function manualRefreshOrders() {
     const res = await authFetch("/api/manual/orders?profile=" + encodeURIComponent(ACTIVE_PROFILE));
     const data = await res.json();
     if (!data.ok || !data.orders.length) { box.innerHTML = ""; return; }
-    box.innerHTML = `<div class="manual-orders-title">Pending and recent orders${manualClearButton(data.orders.some(o => o.status !== "pending"))}</div>` + data.orders.map(o => {
+    box.innerHTML = `<div class="manual-orders-title">Pending and recent orders${manualClearButton(data.orders.some(o => o.status !== "pending"), "orders")}</div>` + data.orders.map(o => {
       const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "");
       const status = o.status === "pending"
         ? `<button type="button" class="manual-sell-btn" data-cancel="${o.id}">Cancel</button>`
@@ -1917,7 +1922,13 @@ function initManualTicket() {
     if (delGtt) return manualRemoveFinished("/api/manual/gtt/delete", { gtt_id: delGtt.dataset.deleteGtt });
     const delOrder = t.closest("[data-delete-order]");
     if (delOrder) return manualRemoveFinished("/api/manual/orders/delete", { order_id: delOrder.dataset.deleteOrder });
-    if (t.closest("[data-clear-finished]")) return manualRemoveFinished("/api/manual/clear-finished", {});
+    const clear = t.closest("[data-clear-finished]");
+    if (clear) {
+      const which = clear.dataset.clearFinished;
+      const what = which === "gtts" ? "finished GTTs" : "finished orders";
+      if (!window.confirm(`Remove all ${what} from this list? This can't be undone (your trade log is not affected).`)) return;
+      return manualRemoveFinished("/api/manual/clear-finished", { which });
+    }
   }));
   manualEl("manualLevelsBtn").addEventListener("click", manualUpdateLevels);
   manualEl("manualOrders").addEventListener("click", (ev) => {
@@ -1927,6 +1938,7 @@ function initManualTicket() {
   document.getElementById("positionsBody").addEventListener("click", (ev) => {
     const btn = ev.target.closest(".manual-sell-btn");
     if (!btn) return;
+    if (manual.editGtt) manualEndEdit();  // a sale of another holding, not the GTT being edited
     manualEl("manualSearch").value = btn.dataset.symbol;
     manualEl("manualQty").value = btn.dataset.qty;
     manual.mode = "regular";  // "Sell" on a position is a sale now, not a GTT
@@ -2731,9 +2743,13 @@ function renderWatchlistNote(data) {
   const banner = document.getElementById("watchlistBanner");
   document.getElementById("watchlistIndex").textContent = data.index_symbol || "the benchmark index";
 
-  if (data.regime_blocking) {
+  if (data.paused) {
     banner.className = "edit-banner error";
-    banner.innerHTML = `Market regime filter is currently blocking new entries (${escapeText(data.index_symbol)} is below its own average) -- these candidates qualify on their own merits but would NOT be bought right now.`;
+    banner.innerHTML = "New entries are paused for this profile (strategy.pause_new_entries) -- these candidates qualify but would NOT be bought.";
+    banner.style.display = "block";
+  } else if (data.regime_blocking) {
+    banner.className = "edit-banner error";
+    banner.innerHTML = `Market regime filter is currently blocking new entries (${escapeText(data.regime_reason || (data.index_symbol + " is below its own average"))}) -- these candidates qualify on their own merits but would NOT be bought right now.`;
     banner.style.display = "block";
   } else if (data.room_available <= 0) {
     banner.className = "edit-banner error";

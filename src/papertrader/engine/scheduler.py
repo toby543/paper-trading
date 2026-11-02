@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..config import Config
 from ..data.nse_client import MarketDataClient, DataUnavailableError
@@ -23,7 +23,7 @@ from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
-from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, regime_allows_entries, describe_regime_rule
+from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, evaluate_regime, describe_regime_rule
 from ..strategy import (
     consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
@@ -134,6 +134,8 @@ class TradingEngine:
         self.risk_cfg = profile_risk_cfg
         # Profile-specific regime config (e.g., crypto disables Nifty 50 regime filter)
         self.regime_cfg = cfg.get_profile_regime_config(self.profile_name)
+        # The last regime evaluation (what passed/failed), for the dashboard.
+        self.last_regime = None
         self.data.allow_eod_fallback = self.is_manual
 
     def sync_untouched_capital(self) -> None:
@@ -240,6 +242,7 @@ class TradingEngine:
         (or the filter is disabled / its data is unavailable, in which
         case we fail open rather than freezing the whole system)."""
         if not self.regime_cfg.get("enabled", False):
+            self.last_regime = None
             return True
         index_history = None
         if int(self.regime_cfg.get("ma_days", 200) or 0):
@@ -247,16 +250,39 @@ class TradingEngine:
             try:
                 index_history = self.data.get_index_history(index_symbol)
             except DataUnavailableError as exc:
-                log.warning("Could not evaluate market regime (%s); proceeding without the filter this scan", exc)
-                return True
+                # Only the index part is skipped: the breadth rule reads the
+                # coins' own prices (a different source) and still applies.
+                log.warning("Could not fetch %s for the market regime (%s); judging this scan "
+                            "on the other regime rules only", index_symbol, exc)
+
+        mode = self.strategy_cfg.get("mode", "52w_high")
+        # The period this mode's scan fetches, so breadth reuses the same
+        # cached histories instead of fetching every symbol a second time.
+        period = self._SCAN_HISTORY_PERIOD.get(mode, "1y")
+        today_utc = datetime.now(timezone.utc).date()
 
         def universe_histories():
             for symbol in self.universe:
                 try:
-                    yield self.data.get_history(symbol, period="1y")
+                    history = self.data.get_history(symbol, period=period)
                 except DataUnavailableError:
                     continue
-        return regime_allows_entries(self.regime_cfg, index_history, universe_histories)
+                if self.trades_24_7 and len(history) and hasattr(history.index[-1], "date"):
+                    # Drop today's still-forming daily bar: the rule was
+                    # back-tested on completed daily closes, and a partial
+                    # day would let intraday swings flip it back and forth.
+                    last = history.index[-1]
+                    last_day = (last.tz_convert("UTC") if getattr(last, "tzinfo", None) else last).date()
+                    if last_day >= today_utc:
+                        history = history.iloc[:-1]
+                yield history
+        result = evaluate_regime(self.regime_cfg, index_history, universe_histories)
+        self.last_regime = {**result, "at": datetime.now().isoformat(timespec="seconds")}
+        return result["ok"]
+
+    # History period each scan mode fetches (see the scan branches below);
+    # anything not listed uses "1y".
+    _SCAN_HISTORY_PERIOD = {"cross_sectional_momentum": "2y", "long_term_trend": "2y", "ipo_base_breakout": "3y"}
 
     def check_exits(self) -> None:
         if self.is_manual:
@@ -1010,7 +1036,7 @@ class TradingEngine:
 
         if not self.market_regime_ok():
             log.info("Market regime filter: %s; skipping new entries this scan",
-                     describe_regime_rule(self.regime_cfg))
+                     (self.last_regime or {}).get("reason") or describe_regime_rule(self.regime_cfg))
             self._record_scan_diagnostics(mode, "regime_blocked")
             return
 

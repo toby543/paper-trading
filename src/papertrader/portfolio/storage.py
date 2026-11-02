@@ -452,11 +452,15 @@ class Storage:
             return conn.execute(
                 "DELETE FROM pending_orders WHERE id = ? AND status != 'pending'", (order_id,)).rowcount > 0
 
-    def clear_resolved_orders(self) -> dict:
-        """Remove every finished order and GTT; those still waiting are kept."""
+    def clear_resolved_orders(self, which: str = "all") -> dict:
+        """Remove finished orders and/or GTTs (which: "orders", "gtts" or
+        "all"); those still waiting are always kept."""
+        orders = gtts = 0
         with self._conn() as conn:
-            orders = conn.execute("DELETE FROM pending_orders WHERE status != 'pending'").rowcount
-            gtts = conn.execute("DELETE FROM gtt_orders WHERE status != 'active'").rowcount
+            if which in ("all", "orders"):
+                orders = conn.execute("DELETE FROM pending_orders WHERE status != 'pending'").rowcount
+            if which in ("all", "gtts"):
+                gtts = conn.execute("DELETE FROM gtt_orders WHERE status != 'active'").rowcount
         return {"orders": orders, "gtts": gtts}
 
     def resolve_gtt(self, gtt_id: int, status: str, detail: str) -> bool:

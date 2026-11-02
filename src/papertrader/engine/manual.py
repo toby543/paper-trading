@@ -309,13 +309,17 @@ class ManualTrader:
                     self._check_levels(limit if limit is not None else trigger, sl, target, "trigger price")
 
             expires = (datetime.now() + timedelta(days=GTT_VALIDITY_DAYS)).isoformat(timespec="seconds")
-            gtt_id = self.storage.add_gtt(
-                symbol=symbol, side=side, kind="oco" if oco else "single", quantity=qty,
-                trigger_price=trigger, direction=direction, limit_price=limit,
-                target_trigger=target_trig if oco else None, stop_loss=sl, target_price=target,
-                note=note, expires_at=expires)
-            if replace_id is not None:
-                self.storage.resolve_gtt(int(replace_id), "cancelled", f"edited; replaced by GTT #{gtt_id}")
+            # One commit: an edit must never leave both the old and the new
+            # GTT active (both would fire and buy twice).
+            with self.storage.transaction():
+                gtt_id = self.storage.add_gtt(
+                    symbol=symbol, side=side, kind="oco" if oco else "single", quantity=qty,
+                    trigger_price=trigger, direction=direction, limit_price=limit,
+                    target_trigger=target_trig if oco else None, stop_loss=sl, target_price=target,
+                    note=note, expires_at=expires)
+                if replace_id is not None and not self.storage.resolve_gtt(
+                        int(replace_id), "cancelled", f"edited; replaced by GTT #{gtt_id}"):
+                    raise ManualOrderError("That GTT is no longer active, so it can't be edited.")
             return {"gtt_id": gtt_id, "symbol": symbol, "side": side, "kind": "oco" if oco else "single",
                     "quantity": qty, "trigger_price": trigger, "direction": direction, "limit_price": limit,
                     "target_trigger": target_trig if oco else None, "expires_at": expires, "last_price": last}
@@ -351,9 +355,13 @@ class ManualTrader:
                 raise ManualOrderError("Only a finished order can be removed; cancel a pending one first.")
         return {"order_id": oid, "deleted": True}
 
-    def clear_finished(self) -> dict:
+    def clear_finished(self, which: str = "all") -> dict:
+        """Remove finished rows from one list ("orders" or "gtts") or both."""
+        which = (which or "all").strip().lower()
+        if which not in ("all", "orders", "gtts"):
+            raise ManualOrderError("Choose orders, gtts or all.")
         with self.lock:
-            return self.storage.clear_resolved_orders()
+            return self.storage.clear_resolved_orders(which)
 
     def gtts(self) -> list[dict]:
         return self.storage.get_recent_gtts(15)

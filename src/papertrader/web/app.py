@@ -478,7 +478,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     @app.post("/api/manual/clear-finished")
     @api_login_required
     def api_manual_clear_finished():
-        return _manual_json_action(lambda t, p: t.clear_finished())
+        return _manual_json_action(lambda t, p: t.clear_finished(p.get("which", "all")))
 
     @app.get("/api/manual/gtt")
     @api_login_required

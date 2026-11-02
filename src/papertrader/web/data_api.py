@@ -109,7 +109,32 @@ def _market_regime(engine) -> dict:
         status = "up" if is_market_in_uptrend(index_history, ma_days) else "down"
     except Exception:  # noqa: BLE001 - dashboard must never 500 on a flaky index fetch
         status = None
-    return {"enabled": True, "status": status, "index_symbol": index_symbol, "ma_days": ma_days}
+    label = None if status is None else ("Uptrend" if status == "up" else "Downtrend") + " · " + index_symbol.replace("^", "")
+    reason = "" if status != "down" else f"{index_symbol} is below its {ma_days}-day average"
+    # The breadth part, as the engine judged it on its last scan (computing
+    # it here would mean fetching every symbol's history per page load).
+    breadth_pct = None
+    min_pct = float(regime_cfg.get("breadth_min_pct", 0) or 0)
+    last = getattr(engine, "last_regime", None) or {}
+    if min_pct > 0 and last.get("breadth_pct") is not None:
+        breadth_pct = round(float(last["breadth_pct"]), 1)
+        if breadth_pct < min_pct:
+            weak = (f"only {breadth_pct:.0f}% of the universe is above its "
+                    f"{int(regime_cfg.get('breadth_ma_days', 50) or 50)}-day average (needs {min_pct:g}%)")
+            reason = f"{reason} and {weak}" if reason else weak
+            if status == "up" or status is None:
+                label = f"Weak breadth {breadth_pct:.0f}% · {index_symbol.replace('^', '')}"
+            status = "down"
+    return {"enabled": True, "status": status, "index_symbol": index_symbol, "ma_days": ma_days,
+            "label": label, "reason": reason, "breadth_pct": breadth_pct}
+
+
+def _regime_block_reason(engine) -> str:
+    """Which part of the regime rule failed on the last scan, in words."""
+    reason = (getattr(engine, "last_regime", None) or {}).get("reason")
+    if reason:
+        return reason[0].upper() + reason[1:]
+    return f"The rule ({describe_regime_rule(engine.regime_cfg)}) was not met"
 
 
 def _parse_ts(value) -> datetime | None:
@@ -238,8 +263,8 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
         insights.append({
             "level": "info",
             "title": "Market regime filter blocked the last scan",
-            "detail": f"The rule is: {describe_regime_rule(engine.regime_cfg)}. It was not met, so no new "
-                      "entries were attempted. Existing positions still exit normally regardless of regime.",
+            "detail": f"{_regime_block_reason(engine)}, so no new entries were attempted. "
+                      "Existing positions still exit normally regardless of regime.",
         })
     elif diag and diag["status"] == "scan_failed":
         insights.append({
@@ -677,6 +702,8 @@ def build_candidates(engine, limit: int = 20) -> dict:
         "mode": mode,
         "index_symbol": regime["index_symbol"],
         "regime_blocking": regime_blocking,
+        "regime_reason": regime.get("reason", ""),
+        "paused": bool(engine.strategy_cfg.get("pause_new_entries")),
         "room_available": room,
         "max_positions": engine.risk.max_open_positions,
         "total_qualifying": len(ranked),

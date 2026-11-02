@@ -235,8 +235,9 @@ def universe_breadth_pct(histories, ma_days: int) -> float | None:
     return above / judged * 100.0 if judged else None
 
 
-def regime_allows_entries(regime_cfg: dict, index_history, universe_histories) -> bool:
-    """The market regime gate for new entries. With the filter enabled:
+def evaluate_regime(regime_cfg: dict, index_history, universe_histories) -> dict:
+    """The market regime gate for new entries, with what it found. With the
+    filter enabled:
     - the index must be above its `ma_days` average (ma_days 0 skips this),
     - and when `breadth_min_pct` is set, at least that share of the
       universe must be above its own `breadth_ma_days` average. A single
@@ -244,19 +245,38 @@ def regime_allows_entries(regime_cfg: dict, index_history, universe_histories) -
       traded are falling; breadth looks at the coins themselves.
     Missing data fails open, as the index check always has.
     `universe_histories` is a callable returning the histories, so they are
-    only fetched when the breadth rule is on."""
+    only fetched when the breadth rule is on.
+
+    Returns {"ok", "index_ok", "breadth_pct", "breadth_ok", "reason"}:
+    index_ok / breadth_ok are None when that part was not judged (off, or
+    no data), and "reason" says in words which part failed."""
+    result = {"ok": True, "index_ok": None, "breadth_pct": None, "breadth_ok": None, "reason": ""}
     if not regime_cfg.get("enabled", False):
-        return True
+        return result
+    failed = []
     ma_days = int(regime_cfg.get("ma_days", 200) or 0)
     if ma_days and index_history is not None and len(index_history) >= 2:
-        if not is_market_in_uptrend(index_history, ma_days):
-            return False
+        result["index_ok"] = is_market_in_uptrend(index_history, ma_days)
+        if not result["index_ok"]:
+            failed.append(f"{regime_cfg.get('index_symbol', '^NSEI')} is below its {ma_days}-day average")
     min_pct = float(regime_cfg.get("breadth_min_pct", 0) or 0)
     if min_pct > 0:
-        pct = universe_breadth_pct(universe_histories(), int(regime_cfg.get("breadth_ma_days", 50)))
-        if pct is not None and pct < min_pct:
-            return False
-    return True
+        breadth_days = int(regime_cfg.get("breadth_ma_days", 50) or 50)
+        pct = universe_breadth_pct(universe_histories(), breadth_days)
+        result["breadth_pct"] = pct
+        if pct is not None:
+            result["breadth_ok"] = pct >= min_pct
+            if not result["breadth_ok"]:
+                failed.append(f"only {pct:.0f}% of the universe is above its {breadth_days}-day average "
+                              f"(needs {min_pct:g}%)")
+    result["ok"] = not failed
+    result["reason"] = " and ".join(failed)
+    return result
+
+
+def regime_allows_entries(regime_cfg: dict, index_history, universe_histories) -> bool:
+    """True when evaluate_regime lets new entries through."""
+    return evaluate_regime(regime_cfg, index_history, universe_histories)["ok"]
 
 
 def describe_regime_rule(regime_cfg: dict) -> str:
@@ -268,7 +288,7 @@ def describe_regime_rule(regime_cfg: dict) -> str:
     min_pct = float(regime_cfg.get("breadth_min_pct", 0) or 0)
     if min_pct > 0:
         parts.append(f"at least {min_pct:g}% of the universe must be above its "
-                     f"{int(regime_cfg.get('breadth_ma_days', 50))}-day average")
+                     f"{int(regime_cfg.get('breadth_ma_days', 50) or 50)}-day average")
     return " and ".join(parts) if parts else "no rule set"
 
 

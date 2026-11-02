@@ -1,5 +1,5 @@
 """Backtest engine: replays the exact same strategy/exit logic used live
-(evaluate_candidate, check_exit, rank_candidates, is_market_in_uptrend)
+(evaluate_candidate, check_exit, rank_candidates, regime_allows_entries)
 against historical daily bars, day by day, so a strategy or config change
 can be validated against the past in minutes instead of waiting months of
 live trading for a statistically meaningful read.
@@ -36,7 +36,6 @@ from ..strategy.momentum_52w_high import (
     Candidate as Candidate52w,
     check_exit as exit_52w,
     evaluate_candidate as eval_52w,
-    is_market_in_uptrend,
     regime_allows_entries,
     rank_candidates as rank_52w,
 )
