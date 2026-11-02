@@ -23,7 +23,7 @@ from ..portfolio.broker import PaperBroker, InsufficientFundsError
 from ..portfolio.storage import Storage
 from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
-from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, is_market_in_uptrend
+from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, regime_allows_entries, describe_regime_rule
 from ..strategy import (
     consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
@@ -241,13 +241,22 @@ class TradingEngine:
         case we fail open rather than freezing the whole system)."""
         if not self.regime_cfg.get("enabled", False):
             return True
-        index_symbol = self.regime_cfg.get("index_symbol", "^NSEI")
-        try:
-            index_history = self.data.get_index_history(index_symbol)
-        except DataUnavailableError as exc:
-            log.warning("Could not evaluate market regime (%s); proceeding without the filter this scan", exc)
-            return True
-        return is_market_in_uptrend(index_history, self.regime_cfg.get("ma_days", 200))
+        index_history = None
+        if int(self.regime_cfg.get("ma_days", 200) or 0):
+            index_symbol = self.regime_cfg.get("index_symbol", "^NSEI")
+            try:
+                index_history = self.data.get_index_history(index_symbol)
+            except DataUnavailableError as exc:
+                log.warning("Could not evaluate market regime (%s); proceeding without the filter this scan", exc)
+                return True
+
+        def universe_histories():
+            for symbol in self.universe:
+                try:
+                    yield self.data.get_history(symbol, period="1y")
+                except DataUnavailableError:
+                    continue
+        return regime_allows_entries(self.regime_cfg, index_history, universe_histories)
 
     def check_exits(self) -> None:
         if self.is_manual:
@@ -984,6 +993,13 @@ class TradingEngine:
         mode = self.strategy_cfg.get("mode", "52w_high")
         if self.is_manual:
             return  # no automatic entries
+        if self.strategy_cfg.get("pause_new_entries"):
+            # Set in the profile to stop a strategy buying without stopping
+            # it managing what it holds: exits keep running every cycle.
+            log.info("%s: new entries are paused (strategy.pause_new_entries); exits still run",
+                     self.profile_name)
+            self._record_scan_diagnostics(mode, "paused")
+            return
 
         positions = self.broker.positions()
         room = self.risk.room_for_new_positions(len(positions))
@@ -993,10 +1009,8 @@ class TradingEngine:
             return
 
         if not self.market_regime_ok():
-            log.info(
-                "Market regime filter: %s below its %sd average; skipping new entries this scan",
-                self.regime_cfg.get("index_symbol", "^NSEI"), self.regime_cfg.get("ma_days", 200),
-            )
+            log.info("Market regime filter: %s; skipping new entries this scan",
+                     describe_regime_rule(self.regime_cfg))
             self._record_scan_diagnostics(mode, "regime_blocked")
             return
 

@@ -7,7 +7,7 @@ import logging
 import math
 from datetime import datetime, timedelta
 
-from ..strategy.momentum_52w_high import is_market_in_uptrend
+from ..strategy.momentum_52w_high import describe_regime_rule, is_market_in_uptrend
 
 log = logging.getLogger(__name__)
 
@@ -227,14 +227,19 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
     free_slots = max_positions - len(position_rows)
     cash_pct = (cash / total_equity * 100.0) if total_equity > 0 else 0.0
 
-    if diag and diag["status"] == "regime_blocked":
-        index_symbol = engine.regime_cfg.get("index_symbol", "^NSEI")
-        ma_days = engine.regime_cfg.get("ma_days", 200)
+    if diag and diag["status"] == "paused":
+        insights.append({
+            "level": "info",
+            "title": "New entries are paused for this strategy",
+            "detail": "strategy.pause_new_entries is set in this profile, so it buys nothing new. "
+                      "Open positions still exit on their stops, targets and exit rules.",
+        })
+    elif diag and diag["status"] == "regime_blocked":
         insights.append({
             "level": "info",
             "title": "Market regime filter blocked the last scan",
-            "detail": f"{index_symbol} is trading below its {ma_days}-day average, so no new entries "
-                      "were attempted. Existing positions still exit normally regardless of regime.",
+            "detail": f"The rule is: {describe_regime_rule(engine.regime_cfg)}. It was not met, so no new "
+                      "entries were attempted. Existing positions still exit normally regardless of regime.",
         })
     elif diag and diag["status"] == "scan_failed":
         insights.append({

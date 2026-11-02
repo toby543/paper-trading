@@ -157,6 +157,13 @@ def evaluate_candidate(symbol: str, quote: Quote, history: pd.DataFrame, daily_t
     if quote.ltp <= ma20 or ma20 <= ma50:
         reasons["not_in_uptrend"] = reasons.get("not_in_uptrend", 0) + 1
         return None
+    # A price only just above the 20-day average is one small dip from the
+    # trend-break exit (close below that same average), so the trade can be
+    # bought and sold within hours. Optionally require some room first.
+    min_gap = float(config.get("min_pct_above_fast_ma", 0) or 0)
+    if min_gap > 0 and quote.ltp < ma20 * (1 + min_gap / 100):
+        reasons["too_close_to_fast_ma"] = reasons.get("too_close_to_fast_ma", 0) + 1
+        return None
 
     # RSI momentum check
     min_rsi = config.get("min_rsi", 50.0)

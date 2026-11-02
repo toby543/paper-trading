@@ -37,6 +37,7 @@ from ..strategy.momentum_52w_high import (
     check_exit as exit_52w,
     evaluate_candidate as eval_52w,
     is_market_in_uptrend,
+    regime_allows_entries,
     rank_candidates as rank_52w,
 )
 from ..strategy import (
@@ -461,12 +462,11 @@ class Backtester:
         cagr = cagr_pct(start_price, end_price, elapsed_days) if elapsed_days > 0 else None
         return total_return_pct, cagr
 
-    def _market_regime_ok(self, index_upto: pd.DataFrame | None) -> bool:
-        if not self.regime_cfg.get("enabled", False):
-            return True
-        if index_upto is None or len(index_upto) < 2:
-            return True  # fail open, matching live behavior when index data is unavailable
-        return is_market_in_uptrend(index_upto, self.regime_cfg.get("ma_days", 200))
+    def _market_regime_ok(self, index_upto: pd.DataFrame | None, day: pd.Timestamp | None = None) -> bool:
+        # Same rule as live (regime_allows_entries); missing index data fails open.
+        def universe_histories():
+            return [h.loc[:day] for h in self._history.values()] if day is not None else []
+        return regime_allows_entries(self.regime_cfg, index_upto, universe_histories)
 
     def _crypto_fx_rate(self) -> float:
         """Multiplier from a crypto pair's USD quote into this book's own
@@ -592,7 +592,7 @@ class Backtester:
             return
 
         index_upto = self._index_history.loc[:day] if self._index_history is not None else None
-        if not self._market_regime_ok(index_upto):
+        if not self._market_regime_ok(index_upto, day):
             self._days_regime_blocked += 1
             return
 

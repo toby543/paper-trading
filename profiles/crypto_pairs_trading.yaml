@@ -14,6 +14,10 @@ regime:
   enabled: false
   index_symbol: "BTC-USD"
 strategy:
+  # Paused Nov 2026: lost money live and in back-tests over the last year
+  # with every variant tried. Open positions still exit normally; set to
+  # false to resume buying.
+  pause_new_entries: true
   min_avg_daily_turnover_inr: 480000000
   max_new_positions_per_scan: 2
   # Time stop: a ratio that hasn't reverted within 10 days has likely

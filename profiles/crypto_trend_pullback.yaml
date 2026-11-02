@@ -14,6 +14,12 @@ regime:
   enabled: true
   index_symbol: "BTC-USD"
   ma_days: 100
+  # Bitcoin alone stayed above its 100-day average through Oct 2026 while
+  # most altcoins fell 9-25%, so it never blocked a buy. Also require most
+  # of the coins traded to be in their own uptrend (back-tested Nov 2025 -
+  # Nov 2026: better or equal on every trend-following profile).
+  breadth_min_pct: 60
+  breadth_ma_days: 50
 strategy:
   # 20/50 for crypto, matching the other crypto strategies' convention
   # (not the equity default of 50/200).

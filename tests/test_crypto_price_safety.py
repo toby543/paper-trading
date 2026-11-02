@@ -237,9 +237,11 @@ def test_crypto_trend_profiles_use_the_bitcoin_filter_and_the_tested_settings():
         return yaml.safe_load(open(f"profiles/{name}.yaml", encoding="utf-8"))
 
     for name in ("crypto_trend_pullback", "crypto_momentum", "crypto_breakout", "crypto_breakout_retest"):
-        assert load(name)["regime"] == {"enabled": True, "index_symbol": "BTC-USD", "ma_days": 100}, name
+        assert load(name)["regime"] == {"enabled": True, "index_symbol": "BTC-USD", "ma_days": 100,
+                                        "breadth_min_pct": 60, "breadth_ma_days": 50}, name
     for name in ("crypto_mean_reversion", "crypto_pairs_trading"):   # buy-the-dip / market-neutral
         assert load(name)["regime"]["enabled"] is False, name
+        assert load(name)["strategy"]["pause_new_entries"] is True, name
     assert load("crypto_trend_pullback")["risk"]["take_profit_pct"] == 20.0
     assert load("crypto_breakout_retest")["strategy"]["crypto_breakout_retest"]["retest_exit_buffer_pct"] == 5.0
 
@@ -253,6 +255,7 @@ def test_the_live_engine_blocks_crypto_buys_while_bitcoin_is_below_its_100_day_a
     engine = TradingEngine(cfg, profile_name="crypto_momentum")
     falling = pd.DataFrame({"Close": [200.0 - i for i in range(150)]})      # ends well below its 100-day mean
     rising = pd.DataFrame({"Close": [50.0 + i for i in range(150)]})
+    engine.data.get_history = lambda symbol, *a, **k: rising                  # breadth passes
     engine.data.get_index_history = lambda symbol, *a, **k: falling
     assert engine.market_regime_ok() is False
     engine.data.get_index_history = lambda symbol, *a, **k: rising

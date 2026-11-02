@@ -218,6 +218,60 @@ def is_market_in_uptrend(index_history: pd.DataFrame, ma_days: int) -> bool:
     return last_close > ma
 
 
+def universe_breadth_pct(histories, ma_days: int) -> float | None:
+    """Share (0-100) of the given price histories whose last close is above
+    their own `ma_days` average. Histories too short for the average are
+    left out; None when none of them can be judged."""
+    above = judged = 0
+    for history in histories:
+        if history is None:
+            continue
+        ma = _moving_average(history, ma_days)
+        if ma is None:
+            continue
+        judged += 1
+        if float(history["Close"].iloc[-1]) > ma:
+            above += 1
+    return above / judged * 100.0 if judged else None
+
+
+def regime_allows_entries(regime_cfg: dict, index_history, universe_histories) -> bool:
+    """The market regime gate for new entries. With the filter enabled:
+    - the index must be above its `ma_days` average (ma_days 0 skips this),
+    - and when `breadth_min_pct` is set, at least that share of the
+      universe must be above its own `breadth_ma_days` average. A single
+      index (Bitcoin) can sit in an uptrend while most of the coins being
+      traded are falling; breadth looks at the coins themselves.
+    Missing data fails open, as the index check always has.
+    `universe_histories` is a callable returning the histories, so they are
+    only fetched when the breadth rule is on."""
+    if not regime_cfg.get("enabled", False):
+        return True
+    ma_days = int(regime_cfg.get("ma_days", 200) or 0)
+    if ma_days and index_history is not None and len(index_history) >= 2:
+        if not is_market_in_uptrend(index_history, ma_days):
+            return False
+    min_pct = float(regime_cfg.get("breadth_min_pct", 0) or 0)
+    if min_pct > 0:
+        pct = universe_breadth_pct(universe_histories(), int(regime_cfg.get("breadth_ma_days", 50)))
+        if pct is not None and pct < min_pct:
+            return False
+    return True
+
+
+def describe_regime_rule(regime_cfg: dict) -> str:
+    """The regime rule in words, for logs and the dashboard."""
+    parts = []
+    ma_days = int(regime_cfg.get("ma_days", 200) or 0)
+    if ma_days:
+        parts.append(f"{regime_cfg.get('index_symbol', '^NSEI')} must be above its {ma_days}-day average")
+    min_pct = float(regime_cfg.get("breadth_min_pct", 0) or 0)
+    if min_pct > 0:
+        parts.append(f"at least {min_pct:g}% of the universe must be above its "
+                     f"{int(regime_cfg.get('breadth_ma_days', 50))}-day average")
+    return " and ".join(parts) if parts else "no rule set"
+
+
 def check_exit(position: Position, quote: Quote, history: pd.DataFrame, cfg: dict) -> tuple[bool, str]:
     """Return (should_exit, reason)."""
     # Optional hard take-profit. Off by default (0 or absent) -- momentum
