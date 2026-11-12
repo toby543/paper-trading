@@ -446,9 +446,11 @@ engine:
   holidays_file: data/nse_holidays.csv
 
 data_source:
-  # "nse" tries the official NSE website API first and falls back to
-  # "yfinance" automatically if it is unreachable or blocked. This applies
-  # to equity profiles only.
+  # Where equity quotes come from. "yfinance" (the default) goes straight to
+  # Yahoo Finance. "nse" tries the NSE website's quote API first, falling back
+  # to Yahoo; NSE's bot protection answers that API with 403 to scripts (seen
+  # Nov 2026 from a home connection), so "nse" usually just adds a failed
+  # attempt and retries before every fallback. Equity profiles only.
   # CRYPTO profiles (crypto_momentum, crypto_breakout) never go through NSE
   # or this preferred/fallback pair -- MarketDataClient detects crypto
   # symbols (universe entries containing "-", e.g. "BTC-USD") and routes
@@ -457,7 +459,7 @@ data_source:
   # the pair, then Yahoo Finance's crypto tickers as the last resort. All
   # of these are public, unauthenticated market-data endpoints -- no API
   # key required. See src/papertrader/data/crypto_client.py.
-  preferred: nse
+  preferred: yfinance
   fallback: yfinance
   request_timeout_seconds: 15
   max_retries: 5

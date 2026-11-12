@@ -109,7 +109,7 @@ class TradingEngine:
         )
         manual_profile = cfg.get_profile_strategy_mode(self.profile_name) == MANUAL_MODE
         data_settings = dict(
-            preferred=cfg.get("data_source", "preferred", default="nse"),
+            preferred=cfg.get("data_source", "preferred", default="yfinance"),
             fallback=cfg.get("data_source", "fallback", default="yfinance"),
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
             max_retries=cfg.get("data_source", "max_retries", default=2),
