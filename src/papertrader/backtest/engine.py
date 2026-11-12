@@ -289,7 +289,7 @@ class Backtester:
 
         fd, self._tmp_db = tempfile.mkstemp(suffix=".db", prefix="papertrader-backtest-")
         os.close(fd)
-        self.storage = Storage(self._tmp_db, self.starting_capital, wal=False)
+        self.storage = Storage(self._tmp_db, self.starting_capital)
         # Profile-scoped so a crypto backtest is costed with exchange
         # percentage fees, not NSE flat brokerage -- matching live.
         backtest_exec_cfg = cfg.get_profile_execution_config(self.profile_name)

@@ -1,4 +1,4 @@
-"""One shared market-data client, short-lived quote reuse, and WAL ledgers."""
+"""One shared market-data client, short-lived quote reuse, and ledger journal mode."""
 import sqlite3
 import sys
 import threading
@@ -136,13 +136,15 @@ def test_automated_profiles_share_one_client_and_a_manual_book_keeps_its_own(tmp
     assert alone.data is not swing.data
 
 
-def test_ledgers_use_write_ahead_logging_and_throwaway_ones_do_not(tmp_path):
-    live = Storage(str(tmp_path / "live.db"), 1000.0)
-    live.record_equity(1000.0, 0.0)
-    assert sqlite3.connect(str(tmp_path / "live.db")).execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-    throwaway = Storage(str(tmp_path / "tmp.db"), 1000.0, wal=False)
-    assert sqlite3.connect(str(tmp_path / "tmp.db")).execute("PRAGMA journal_mode").fetchone()[0] == "delete"
-    assert live.get_cash() == 1000.0 and throwaway.get_cash() == 1000.0
+def test_a_ledger_left_in_wal_mode_is_switched_back(tmp_path):
+    path = str(tmp_path / "ledger.db")
+    Storage(path, 1000.0).record_equity(1000.0, 0.0)
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    conn.close()
+    ledger = Storage(path, 1000.0)
+    assert sqlite3.connect(path).execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    assert ledger.get_cash() == 1000.0 and len(ledger.get_equity_curve()) == 1
 
 
 def test_a_reader_is_not_blocked_by_an_open_write_transaction(tmp_path):

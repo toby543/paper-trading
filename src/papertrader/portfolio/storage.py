@@ -1,6 +1,7 @@
 """SQLite-backed persistence for cash, positions, trades and equity curve."""
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -8,6 +9,8 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from .models import Position, Trade
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS account (
@@ -115,14 +118,9 @@ CREATE TABLE IF NOT EXISTS pending_orders (
 
 
 class Storage:
-    def __init__(self, db_path: str, starting_capital: float, wal: bool = True):
+    def __init__(self, db_path: str, starting_capital: float):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
-        # Write-ahead logging: a dashboard read no longer waits for an
-        # engine write (or the reverse), and each commit costs one append
-        # instead of a journal rewrite -- noticeable on a Pi's SD card.
-        # Off for throwaway ledgers (backtests) that are deleted after use.
-        self._wal = wal
         # Per-thread, because one Storage is shared between its engine's
         # background thread and the Flask request threads reading it.
         self._tx = threading.local()
@@ -133,10 +131,6 @@ class Storage:
         # lock instead of failing the whole scan with "database is locked".
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
-        if self._wal:
-            # Per-connection; NORMAL is the pairing SQLite recommends for WAL
-            # (a power cut can lose the last commit, never corrupt the file).
-            conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     @contextmanager
@@ -220,14 +214,18 @@ class Storage:
             return self._backfill_entry_charges(conn)
 
     def _init_db(self, starting_capital: float) -> None:
-        if self._wal:
-            # The mode is stored in the database file, so setting it once
-            # here covers every later connection (and an existing ledger).
-            conn = self._open()
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            finally:
-                conn.close()
+        # Ledgers briefly ran in WAL mode, which is stored in the file. With a
+        # connection opened and closed for every query, WAL made each one about
+        # three times slower (on a Pi's SD card, seconds per dashboard poll),
+        # so put any such ledger back to the default rollback journal.
+        conn = self._open()
+        try:
+            if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+                conn.execute("PRAGMA journal_mode=DELETE")
+        except sqlite3.OperationalError as exc:   # another process has it open; try next start
+            log.warning("Could not switch %s back from WAL mode: %s", self.db_path, exc)
+        finally:
+            conn.close()
         with self._conn() as conn:
             conn.executescript(SCHEMA)
             row = conn.execute("SELECT cash FROM account WHERE id = 1").fetchone()
