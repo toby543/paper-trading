@@ -1641,3 +1641,11 @@ def test_a_failed_edit_rolls_back_the_new_gtt(trader_env, monkeypatch):
     with pytest.raises(RuntimeError):
         trader.create_gtt("AAA", "BUY", 20, trigger_price=85, replace_id=old)
     assert [g["id"] for g in broker.storage.get_active_gtts()] == [old]     # never two active
+
+
+def test_api_tags_a_position_long_or_short_term(client):
+    client.post("/api/manual/order", json={"profile": "manual_swing", "symbol": "AAA", "side": "BUY", "quantity": 1})
+    out = client.post("/api/manual/horizon", json={"profile": "manual_swing", "symbol": "AAA", "horizon": "long"}).get_json()
+    assert out["ok"] and out["horizon"] == "long"
+    bad = client.post("/api/manual/horizon", json={"profile": "manual_swing", "symbol": "AAA", "horizon": "x"}).get_json()
+    assert not bad["ok"] and "Category" in bad["error"]

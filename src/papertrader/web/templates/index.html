@@ -392,6 +392,7 @@
   .cat-tag { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 7px;
              border-radius: 6px; white-space: nowrap; background: var(--accent-wash); color: var(--accent); }
   .cat-tag.short { background: var(--border); color: var(--ink-dim); }
+  .cat-select { width: auto; min-width: 104px; padding: 3px 6px; font-size: 12px; text-align: left; }
   .cat-tax { font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; margin-left: 4px; }
   .cat-tax.ltcg { color: var(--good); font-weight: 600; }
 
@@ -1405,8 +1406,17 @@ function manualInvestedCard(s) {
 // term from the holding period: Indian equity gains are long term (LTCG) once
 // held more than 12 months. Crypto has no tax term.
 const HORIZON_LABEL = { long: "Long term", short: "Short term" };
-function categoryHtml(r, sold) {
-  const tag = r.horizon ? `<span class="cat-tag ${r.horizon}">${HORIZON_LABEL[r.horizon] || escapeText(r.horizon)}</span>` : "";
+function categoryHtml(r, sold, editable) {
+  let tag;
+  if (editable) {
+    const opt = (v, label) => `<option value="${v}"${(r.horizon || "") === v ? " selected" : ""}>${label}</option>`;
+    tag = `<select class="edit-input cat-select" data-horizon-symbol="${escapeText(r.symbol)}" title="Your category for this position">` +
+      opt("", "Not set") + opt("short", "Short term") + opt("long", "Long term") + `</select>`;
+  } else {
+    // No tag of the user's: name it from the holding period instead.
+    const hz = r.horizon || (r.tax_term === "long" ? "long" : r.tax_term === "short" ? "short" : null);
+    tag = hz ? `<span class="cat-tag ${hz}">${HORIZON_LABEL[hz] || escapeText(hz)}</span>` : "";
+  }
   let tax = "";
   if (r.tax_term) {
     const days = r.held_days === null || r.held_days === undefined ? "" : `${r.held_days}d`;
@@ -1423,6 +1433,7 @@ function categoryHtml(r, sold) {
 function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
+  if (tbody.contains(document.activeElement) && document.activeElement.matches(".cat-select")) return;
   if (!s.positions.length) {
     tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 14 : 11}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
     return;
@@ -1444,7 +1455,7 @@ function renderPositions(s) {
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
       <td class="mono ${p.pct_to_target !== null && p.pct_to_target !== undefined && p.pct_to_target <= 0 ? "up" : ""}" data-label="To Target" title="${p.exit_target ? "Target " + CCY + fmtPrice(p.exit_target) : "No target set"}">${p.pct_to_target === null || p.pct_to_target === undefined ? "—" : (p.pct_to_target <= 0 ? "Reached" : "+" + p.pct_to_target.toFixed(1) + "%")}</td>
       <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
-      <td data-label="Category">${categoryHtml(p, false)}</td>
+      <td data-label="Category">${categoryHtml(p, false, IS_MANUAL)}</td>
       ${IS_MANUAL ? `<td class="mono down" data-label="Stop">${p.stop_loss ? fmt(p.stop_loss) : "—"}</td>
       <td class="mono up" data-label="Target">${p.target_price ? fmt(p.target_price) : "—"}</td>
       <td><button type="button" class="manual-sell-btn" data-symbol="${p.symbol}" data-qty="${p.quantity}">Sell</button></td>` : ""}
@@ -1950,6 +1961,21 @@ function initManualTicket() {
   manualEl("manualOrders").addEventListener("click", (ev) => {
     const btn = ev.target.closest("[data-cancel]");
     if (btn) manualCancelOrder(btn.dataset.cancel);
+  });
+  document.getElementById("positionsBody").addEventListener("change", async (ev) => {
+    const sel = ev.target.closest("[data-horizon-symbol]");
+    if (!sel) return;
+    sel.disabled = true;
+    try {
+      const out = await manualPost("/api/manual/horizon", { symbol: sel.dataset.horizonSymbol, horizon: sel.value });
+      if (!out.ok) window.alert(out.error || "Could not save the category.");
+    } catch (e) {
+      window.alert("Could not save the category: " + e.message);
+    } finally {
+      sel.disabled = false;
+      sel.blur();
+      refresh();
+    }
   });
   document.getElementById("positionsBody").addEventListener("click", (ev) => {
     const btn = ev.target.closest(".manual-sell-btn");

@@ -463,6 +463,11 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             p.get("symbol"), p.get("stop_loss"), p.get("target_price"),
             **({"horizon": p.get("horizon")} if "horizon" in p else {})))
 
+    @app.post("/api/manual/horizon")
+    @api_login_required
+    def api_manual_horizon():
+        return _manual_json_action(lambda t, p: t.set_horizon(p.get("symbol"), p.get("horizon")))
+
     @app.post("/api/manual/cancel")
     @api_login_required
     def api_manual_cancel():

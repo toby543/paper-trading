@@ -530,6 +530,16 @@ class ManualTrader:
             current = self.storage.get_horizons().get(symbol)
         return {"symbol": symbol, "stop_loss": sl, "target_price": target, "horizon": current}
 
+    def set_horizon(self, symbol: str, horizon) -> dict:
+        """Tag a position held as long term or short term (blank clears it)."""
+        symbol = (symbol or "").strip().upper()
+        hz = _horizon(horizon)
+        with self.lock:
+            if symbol not in self.broker.positions():
+                raise ManualOrderError(f"You don't hold {symbol}.")
+            self.storage.set_horizon(symbol, hz)
+        return {"symbol": symbol, "horizon": hz}
+
     def cancel_order(self, order_id) -> dict:
         try:
             oid = int(order_id)

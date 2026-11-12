@@ -160,3 +160,14 @@ def test_positions_show_how_far_the_price_is_from_the_target(tmp_path, monkeypat
     target = auto.broker.positions()["AAA"].avg_price * 1.2     # avg includes slippage
     assert row["exit_target"] == pytest.approx(target, abs=0.01)
     assert row["pct_to_target"] == pytest.approx((target - 110) / 110 * 100, abs=0.01)
+
+
+def test_a_held_position_can_be_tagged_directly(env):
+    trader, broker, _, _ = env
+    trader.place_order("AAA", "BUY", 1)
+    assert trader.set_horizon("AAA", "long") == {"symbol": "AAA", "horizon": "long"}
+    assert broker.storage.get_horizons() == {"AAA": "long"}
+    trader.set_horizon("AAA", "")
+    assert broker.storage.get_horizons() == {}
+    with pytest.raises(ManualOrderError, match="don't hold"):
+        trader.set_horizon("BBB", "short")
