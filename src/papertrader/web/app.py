@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from datetime import timedelta
 from functools import wraps
 
@@ -80,7 +82,12 @@ def _safe_next_path(value: str | None) -> str | None:
     return value
 
 
+# How long one Strategy Comparison build is served before rebuilding.
+COMPARISON_CACHE_SECONDS = 15
+
+
 def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> Flask:
+    comparison_cache = {"lock": threading.Lock(), "at": 0.0, "data": None}
     app = Flask(
         __name__,
         template_folder=os.path.join(_HERE, "templates"),
@@ -367,7 +374,14 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
         """Scoreboard across every profile at once -- the one view that
         can't be had by switching the profile dropdown. Ledger reads
         only, so it's cheap enough to sit on the normal refresh poll."""
-        return jsonify(build_strategy_comparison(engines, cfg))
+        # The page asks for this two or three times per refresh, and its
+        # numbers only move when an engine marks to market (every few
+        # minutes) or trades, so one build serves every request for a while.
+        with comparison_cache["lock"]:
+            if time.time() - comparison_cache["at"] >= COMPARISON_CACHE_SECONDS:
+                comparison_cache["data"] = build_strategy_comparison(engines, cfg)
+                comparison_cache["at"] = time.time()
+            return jsonify(comparison_cache["data"])
 
     @app.get("/api/candidates")
     @api_login_required

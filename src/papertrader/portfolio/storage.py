@@ -1,6 +1,7 @@
 """SQLite-backed persistence for cash, positions, trades and equity curve."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -509,20 +510,60 @@ class Storage:
                  trade.timestamp, trade.realized_pnl),
             )
 
+    @staticmethod
+    def _rows(conn: sqlite3.Connection, columns: tuple[str, ...], query: str, params=()) -> list[dict]:
+        """The rows of `query` as dicts, read in a single SQLite step.
+
+        sqlite3 releases the GIL around every row it steps through. While an
+        engine thread is busy parsing price data, winning it back costs
+        milliseconds each time, so a dashboard read of a few hundred rows
+        took seconds on the Pi. Packing the rows into one JSON value makes it
+        one step. JSON keeps 15 significant digits, plenty for display."""
+        fields = ", ".join(f"'{c}', {c}" for c in columns)
+        try:
+            row = conn.execute(f"SELECT json_group_array(json_object({fields})) FROM ({query})", params).fetchone()
+        except sqlite3.OperationalError as exc:
+            if "json" not in str(exc).lower():
+                raise
+            return [dict(r) for r in conn.execute(query, params).fetchall()]   # SQLite without JSON
+        return json.loads(row[0])
+
+    _TRADE_COLUMNS = ("id", "symbol", "side", "quantity", "price", "charges", "reason", "timestamp", "realized_pnl")
+
     def get_trades(self, limit: int | None = None) -> list[Trade]:
         query = "SELECT * FROM trades ORDER BY id DESC"
         if limit:
             query += f" LIMIT {int(limit)}"
         with self._conn() as conn:
-            rows = conn.execute(query).fetchall()
+            rows = self._rows(conn, self._TRADE_COLUMNS, query)
+        rows.sort(key=lambda r: r["id"], reverse=True)
         return [
             Trade(
                 id=r["id"], symbol=r["symbol"], side=r["side"], quantity=r["quantity"],
                 price=r["price"], charges=r["charges"], reason=r["reason"], timestamp=r["timestamp"],
-                realized_pnl=r["realized_pnl"] if "realized_pnl" in r.keys() else None,
+                realized_pnl=r.get("realized_pnl"),
             )
             for r in rows
         ]
+
+    def get_summary_row(self) -> dict:
+        """Everything the strategy comparison shows for this ledger, from one
+        query instead of loading every trade and position."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT a.starting_capital, a.cash, a.last_scan_at,
+                          (SELECT total_equity FROM equity_curve ORDER BY timestamp DESC LIMIT 1) AS last_equity,
+                          (SELECT timestamp FROM equity_curve ORDER BY timestamp DESC LIMIT 1) AS last_equity_at,
+                          (SELECT COUNT(*) FROM trades) AS total_trades,
+                          (SELECT COUNT(*) FROM trades WHERE side = 'SELL' AND realized_pnl IS NOT NULL) AS closed_trades,
+                          (SELECT COUNT(*) FROM trades WHERE side = 'SELL' AND realized_pnl > 0) AS winning_trades,
+                          (SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE side = 'SELL') AS realized_pnl,
+                          (SELECT COUNT(*) FROM positions) AS open_positions,
+                          (SELECT COALESCE(SUM(quantity * avg_price), 0) FROM positions) AS cost_basis,
+                          (SELECT COALESCE(SUM(entry_charges), 0) FROM positions) AS entry_charges
+                   FROM account a WHERE a.id = 1"""
+            ).fetchone()
+        return dict(row)
 
     def get_recently_sold_symbols(self, cutoff_timestamp: str) -> set[str]:
         """Symbols with a SELL trade at or after `cutoff_timestamp` --
@@ -551,8 +592,19 @@ class Storage:
                 (datetime.now().isoformat(timespec="seconds"), cash, positions_value, cash + positions_value),
             )
 
-    def get_equity_curve(self, limit: int = 200) -> list[sqlite3.Row]:
+    def get_equity_curve(self, limit: int = 200) -> list[dict]:
+        """Newest first."""
         with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM equity_curve ORDER BY timestamp DESC LIMIT ?", (limit,)
-            ).fetchall()
+            rows = self._rows(conn, ("timestamp", "cash", "positions_value", "total_equity"),
+                              "SELECT * FROM equity_curve ORDER BY timestamp DESC LIMIT ?", (limit,))
+        rows.sort(key=lambda r: r["timestamp"], reverse=True)
+        return rows
+
+    def get_equity_endpoints(self) -> tuple[dict, dict] | None:
+        """The first and latest equity-curve points, or None with fewer than two."""
+        with self._conn() as conn:
+            first = conn.execute("SELECT * FROM equity_curve ORDER BY timestamp ASC LIMIT 1").fetchone()
+            last = conn.execute("SELECT * FROM equity_curve ORDER BY timestamp DESC LIMIT 1").fetchone()
+        if first is None or last is None or first["timestamp"] == last["timestamp"]:
+            return None
+        return dict(first), dict(last)

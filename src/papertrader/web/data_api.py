@@ -468,22 +468,22 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
             # comment / Storage.get_starting_capital's docstring. This is
             # the scoreboard every profile's total_return_pct feeds, so a
             # drifted baseline here is the most visible place it would show up.
-            starting_capital = engine.storage.get_starting_capital()
-            curve = engine.storage.get_equity_curve(limit=1)
-            cash = engine.storage.get_cash()
-            positions = engine.storage.get_positions()
+            # One query per ledger (see Storage.get_summary_row): loading every
+            # trade and position here made each poll take seconds on the Pi.
+            ledger = engine.storage.get_summary_row()
+            starting_capital = float(ledger["starting_capital"])
+            cash = float(ledger["cash"])
+            cost_basis = float(ledger["cost_basis"])
             # Fall back to cash + cost basis when no equity point exists yet
             # (a profile that hasn't completed its first mark-to-market).
-            if curve:
-                total_equity = float(curve[0]["total_equity"])
-                as_of = str(curve[0]["timestamp"])
+            if ledger["last_equity"] is not None:
+                total_equity = float(ledger["last_equity"])
+                as_of = str(ledger["last_equity_at"])
             else:
-                total_equity = cash + sum(p.cost_basis for p in positions.values())
+                total_equity = cash + cost_basis
                 as_of = None
 
-            trades = engine.storage.get_trades(limit=100000)
-            closed = [t for t in trades if t.side == "SELL" and t.realized_pnl is not None]
-            wins = [t for t in closed if t.realized_pnl > 0]
+            closed = ledger["closed_trades"]
             total_return_pct = ((total_equity - starting_capital) / starting_capital * 100.0) if starting_capital else 0.0
             # positions_value at the same mark total_equity was built from
             # (the last live mark-to-market, or the cost-basis fallback when
@@ -493,11 +493,9 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
             # are converted from USD at the data layer before they ever
             # reach storage, same as every other figure on this row.
             positions_value = total_equity - cash
-            cost_basis = sum(p.cost_basis for p in positions.values())
             # Net of entry charges, matching Position.unrealized_pnl, so
             # this column agrees with the per-position P&L on the same page.
-            entry_charges = sum(p.entry_charges for p in positions.values())
-            unrealized_pnl = positions_value - cost_basis - entry_charges
+            unrealized_pnl = positions_value - cost_basis - float(ledger["entry_charges"])
 
             rows.append({
                 "profile": profile_name,
@@ -507,14 +505,14 @@ def build_strategy_comparison(engines: dict, cfg) -> dict:
                 "starting_capital": round(starting_capital, 2),
                 "total_equity": round(total_equity, 2),
                 "total_return_pct": round(total_return_pct, 2),
-                "realized_pnl": round(engine.storage.get_total_realized_pnl(), 2),
+                "realized_pnl": round(float(ledger["realized_pnl"]), 2),
                 "unrealized_pnl": round(unrealized_pnl, 2),
                 "cash": round(cash, 2),
-                "open_positions": len(positions),
-                "total_trades": len(trades),
-                "closed_trades": len(closed),
-                "win_rate_pct": round(len(wins) / len(closed) * 100.0, 1) if closed else None,
-                "last_scan_at": engine.storage.get_last_scan_at(),
+                "open_positions": ledger["open_positions"],
+                "total_trades": ledger["total_trades"],
+                "closed_trades": closed,
+                "win_rate_pct": round(ledger["winning_trades"] / closed * 100.0, 1) if closed else None,
+                "last_scan_at": ledger["last_scan_at"],
                 "equity_as_of": as_of,
             })
         except Exception:  # noqa: BLE001 - one unreadable ledger must not blank the whole board
@@ -762,11 +760,11 @@ def build_performance_comparison(engine) -> dict:
     actually beating the market" rather than just showing the raw equity
     curve on its own. Never fabricates a benchmark return when the index
     history can't be fetched; the strategy's own return is still shown."""
-    rows = engine.storage.get_equity_curve(limit=100000)
-    if len(rows) < 2:
+    endpoints = engine.storage.get_equity_endpoints()
+    if endpoints is None:
         return {"available": False}
 
-    first, last = rows[-1], rows[0]  # storage returns newest-first
+    first, last = endpoints
     starting_equity = float(first["total_equity"])
     current_equity = float(last["total_equity"])
     if starting_equity <= 0:
