@@ -822,7 +822,7 @@
           <table id="positionsTable">
             <thead>
               <tr>
-                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th><th>Category</th>{% if is_manual_profile %}<th>Stop</th><th>Target</th><th></th>{% endif %}
+                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>To Target</th><th>Entered</th><th>Category</th>{% if is_manual_profile %}<th>Stop</th><th>Target</th><th></th>{% endif %}
               </tr>
             </thead>
             <tbody id="positionsBody"></tbody>
@@ -1424,7 +1424,7 @@ function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 13 : 10}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 14 : 11}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {
@@ -1442,6 +1442,7 @@ function renderPositions(s) {
       <td class="mono" data-label="Mkt Value">${fmt(p.market_value)}</td>
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
+      <td class="mono ${p.pct_to_target !== null && p.pct_to_target !== undefined && p.pct_to_target <= 0 ? "up" : ""}" data-label="To Target" title="${p.exit_target ? "Target " + CCY + fmtPrice(p.exit_target) : "No target set"}">${p.pct_to_target === null || p.pct_to_target === undefined ? "—" : (p.pct_to_target <= 0 ? "Reached" : "+" + p.pct_to_target.toFixed(1) + "%")}</td>
       <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
       <td data-label="Category">${categoryHtml(p, false)}</td>
       ${IS_MANUAL ? `<td class="mono down" data-label="Stop">${p.stop_loss ? fmt(p.stop_loss) : "—"}</td>

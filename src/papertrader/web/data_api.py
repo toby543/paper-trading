@@ -350,6 +350,22 @@ def holding_period(entry_date: str | None, until: str | None = None, crypto: boo
     }
 
 
+def _target_for(engine):
+    """(avg_price, manual_target) -> the price a position sells at for
+    profit, or None. Manual profiles use each position's own target;
+    automated ones the take-profit % their strategy actually reads."""
+    if getattr(engine, "is_manual", False):
+        return lambda avg, own: own or None
+    mode = (getattr(engine, "strategy_cfg", None) or {}).get("mode", "52w_high")
+    if mode in ("crypto_mean_reversion", "crypto_pairs_trading"):
+        return lambda avg, own: None          # exit on reversion, not a fixed target
+    if mode == "crypto_institutional_swing":
+        pct = float((engine.strategy_cfg or {}).get("profit_target_pct", 22.0) or 0)
+    else:
+        pct = float((engine.risk_cfg or {}).get("take_profit_pct", 0) or 0)
+    return lambda avg, own: avg * (1 + pct / 100.0) if pct > 0 else None
+
+
 def build_summary(engine) -> dict:
     positions = engine.broker.positions()
     cash = engine.broker.cash()
@@ -365,6 +381,7 @@ def build_summary(engine) -> dict:
     levels = engine.storage.get_levels() if getattr(engine, "is_manual", False) else {}
     horizons = engine.storage.get_horizons()
     crypto = bool(getattr(engine, "trades_24_7", False))
+    target_for = _target_for(engine)
     for symbol, pos in positions.items():
         quote = _safe_quote(engine, symbol)
         # Falling back to avg_price prices the row at cost, which renders
@@ -379,6 +396,7 @@ def build_summary(engine) -> dict:
         pct_from_high = _pct_from_52w_high(week52_high, ltp)
         mv = pos.market_value(ltp)
         positions_value += mv
+        target = target_for(pos.avg_price, levels.get(symbol, {}).get("target_price"))
         position_rows.append({
             "symbol": symbol,
             "price_stale": price_stale,
@@ -395,6 +413,10 @@ def build_summary(engine) -> dict:
             "stop_loss": levels.get(symbol, {}).get("stop_loss"),
             "target_price": levels.get(symbol, {}).get("target_price"),
             "horizon": horizons.get(symbol),
+            # How much further the price must rise to hit the target, as a %
+            # of the current price (negative once it is past the target).
+            "exit_target": _round_price(target) if target else None,
+            "pct_to_target": round((target - ltp) / ltp * 100.0, 2) if target and ltp > 0 and not price_stale else None,
             **holding_period(pos.entry_date, crypto=crypto),
         })
 

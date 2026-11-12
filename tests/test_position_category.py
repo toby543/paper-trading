@@ -133,3 +133,30 @@ def test_the_api_takes_a_category_and_the_summary_shows_it(tmp_path, monkeypatch
     row = build_summary(engine)["positions"][0]
     assert row["horizon"] == "long" and row["tax_term"] == "short" and row["held_days"] == 0
     assert row["long_term_from"] > datetime.now().date().isoformat()
+
+
+def test_positions_show_how_far_the_price_is_from_the_target(tmp_path, monkeypatch):
+    from papertrader.config import Config
+    from papertrader.engine.scheduler import TradingEngine
+    from papertrader.web.data_api import build_summary
+
+    cfg = Config.load()
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "m.db"))
+    manual = TradingEngine(cfg, profile_name="manual_swing")
+    manual.data = _FakeData(ltp=100.0)
+    manual.broker.buy("AAA", 1, 100.0, "manual")
+    manual.broker.buy("BBB", 1, 100.0, "manual")
+    manual.storage.set_levels("AAA", None, 125.0)
+    rows = {r["symbol"]: r for r in build_summary(manual)["positions"]}
+    assert (rows["AAA"]["exit_target"], rows["AAA"]["pct_to_target"]) == (125.0, 25.0)
+    assert rows["BBB"]["pct_to_target"] is None                 # no target set
+
+    monkeypatch.setattr(cfg, "get_profile_state_file", lambda name=None: str(tmp_path / "a.db"))
+    auto = TradingEngine(cfg, profile_name="52w_high")
+    auto.data = _FakeData(ltp=110.0)
+    auto.risk_cfg = {**auto.risk_cfg, "take_profit_pct": 20}
+    auto.broker.buy("AAA", 1, 100.0, "entry")
+    row = build_summary(auto)["positions"][0]
+    target = auto.broker.positions()["AAA"].avg_price * 1.2     # avg includes slippage
+    assert row["exit_target"] == pytest.approx(target, abs=0.01)
+    assert row["pct_to_target"] == pytest.approx((target - 110) / 110 * 100, abs=0.01)
