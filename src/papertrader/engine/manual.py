@@ -39,6 +39,23 @@ class ManualOrderError(ValueError):
     """A rejected order; the message is safe to show the user."""
 
 
+HORIZONS = {"long": "Long term", "short": "Short term"}
+KEEP = object()   # set_levels: leave the category as it is
+
+
+def _horizon(value) -> str | None:
+    """'long', 'short', or None for blank / not given."""
+    if value is None:
+        return None
+    text = str(value).strip().lower().replace("-", " ").replace("_", " ")
+    text = {"long term": "long", "short term": "short"}.get(text, text)
+    if text == "":
+        return None
+    if text not in HORIZONS:
+        raise ManualOrderError("Category must be Long term or Short term.")
+    return text
+
+
 def _optional_price(value, label: str) -> float | None:
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
@@ -101,6 +118,7 @@ class ManualTrader:
             return value if value is not None and math.isfinite(value) and value > 0 else None
 
         levels = self.storage.get_levels().get(symbol, {}) if held else {}
+        horizon = self.storage.get_horizons().get(symbol) if held else None
         return {
             "symbol": symbol,
             "ltp": q.ltp,
@@ -116,13 +134,14 @@ class ManualTrader:
             "held_avg_price": held.avg_price if held else None,
             "held_stop_loss": levels.get("stop_loss"),
             "held_target_price": levels.get("target_price"),
+            "held_horizon": horizon,
             "buy_cost_per_share": slope,
             "buy_cost_fixed": one - slope,
         }
 
     # ------------------------------------------------------------------
     def place_order(self, symbol: str, side: str, quantity, note: str = "", expected_price=None,
-                    entry_price=None, stop_loss=None, target_price=None) -> dict:
+                    entry_price=None, stop_loss=None, target_price=None, horizon=None) -> dict:
         symbol = (symbol or "").strip().upper()
         side = (side or "").strip().upper()
         if side not in ("BUY", "SELL"):
@@ -137,6 +156,7 @@ class ManualTrader:
         entry = _optional_price(entry_price, "Entry price")
         sl = _optional_price(stop_loss, "Stop loss")
         target = _optional_price(target_price, "Target price")
+        hz = _horizon(horizon) if side == "BUY" else None
         if side == "SELL" and (entry is not None or sl is not None or target is not None):
             raise ManualOrderError("Entry price, stop loss and target apply to buy orders only.")
         market_open = self.allow_when_market_closed or self.is_market_open()
@@ -157,7 +177,7 @@ class ManualTrader:
                 if qty > held.quantity:
                     raise ManualOrderError(f"You only hold {held.quantity:g} of {symbol}.")
             if not market_open:
-                return self._schedule_for_open(symbol, side, qty, entry, sl, target, note)
+                return self._schedule_for_open(symbol, side, qty, entry, sl, target, note, hz)
             q = self._live_price(symbol)
             if not self.allow_when_market_closed and not self._is_fresh(q):
                 raise ManualOrderError(
@@ -181,20 +201,20 @@ class ManualTrader:
                     raise ManualOrderError(
                         f"A limit order for {qty} × {symbol} at {entry:,.2f} would need about {cost:,.2f}; "
                         f"you have {self.broker.cash():,.2f}.")
-                order_id = self.storage.add_pending_order(symbol, qty, entry, sl, target, note)
+                order_id = self.storage.add_pending_order(symbol, qty, entry, sl, target, note, horizon=hz)
                 return {"symbol": symbol, "side": "BUY", "status": "pending", "order_id": order_id,
                         "quantity": qty, "limit_price": entry, "stop_loss": sl, "target_price": target,
-                        "cash": self.broker.cash()}
+                        "horizon": hz, "cash": self.broker.cash()}
 
             reason = "manual" + (f": {note}" if note else "")
             with self.storage.transaction():
                 trade = self._fill(symbol, "BUY", qty, q.ltp, reason)
-                self._apply_levels(symbol, sl, target)
+                self._apply_levels(symbol, sl, target, hz)
             out = self._result(symbol, "BUY", qty, trade)
-            out["stop_loss"], out["target_price"] = sl, target
+            out["stop_loss"], out["target_price"], out["horizon"] = sl, target, hz
             return out
 
-    def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note) -> dict:
+    def _schedule_for_open(self, symbol, side, qty, entry, sl, target, note, hz=None) -> dict:
         """The market is closed: queue the order. A buy with an entry price
         buys at that price or better and never above it: it fills once the
         market is open and the price is at or below the entry, however far
@@ -220,11 +240,11 @@ class ManualTrader:
                     f"{qty} × {symbol} at about {reference:,.2f} would need about {cost:,.2f}; "
                     f"you have {self.broker.cash():,.2f}.")
         if limit_order:
-            order_id = self.storage.add_pending_order(symbol, qty, entry, sl, target, note)
+            order_id = self.storage.add_pending_order(symbol, qty, entry, sl, target, note, horizon=hz)
             return {"symbol": symbol, "side": "BUY", "status": "pending", "order_id": order_id,
                     "quantity": qty, "limit_price": entry, "stop_loss": sl, "target_price": target,
-                    "cash": self.broker.cash()}
-        order_id = self.storage.add_pending_order(symbol, qty, 0.0, sl, target, note, "BUY", "market_open")
+                    "horizon": hz, "cash": self.broker.cash()}
+        order_id = self.storage.add_pending_order(symbol, qty, 0.0, sl, target, note, "BUY", "market_open", horizon=hz)
         return {"symbol": symbol, "side": "BUY", "status": "scheduled", "order_id": order_id,
                 "quantity": qty, "stop_loss": sl, "target_price": target, "last_price": last,
                 "cash": self.broker.cash()}
@@ -233,7 +253,7 @@ class ManualTrader:
     # GTT: good till triggered
     def create_gtt(self, symbol: str, side: str, quantity, trigger_price=None, limit_price=None,
                    note: str = "", stop_loss=None, target_price=None, oco: bool = False,
-                   target_trigger=None, replace_id=None) -> dict:
+                   target_trigger=None, replace_id=None, horizon=None) -> dict:
         """With replace_id, edit that waiting GTT: the new one is validated like any
         other and only then does the old one close (as cancelled, "edited"), so a
         rejected edit leaves the original untouched.
@@ -265,6 +285,7 @@ class ManualTrader:
             raise ManualOrderError("Two-leg GTT legs sell at the market price when triggered; leave the limit price blank.")
         if side == "SELL" and (sl is not None or target is not None):
             raise ManualOrderError("Stop loss and target apply to buys; a sell GTT closes shares.")
+        hz = _horizon(horizon) if side == "BUY" else None
 
         with self.lock:
             if replace_id is not None:
@@ -319,7 +340,7 @@ class ManualTrader:
                     symbol=symbol, side=side, kind="oco" if oco else "single", quantity=qty,
                     trigger_price=trigger, direction=direction, limit_price=limit,
                     target_trigger=target_trig if oco else None, stop_loss=sl, target_price=target,
-                    note=note, expires_at=expires)
+                    note=note, expires_at=expires, horizon=hz)
                 if replace_id is not None and not self.storage.resolve_gtt(
                         int(replace_id), "cancelled", f"edited; replaced by GTT #{gtt_id}"):
                     raise ManualOrderError("That GTT is no longer active, so it can't be edited.")
@@ -481,7 +502,7 @@ class ManualTrader:
                     return
                 self._fill(symbol, side, qty, q.ltp, reason)
                 if side == "BUY":
-                    self._apply_levels(symbol, g["stop_loss"], g["target_price"])
+                    self._apply_levels(symbol, g["stop_loss"], g["target_price"], g.get("horizon"))
             log.info("GTT #%s triggered: %s %s", g["id"], side, symbol)
         except ManualOrderError as exc:
             finish("triggered", f"{why} reached, but the order failed: {exc}")
@@ -489,19 +510,25 @@ class ManualTrader:
             log.exception("Could not run GTT #%s", g["id"])
 
     # ------------------------------------------------------------------
-    def set_levels(self, symbol: str, stop_loss, target_price) -> dict:
+    def set_levels(self, symbol: str, stop_loss, target_price, horizon=KEEP) -> dict:
         """Replace the stop loss / target of a position already held. A
-        blank value clears that level."""
+        blank value clears that level. A category given replaces the
+        position's (blank clears it); none given leaves it alone."""
         symbol = (symbol or "").strip().upper()
         sl = _optional_price(stop_loss, "Stop loss")
         target = _optional_price(target_price, "Target price")
+        hz = KEEP if horizon is KEEP else _horizon(horizon)
         with self.lock:
             if symbol not in self.broker.positions():
                 raise ManualOrderError(f"You don't hold {symbol}.")
             q = self._live_price(symbol)
             self._check_levels(q.ltp, sl, target, "current price")
-            self.storage.set_levels(symbol, sl, target)
-        return {"symbol": symbol, "stop_loss": sl, "target_price": target}
+            with self.storage.transaction():
+                self.storage.set_levels(symbol, sl, target)
+                if hz is not KEEP:
+                    self.storage.set_horizon(symbol, hz)
+            current = self.storage.get_horizons().get(symbol)
+        return {"symbol": symbol, "stop_loss": sl, "target_price": target, "horizon": current}
 
     def cancel_order(self, order_id) -> dict:
         try:
@@ -605,7 +632,7 @@ class ManualTrader:
                     return
                 self._fill(symbol, side, qty, q.ltp, reason)
                 if side == "BUY":
-                    self._apply_levels(symbol, order["stop_loss"], order["target_price"])
+                    self._apply_levels(symbol, order["stop_loss"], order["target_price"], order.get("horizon"))
             log.info("Order #%s filled: %s %s", order["id"], side, symbol)
         except ManualOrderError as exc:
             cancel(str(exc))
@@ -640,9 +667,12 @@ class ManualTrader:
         except ValueError as exc:
             raise ManualOrderError(str(exc)) from exc
 
-    def _apply_levels(self, symbol: str, stop_loss, target) -> None:
+    def _apply_levels(self, symbol: str, stop_loss, target, horizon=None) -> None:
         """Levels given with a buy replace the ones given; one left blank keeps
-        what the position already had (a first entry has none)."""
+        what the position already had (a first entry has none). The same goes
+        for the category."""
+        if horizon is not None:
+            self.storage.set_horizon(symbol, horizon)
         existing = self.storage.get_levels().get(symbol, {})
         self.storage.set_levels(
             symbol,

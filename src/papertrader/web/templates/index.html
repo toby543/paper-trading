@@ -389,6 +389,11 @@
   .badge-side { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 6px; }
   .badge-side.buy { background: var(--good-wash); color: var(--good); }
   .badge-side.sell { background: var(--bad-wash); color: var(--bad); }
+  .cat-tag { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 7px;
+             border-radius: 6px; white-space: nowrap; background: var(--accent-wash); color: var(--accent); }
+  .cat-tag.short { background: var(--border); color: var(--ink-dim); }
+  .cat-tax { font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; margin-left: 4px; }
+  .cat-tax.ltcg { color: var(--good); font-weight: 600; }
 
   .footer-note { margin-top: 22px; font-size: 11.5px; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .footer-note .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
@@ -784,12 +789,19 @@
               <label class="manual-field">Target price
                 <input type="number" id="manualTarget" class="edit-input" min="0" step="0.05" placeholder="optional" style="width:130px;">
               </label>
+              <label class="manual-field">Category
+                <select id="manualHorizon" class="edit-input" style="width:130px; text-align:left;">
+                  <option value="">—</option>
+                  <option value="short">Short term</option>
+                  <option value="long">Long term</option>
+                </select>
+              </label>
             </div>
             <div class="manual-row" style="margin-top:12px;">
               <input type="text" id="manualNote" class="edit-input wide" maxlength="100" placeholder="Note (optional)" style="width:240px; text-align:left;">
               <button type="button" id="manualPlaceBtn" class="edit-save-btn">Place buy order</button>
               <button type="button" id="manualEditCancel" class="manual-sell-btn" style="display:none;">Cancel edit</button>
-              <button type="button" id="manualLevelsBtn" class="manual-sell-btn" style="display:none;">Update stop / target</button>
+              <button type="button" id="manualLevelsBtn" class="manual-sell-btn" style="display:none;">Update stop / target / category</button>
             </div>
             <div class="manual-est mono" id="manualEst"></div>
             <div class="manual-est mono" id="manualRR"></div>
@@ -810,7 +822,7 @@
           <table id="positionsTable">
             <thead>
               <tr>
-                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th>{% if is_manual_profile %}<th>Stop</th><th>Target</th><th></th>{% endif %}
+                <th>Symbol</th><th>Qty</th><th>Avg</th><th>LTP</th><th>From 52W High</th><th>Mkt Value</th><th>P&amp;L</th><th>Since Peak</th><th>Entered</th><th>Category</th>{% if is_manual_profile %}<th>Stop</th><th>Target</th><th></th>{% endif %}
               </tr>
             </thead>
             <tbody id="positionsBody"></tbody>
@@ -1389,11 +1401,30 @@ function manualInvestedCard(s) {
   return card;
 }
 
+// The category the user gave a position (Long term / Short term) plus its tax
+// term from the holding period: Indian equity gains are long term (LTCG) once
+// held more than 12 months. Crypto has no tax term.
+const HORIZON_LABEL = { long: "Long term", short: "Short term" };
+function categoryHtml(r, sold) {
+  const tag = r.horizon ? `<span class="cat-tag ${r.horizon}">${HORIZON_LABEL[r.horizon] || escapeText(r.horizon)}</span>` : "";
+  let tax = "";
+  if (r.tax_term) {
+    const days = r.held_days === null || r.held_days === undefined ? "" : `${r.held_days}d`;
+    const left = !sold && r.tax_term === "short" && r.long_term_from
+      ? `Long term for tax from ${shortDate(r.long_term_from)}` : "";
+    const title = `${sold ? "Held" : "Held so far"} ${r.held_days} days. ` +
+      (r.tax_term === "long" ? "Over 12 months: long-term capital gain (LTCG)." : "12 months or less: short-term capital gain (STCG).") +
+      (left ? " " + left + "." : "");
+    tax = `<span class="cat-tax mono ${r.tax_term === "long" ? "ltcg" : ""}" title="${title}">${r.tax_term === "long" ? "LTCG" : "STCG"} ${days}</span>`;
+  }
+  return tag || tax ? tag + tax : `<span style="color:var(--ink-faint);">—</span>`;
+}
+
 function renderPositions(s) {
   document.getElementById("positionsMeta").textContent = s.open_positions + " held";
   const tbody = document.getElementById("positionsBody");
   if (!s.positions.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 12 : 9}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${IS_MANUAL ? 13 : 10}">${IS_MANUAL ? "No open positions — search a stock above to place a trade." : "No open positions — the next scan will look for qualifying entries."}</td></tr>`;
     return;
   }
   tbody.innerHTML = s.positions.map(p => {
@@ -1412,6 +1443,7 @@ function renderPositions(s) {
       <td class="mono ${pnlClass(p.unrealized_pnl)}" data-label="P&amp;L">${p.unrealized_pnl >= 0 ? "+" : ""}${fmt(p.unrealized_pnl)} <span style="font-size:11px;">(${p.unrealized_pnl_pct >= 0 ? "+" : ""}${p.unrealized_pnl_pct}%)</span></td>
       <td data-label="Since Peak"><span class="peak-track"><span class="peak-bar"><i style="width:${peakPct.toFixed(0)}%"></i></span><span class="mono" style="font-size:11px; color:var(--ink-dim);">${peakPct.toFixed(0)}%</span></span></td>
       <td class="mono" style="color:var(--ink-dim);" data-label="Entered">${shortDate(p.entry_date)}</td>
+      <td data-label="Category">${categoryHtml(p, false)}</td>
       ${IS_MANUAL ? `<td class="mono down" data-label="Stop">${p.stop_loss ? fmt(p.stop_loss) : "—"}</td>
       <td class="mono up" data-label="Target">${p.target_price ? fmt(p.target_price) : "—"}</td>
       <td><button type="button" class="manual-sell-btn" data-symbol="${p.symbol}" data-qty="${p.quantity}">Sell</button></td>` : ""}
@@ -1578,6 +1610,7 @@ async function manualCreateGtt() {
     question = `${manual.editGtt ? "Replace GTT #" + manual.editGtt + " with this one:\n" : ""}Create a GTT to ${manual.side} ${qty} × ${manual.symbol} when the price ${dir} ${CCY}${fmt(trigger)}?` +
       (limit ? `\nLimit price ${CCY}${fmt(limit)}` : "\nAt the market price when triggered") +
       (stop ? `\nThen stop loss ${CCY}${fmt(stop)}` : "") + (target ? `\nThen target ${CCY}${fmt(target)}` : "") +
+      (buy && manualEl("manualHorizon").value ? `\nCategory: ${HORIZON_LABEL[manualEl("manualHorizon").value]}` : "") +
       "\nValid for one year. Nothing is bought or reserved until it triggers.";
   }
   if (!window.confirm(question)) return;
@@ -1587,7 +1620,7 @@ async function manualCreateGtt() {
     const out = await manualPost("/api/manual/gtt", {
       symbol: manual.symbol, side: manual.side, quantity: qty, note: manualEl("manualNote").value, oco,
       trigger_price: trigger, limit_price: limit, target_trigger: targetTrigger, stop_loss: stop, target_price: target,
-      replace_id: manual.editGtt,
+      replace_id: manual.editGtt, horizon: buy ? manualEl("manualHorizon").value : null,
     });
     if (!out.ok) { manualMsg(out.error || "GTT rejected.", "err"); return; }
     const edited = !!manual.editGtt;
@@ -1636,6 +1669,7 @@ function manualApplyPendingEdit() {
   manualEl("manualGttTarget").value = g.target_trigger || "";
   manualEl("manualStop").value = g.stop_loss || "";
   manualEl("manualTarget").value = g.target_price || "";
+  manualEl("manualHorizon").value = g.horizon || "";
   manualEl("manualNote").value = g.note || "";
   manualSetSide(g.side);          // shows the right fields first, so the OCO box exists
   manualEl("manualOco").checked = g.kind === "oco";
@@ -1678,7 +1712,8 @@ async function manualRefreshGtts() {
         ? `Sell ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} · stop ${CCY}${fmt(g.trigger_price)} · target ${CCY}${fmt(g.target_trigger)}`
         : `${side} ${fmtInt(g.quantity)} × ${escapeText(g.symbol)} when price ${g.direction === "down" ? "falls" : "rises"} to ${CCY}${fmt(g.trigger_price)}` +
           (g.limit_price ? ` (limit ${CCY}${fmt(g.limit_price)})` : "") +
-          (g.stop_loss ? ` · stop ${CCY}${fmt(g.stop_loss)}` : "") + (g.target_price ? ` · target ${CCY}${fmt(g.target_price)}` : "");
+          (g.stop_loss ? ` · stop ${CCY}${fmt(g.stop_loss)}` : "") + (g.target_price ? ` · target ${CCY}${fmt(g.target_price)}` : "") +
+          (g.horizon ? ` · ${HORIZON_LABEL[g.horizon] || ""}` : "");
       const until = new Date(g.expires_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
       const status = g.status === "active"
         ? `<span class="manual-order-status">valid till ${until} <button type="button" class="manual-sell-btn" data-edit-gtt="${g.id}">Edit</button> <button type="button" class="manual-sell-btn" data-cancel-gtt="${g.id}">Cancel</button></span>`
@@ -1720,6 +1755,7 @@ async function manualLoadQuote(symbol, name) {
     ["manualGttTrigger", "manualGttLimit", "manualGttTarget"].forEach(id => { manualEl(id).value = ""; });
     manualEl("manualStop").value = q.held_stop_loss ? q.held_stop_loss : "";
     manualEl("manualTarget").value = q.held_target_price ? q.held_target_price : "";
+    manualEl("manualHorizon").value = q.held_horizon || "";
     manualSetSide(manual.side);
     manualApplyPendingEdit();
   } catch (e) {
@@ -1790,13 +1826,15 @@ async function manualPlaceOrder() {
       : `${manual.side} ${qty} × ${manual.symbol} at about ${CCY}${fmt(price)}?`);
   if (buy && stop) question += `\nStop loss ${CCY}${fmt(stop)}`;
   if (buy && target) question += `\nTarget ${CCY}${fmt(target)}`;
+  const horizon = buy ? manualEl("manualHorizon").value : "";
+  if (horizon) question += `\nCategory: ${HORIZON_LABEL[horizon]}`;
   if (!window.confirm(question)) return;
   const btn = manualEl("manualPlaceBtn");
   btn.disabled = true;
   try {
     const out = await manualPost("/api/manual/order", {
       symbol: manual.symbol, side: manual.side, quantity: qty, note: manualEl("manualNote").value,
-      expected_price: price, entry_price: entry, stop_loss: stop, target_price: target,
+      expected_price: price, entry_price: entry, stop_loss: stop, target_price: target, horizon: horizon || null,
     });
     if (!out.ok) { manualMsg(out.error || "Order rejected.", "err"); return; }
     let done;
@@ -1825,11 +1863,12 @@ async function manualPlaceOrder() {
 async function manualUpdateLevels() {
   const stop = manualNum("manualStop"), target = manualNum("manualTarget");
   if ([stop, target].some(Number.isNaN)) { manualMsg("Stop loss and target must be numbers.", "err"); return; }
-  const out = await manualPost("/api/manual/levels", { symbol: manual.symbol, stop_loss: stop, target_price: target });
+  const horizon = manualEl("manualHorizon").value;
+  const out = await manualPost("/api/manual/levels", { symbol: manual.symbol, stop_loss: stop, target_price: target, horizon });
   if (!out.ok) { manualMsg(out.error || "Could not update.", "err"); return; }
   await manualLoadQuote(manual.symbol, manualEl("manualName").textContent);
   manualMsg("Levels updated" + (stop ? ` · stop ${CCY}${fmt(stop)}` : "") + (target ? ` · target ${CCY}${fmt(target)}` : "") +
-    (!stop && !target ? " · cleared" : ""), "ok");
+    (!stop && !target ? " · no stop or target" : "") + ` · ${horizon ? HORIZON_LABEL[horizon] : "no category"}`, "ok");
   refresh();
 }
 
@@ -1848,7 +1887,8 @@ async function manualRefreshOrders() {
     const data = await res.json();
     if (!data.ok || !data.orders.length) { box.innerHTML = ""; return; }
     box.innerHTML = `<div class="manual-orders-title">Pending and recent orders${manualClearButton(data.orders.some(o => o.status !== "pending"), "orders")}</div>` + data.orders.map(o => {
-      const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "");
+      const lv = (o.stop_loss ? ` · stop ${CCY}${fmt(o.stop_loss)}` : "") + (o.target_price ? ` · target ${CCY}${fmt(o.target_price)}` : "") +
+        (o.horizon ? ` · ${HORIZON_LABEL[o.horizon] || ""}` : "");
       const status = o.status === "pending"
         ? `<button type="button" class="manual-sell-btn" data-cancel="${o.id}">Cancel</button>`
         : `<span class="manual-order-status ${o.status}">${escapeText(o.status)} — ${escapeText(o.detail)}
@@ -1944,6 +1984,7 @@ function renderTrades(trades) {
         ${t.realized_pnl !== null && t.realized_pnl !== undefined ? `<span class="ticker-pnl mono ${pnlClass(t.realized_pnl)}">${t.realized_pnl >= 0 ? "+" : ""}${CCY}${fmt(t.realized_pnl)}</span>` : ""}
       </div>
       <div class="ticker-reason">${escapeText(t.reason)}</div>
+      ${t.side === "SELL" && (t.horizon || t.tax_term) ? `<div class="ticker-reason">${categoryHtml(t, true)}</div>` : ""}
     </div>
   `).join("");
 }

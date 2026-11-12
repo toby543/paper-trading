@@ -438,7 +438,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             result = engine.manual_trader().place_order(
                 payload.get("symbol"), payload.get("side"), payload.get("quantity"), payload.get("note", ""),
                 expected_price=payload.get("expected_price"), entry_price=payload.get("entry_price"),
-                stop_loss=payload.get("stop_loss"), target_price=payload.get("target_price"))
+                stop_loss=payload.get("stop_loss"), target_price=payload.get("target_price"),
+                horizon=payload.get("horizon"))
         except ManualOrderError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify({"ok": True, **result})
@@ -459,7 +460,8 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
     @api_login_required
     def api_manual_levels():
         return _manual_json_action(lambda t, p: t.set_levels(
-            p.get("symbol"), p.get("stop_loss"), p.get("target_price")))
+            p.get("symbol"), p.get("stop_loss"), p.get("target_price"),
+            **({"horizon": p.get("horizon")} if "horizon" in p else {})))
 
     @app.post("/api/manual/cancel")
     @api_login_required
@@ -473,7 +475,7 @@ def create_app(engines: dict[str, TradingEngine], cfg: Config | None = None) -> 
             p.get("symbol"), p.get("side"), p.get("quantity"), trigger_price=p.get("trigger_price"),
             limit_price=p.get("limit_price"), note=p.get("note", ""), stop_loss=p.get("stop_loss"),
             target_price=p.get("target_price"), oco=bool(p.get("oco")), target_trigger=p.get("target_trigger"),
-            replace_id=p.get("replace_id")))
+            replace_id=p.get("replace_id"), horizon=p.get("horizon")))
 
     @app.post("/api/manual/gtt/cancel")
     @api_login_required

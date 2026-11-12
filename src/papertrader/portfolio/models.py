@@ -56,6 +56,10 @@ class Trade:
     reason: str
     timestamp: str
     realized_pnl: float | None = None  # set for SELL trades only
+    # SELL trades only: when the position sold was opened, and the
+    # category ('long' / 'short') the user gave it, if any.
+    entry_date: str | None = None
+    horizon: str | None = None
 
     @property
     def gross_value(self) -> float:

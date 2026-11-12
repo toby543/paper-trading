@@ -130,6 +130,7 @@ class PaperBroker:
         released_entry_charges = existing.entry_charges * min(portion, 1.0)
         realized_pnl = (fill_price - existing.avg_price) * quantity - charges - released_entry_charges
 
+        horizon = self.storage.get_horizons().get(symbol)   # read before a full exit removes it
         remaining = existing.quantity - quantity
         # `== 0` would strand an un-closeable dust position: subtracting
         # fractional quantities rarely lands on exactly 0.0, so a full
@@ -144,7 +145,8 @@ class PaperBroker:
             self.storage.upsert_position(existing)
 
         self.storage.set_cash(self.storage.get_cash() + proceeds)
-        trade = Trade(id=None, symbol=symbol, side="SELL", quantity=quantity, price=fill_price, charges=charges, reason=reason, timestamp=now, realized_pnl=realized_pnl)
+        trade = Trade(id=None, symbol=symbol, side="SELL", quantity=quantity, price=fill_price, charges=charges, reason=reason, timestamp=now, realized_pnl=realized_pnl,
+                      entry_date=existing.entry_date, horizon=horizon)
         self.storage.record_trade(trade)
         log.info("SELL %-10s qty=%-12.8g price=%-10.2f reason=%s", symbol, quantity, fill_price, reason)
         return trade

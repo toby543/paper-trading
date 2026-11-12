@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS trades (
     charges REAL NOT NULL,
     reason TEXT NOT NULL,
     timestamp TEXT NOT NULL,
-    realized_pnl REAL
+    realized_pnl REAL,
+    -- SELL rows only: when the position being sold was opened (for the
+    -- long/short-term holding period) and the category the user gave it.
+    entry_date TEXT,
+    horizon TEXT
 );
 
 CREATE TABLE IF NOT EXISTS equity_curve (
@@ -68,6 +72,13 @@ CREATE TABLE IF NOT EXISTS position_levels (
     symbol TEXT PRIMARY KEY,
     stop_loss REAL,
     target_price REAL
+);
+
+-- The category the user gave a position: 'long' (long term) or 'short'
+-- (short term). Removed with the position, like its levels.
+CREATE TABLE IF NOT EXISTS position_horizon (
+    symbol TEXT PRIMARY KEY,
+    horizon TEXT NOT NULL
 );
 
 -- GTT ("good till triggered") orders: wait up to a year for the price to
@@ -88,6 +99,7 @@ CREATE TABLE IF NOT EXISTS gtt_orders (
     stop_loss REAL,
     target_price REAL,
     note TEXT NOT NULL DEFAULT '',
+    horizon TEXT,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
@@ -113,7 +125,8 @@ CREATE TABLE IF NOT EXISTS pending_orders (
     -- side BUY/SELL; order_type "limit" (wait for limit_price) or "market_open"
     -- (run at the next open; limit_price is 0 and unused)
     side TEXT NOT NULL DEFAULT 'BUY',
-    order_type TEXT NOT NULL DEFAULT 'limit'
+    order_type TEXT NOT NULL DEFAULT 'limit',
+    horizon TEXT
 );
 """
 
@@ -239,6 +252,14 @@ class Storage:
             if "realized_pnl" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl REAL")
             self._backfill_realized_pnl(conn)
+            if "entry_date" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN entry_date TEXT")
+                self._backfill_sell_entry_dates(conn)
+            if "horizon" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN horizon TEXT")
+            gtt_cols = {r["name"] for r in conn.execute("PRAGMA table_info(gtt_orders)").fetchall()}
+            if "horizon" not in gtt_cols:
+                conn.execute("ALTER TABLE gtt_orders ADD COLUMN horizon TEXT")
             position_cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
             if "entry_charges" not in position_cols:
                 conn.execute("ALTER TABLE positions ADD COLUMN entry_charges REAL NOT NULL DEFAULT 0")
@@ -250,6 +271,8 @@ class Storage:
                 conn.execute("ALTER TABLE pending_orders ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
             if "order_type" not in order_cols:
                 conn.execute("ALTER TABLE pending_orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'limit'")
+            if "horizon" not in order_cols:
+                conn.execute("ALTER TABLE pending_orders ADD COLUMN horizon TEXT")
             account_cols = {r["name"] for r in conn.execute("PRAGMA table_info(account)").fetchall()}
             if "last_scan_at" not in account_cols:
                 conn.execute("ALTER TABLE account ADD COLUMN last_scan_at TEXT")
@@ -287,6 +310,21 @@ class Storage:
                     realized = (r["price"] - avg) * r["quantity"] - r["charges"]
                     conn.execute("UPDATE trades SET realized_pnl = ? WHERE id = ?", (realized, r["id"]))
                 avg_cost[r["symbol"]] = (qty - r["quantity"], avg)
+
+    @staticmethod
+    def _backfill_sell_entry_dates(conn) -> None:
+        """Give SELL rows recorded before entry_date existed the date their
+        position was opened: the first BUY after the symbol was last flat."""
+        held: dict[str, tuple[float, str | None]] = {}
+        for r in conn.execute("SELECT id, symbol, side, quantity, timestamp FROM trades ORDER BY id ASC").fetchall():
+            qty, opened = held.get(r["symbol"], (0.0, None))
+            if r["side"] == "BUY":
+                held[r["symbol"]] = (qty + r["quantity"], opened if qty > 1e-9 else r["timestamp"])
+            else:
+                if opened:
+                    conn.execute("UPDATE trades SET entry_date = ? WHERE id = ?", (opened, r["id"]))
+                remaining = qty - r["quantity"]
+                held[r["symbol"]] = (remaining, opened) if remaining > 1e-9 else (0.0, None)
 
     # ---- account -----------------------------------------------------
     def get_cash(self) -> float:
@@ -383,6 +421,25 @@ class Storage:
             # Levels belong to the position: a later re-entry must not
             # inherit a stop the user set on the previous one.
             conn.execute("DELETE FROM position_levels WHERE symbol = ?", (symbol,))
+            conn.execute("DELETE FROM position_horizon WHERE symbol = ?", (symbol,))
+
+    # ---- position category (long / short term) ----------------------------
+    def get_horizons(self) -> dict[str, str]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT symbol, horizon FROM position_horizon").fetchall()
+        return {r["symbol"]: r["horizon"] for r in rows}
+
+    def set_horizon(self, symbol: str, horizon: str | None) -> None:
+        """'long', 'short', or None to clear it."""
+        with self._conn() as conn:
+            if horizon is None:
+                conn.execute("DELETE FROM position_horizon WHERE symbol = ?", (symbol,))
+            else:
+                conn.execute(
+                    """INSERT INTO position_horizon (symbol, horizon) VALUES (?, ?)
+                       ON CONFLICT(symbol) DO UPDATE SET horizon=excluded.horizon""",
+                    (symbol, horizon),
+                )
 
     # ---- manual-trade levels and pending orders -------------------------
     def get_levels(self) -> dict[str, dict]:
@@ -404,14 +461,14 @@ class Storage:
 
     def add_pending_order(self, symbol: str, quantity: float, limit_price: float,
                           stop_loss: float | None, target_price: float | None, note: str,
-                          side: str = "BUY", order_type: str = "limit") -> int:
+                          side: str = "BUY", order_type: str = "limit", horizon: str | None = None) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO pending_orders
-                   (symbol, quantity, limit_price, stop_loss, target_price, note, created_at, side, order_type)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (symbol, quantity, limit_price, stop_loss, target_price, note, created_at, side, order_type, horizon)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (symbol, quantity, limit_price, stop_loss, target_price, note,
-                 datetime.now().isoformat(timespec="seconds"), side, order_type),
+                 datetime.now().isoformat(timespec="seconds"), side, order_type, horizon),
             )
             return int(cur.lastrowid)
 
@@ -432,14 +489,15 @@ class Storage:
     # ---- GTT orders -----------------------------------------------------
     def add_gtt(self, *, symbol: str, side: str, kind: str, quantity: float, trigger_price: float,
                 direction: str, limit_price: float | None, target_trigger: float | None,
-                stop_loss: float | None, target_price: float | None, note: str, expires_at: str) -> int:
+                stop_loss: float | None, target_price: float | None, note: str, expires_at: str,
+                horizon: str | None = None) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO gtt_orders (symbol, side, kind, quantity, trigger_price, direction, limit_price,
-                       target_trigger, stop_loss, target_price, note, created_at, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       target_trigger, stop_loss, target_price, note, created_at, expires_at, horizon)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (symbol, side, kind, quantity, trigger_price, direction, limit_price, target_trigger,
-                 stop_loss, target_price, note, datetime.now().isoformat(timespec="seconds"), expires_at),
+                 stop_loss, target_price, note, datetime.now().isoformat(timespec="seconds"), expires_at, horizon),
             )
             return int(cur.lastrowid)
 
@@ -504,10 +562,11 @@ class Storage:
     def record_trade(self, trade: Trade) -> None:
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO trades (symbol, side, quantity, price, charges, reason, timestamp, realized_pnl)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO trades (symbol, side, quantity, price, charges, reason, timestamp, realized_pnl,
+                                       entry_date, horizon)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (trade.symbol, trade.side, trade.quantity, trade.price, trade.charges, trade.reason,
-                 trade.timestamp, trade.realized_pnl),
+                 trade.timestamp, trade.realized_pnl, trade.entry_date, trade.horizon),
             )
 
     @staticmethod
@@ -528,7 +587,8 @@ class Storage:
             return [dict(r) for r in conn.execute(query, params).fetchall()]   # SQLite without JSON
         return json.loads(row[0])
 
-    _TRADE_COLUMNS = ("id", "symbol", "side", "quantity", "price", "charges", "reason", "timestamp", "realized_pnl")
+    _TRADE_COLUMNS = ("id", "symbol", "side", "quantity", "price", "charges", "reason", "timestamp", "realized_pnl",
+                      "entry_date", "horizon")
 
     def get_trades(self, limit: int | None = None) -> list[Trade]:
         query = "SELECT * FROM trades ORDER BY id DESC"
@@ -541,7 +601,7 @@ class Storage:
             Trade(
                 id=r["id"], symbol=r["symbol"], side=r["side"], quantity=r["quantity"],
                 price=r["price"], charges=r["charges"], reason=r["reason"], timestamp=r["timestamp"],
-                realized_pnl=r.get("realized_pnl"),
+                realized_pnl=r.get("realized_pnl"), entry_date=r.get("entry_date"), horizon=r.get("horizon"),
             )
             for r in rows
         ]

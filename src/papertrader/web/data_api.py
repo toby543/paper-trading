@@ -329,6 +329,27 @@ def _build_insights(engine, position_rows: list[dict], cash: float, total_equity
     return insights
 
 
+def holding_period(entry_date: str | None, until: str | None = None, crypto: bool = False) -> dict:
+    """How long a position was (or has been) held, and whether a gain on it
+    counts as long or short term for Indian equity tax: long term once held
+    for more than 12 months. Crypto is taxed the same however long it is
+    held, so it gets no tax term."""
+    try:
+        start = datetime.fromisoformat(entry_date).date()
+        end = datetime.fromisoformat(until).date() if until else datetime.now().date()
+    except (TypeError, ValueError):
+        return {"held_days": None, "tax_term": None, "long_term_from": None}
+    try:
+        anniversary = start.replace(year=start.year + 1)
+    except ValueError:             # 29 Feb
+        anniversary = start.replace(year=start.year + 1, month=3, day=1)
+    return {
+        "held_days": (end - start).days,
+        "tax_term": None if crypto else ("long" if end > anniversary else "short"),
+        "long_term_from": None if crypto else (anniversary + timedelta(days=1)).isoformat(),
+    }
+
+
 def build_summary(engine) -> dict:
     positions = engine.broker.positions()
     cash = engine.broker.cash()
@@ -342,6 +363,8 @@ def build_summary(engine) -> dict:
     position_rows = []
     positions_value = 0.0
     levels = engine.storage.get_levels() if getattr(engine, "is_manual", False) else {}
+    horizons = engine.storage.get_horizons()
+    crypto = bool(getattr(engine, "trades_24_7", False))
     for symbol, pos in positions.items():
         quote = _safe_quote(engine, symbol)
         # Falling back to avg_price prices the row at cost, which renders
@@ -371,6 +394,8 @@ def build_summary(engine) -> dict:
             "pct_from_52w_high": round(pct_from_high, 2) if pct_from_high is not None else None,
             "stop_loss": levels.get(symbol, {}).get("stop_loss"),
             "target_price": levels.get(symbol, {}).get("target_price"),
+            "horizon": horizons.get(symbol),
+            **holding_period(pos.entry_date, crypto=crypto),
         })
 
     total_equity = cash + positions_value
@@ -432,6 +457,7 @@ def _manual_commitments(engine):
 
 def build_trades(engine, limit: int = 100) -> list[dict]:
     trades = engine.storage.get_trades(limit=limit)
+    crypto = bool(getattr(engine, "trades_24_7", False))
     return [
         {
             "id": t.id,
@@ -444,6 +470,9 @@ def build_trades(engine, limit: int = 100) -> list[dict]:
             "value": round(t.gross_value, 2),
             "reason": t.reason,
             "realized_pnl": round(t.realized_pnl, 2) if t.realized_pnl is not None else None,
+            "entry_date": t.entry_date,
+            "horizon": t.horizon,
+            **holding_period(t.entry_date if t.side == "SELL" else None, t.timestamp, crypto),
         }
         for t in trades
     ]
