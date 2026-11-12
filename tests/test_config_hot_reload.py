@@ -70,8 +70,8 @@ def test_engines_dict_shares_one_config_object():
     cli_source = open(os.path.join(repo_root, "src", "papertrader", "cli.py"), encoding="utf-8").read()
     app_source = open(os.path.join(repo_root, "src", "papertrader", "web", "app.py"), encoding="utf-8").read()
 
-    assert "TradingEngine(cfg, profile_name=p) for p in profiles" in cli_source
-    assert "TradingEngine(cfg, profile_name=name) for name in cfg.list_profiles()" in app_source
+    assert "TradingEngine(cfg, profile_name=p, data_pool=pool) for p in profiles" in cli_source
+    assert "TradingEngine(cfg, profile_name=name, data_pool=pool) for name in cfg.list_profiles()" in app_source
 
 
 def test_run_forever_does_not_gate_the_refresh_behind_reload_return_value():

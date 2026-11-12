@@ -115,9 +115,14 @@ CREATE TABLE IF NOT EXISTS pending_orders (
 
 
 class Storage:
-    def __init__(self, db_path: str, starting_capital: float):
+    def __init__(self, db_path: str, starting_capital: float, wal: bool = True):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
+        # Write-ahead logging: a dashboard read no longer waits for an
+        # engine write (or the reverse), and each commit costs one append
+        # instead of a journal rewrite -- noticeable on a Pi's SD card.
+        # Off for throwaway ledgers (backtests) that are deleted after use.
+        self._wal = wal
         # Per-thread, because one Storage is shared between its engine's
         # background thread and the Flask request threads reading it.
         self._tx = threading.local()
@@ -128,6 +133,10 @@ class Storage:
         # lock instead of failing the whole scan with "database is locked".
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        if self._wal:
+            # Per-connection; NORMAL is the pairing SQLite recommends for WAL
+            # (a power cut can lose the last commit, never corrupt the file).
+            conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     @contextmanager
@@ -211,6 +220,14 @@ class Storage:
             return self._backfill_entry_charges(conn)
 
     def _init_db(self, starting_capital: float) -> None:
+        if self._wal:
+            # The mode is stored in the database file, so setting it once
+            # here covers every later connection (and an existing ledger).
+            conn = self._open()
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            finally:
+                conn.close()
         with self._conn() as conn:
             conn.executescript(SCHEMA)
             row = conn.execute("SELECT cash FROM account WHERE id = 1").fetchone()

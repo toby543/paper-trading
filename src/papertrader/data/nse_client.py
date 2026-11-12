@@ -12,8 +12,9 @@ falls back to Yahoo Finance so the system keeps working end-to-end.
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Optional
 
@@ -155,21 +156,41 @@ class MarketDataClient:
     _YFINANCE_MIN_INTERVAL_SECONDS = 0.2
 
     def __init__(self, preferred: str = "nse", fallback: str = "yfinance", timeout: int = 10,
-                 quote_currency: str = "INR", max_retries: int = 2):
+                 quote_currency: str = "INR", max_retries: int = 2,
+                 quote_ttl_seconds: float = 0.0, allow_eod_fallback: bool = False):
         """quote_currency: the currency this client's caller keeps its book
         in. Crypto pairs are quoted in USD by every exchange we read, so
         for an INR book they are converted here, at the data layer, rather
         than anywhere downstream -- that way strategy thresholds, position
         sizing, the broker, the stored ledger and the dashboard all see
         one currency and none of them need conversion logic. NSE equities
-        are already INR and are never touched."""
+        are already INR and are never touched.
+
+        quote_ttl_seconds: how long a successful quote is reused. 0 (the
+        default) always fetches. Every profile's engine and every dashboard
+        poll asks for the same handful of live prices within seconds of each
+        other; a short TTL turns those into one network call each.
+
+        One client can be shared by several engines (see DataClientPool):
+        its caches, circuit breakers and Yahoo pacing then cover them all."""
         self.preferred = preferred
         self.fallback = fallback
         self.timeout = timeout
         self.quote_currency = (quote_currency or "INR").upper()
         # The exchange end-of-day file as a last-resort quote can be days old.
         # Off by default: an automated profile would act on it as if live.
-        self.allow_eod_fallback = False
+        self.allow_eod_fallback = allow_eod_fallback
+        self.quote_ttl_seconds = max(0.0, float(quote_ttl_seconds or 0.0))
+        self._quote_cache: dict[str, tuple[float, Quote]] = {}
+        # Pacing is global to the client, not per caller: with the lock held
+        # across the sleep, engines sharing it queue up instead of each
+        # firing at Yahoo's rate limit on its own.
+        self._yf_lock = threading.Lock()
+        # One lock per (kind, symbol[, period]) so that when several engines
+        # ask for the same uncached item at once, one fetches and the rest
+        # read what it stored instead of downloading it again.
+        self._key_locks: dict[tuple, threading.Lock] = {}
+        self._key_locks_guard = threading.Lock()
         self._nse = NSESession(timeout=timeout, max_attempts=max_retries)
         self._binance = BinanceClient(timeout=timeout)
         self._kraken = KrakenClient(timeout=timeout)
@@ -211,10 +232,18 @@ class MarketDataClient:
             return 1.0
 
     def _throttle_yfinance(self) -> None:
-        elapsed = time.time() - self._last_yfinance_call
-        if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
-            time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
-        self._last_yfinance_call = time.time()
+        with self._yf_lock:
+            elapsed = time.time() - self._last_yfinance_call
+            if elapsed < self._YFINANCE_MIN_INTERVAL_SECONDS:
+                time.sleep(self._YFINANCE_MIN_INTERVAL_SECONDS - elapsed)
+            self._last_yfinance_call = time.time()
+
+    def _key_lock(self, *key) -> threading.Lock:
+        with self._key_locks_guard:
+            lock = self._key_locks.get(key)
+            if lock is None:
+                lock = self._key_locks[key] = threading.Lock()
+            return lock
 
     @staticmethod
     def _is_crypto_symbol(symbol: str) -> bool:
@@ -239,6 +268,17 @@ class MarketDataClient:
 
     # ---- live quotes -----------------------------------------------
     def get_quote(self, symbol: str) -> Quote:
+        if self.quote_ttl_seconds <= 0:
+            return self._get_quote(symbol)
+        with self._key_lock("quote", symbol):
+            hit = self._quote_cache.get(symbol)
+            if hit is not None and time.time() - hit[0] < self.quote_ttl_seconds:
+                return replace(hit[1])
+            quote = self._get_quote(symbol)   # a failure propagates and is never cached
+            self._quote_cache[symbol] = (time.time(), quote)
+            return replace(quote)
+
+    def _get_quote(self, symbol: str) -> Quote:
         if self._is_crypto_symbol(symbol):
             # Crypto has no NSE equivalent. Try two independent exchanges'
             # live order-book data before falling back to Yahoo Finance's
@@ -396,6 +436,10 @@ class MarketDataClient:
 
     # ---- historical bars (for MAs / momentum returns) ----------------
     def get_history(self, symbol: str, period: str = "1y", ttl_seconds: int = 900) -> pd.DataFrame:
+        with self._key_lock("history", symbol, period):
+            return self._get_history(symbol, period, ttl_seconds)
+
+    def _get_history(self, symbol: str, period: str, ttl_seconds: int) -> pd.DataFrame:
         if self._is_crypto_symbol(symbol):
             fx = self._crypto_fx_rate()
             for client, source in ((self._binance, "binance"), (self._kraken, "kraken")):
@@ -462,6 +506,10 @@ class MarketDataClient:
     def get_index_history(self, index_symbol: str, period: str = "1y", ttl_seconds: int = 900) -> pd.DataFrame:
         """Like get_history, but for a raw Yahoo Finance ticker (e.g. the
         "^NSEI" Nifty 50 index) that must NOT get the ".NS" equity suffix."""
+        with self._key_lock("index", index_symbol, period):
+            return self._get_index_history(index_symbol, period, ttl_seconds)
+
+    def _get_index_history(self, index_symbol: str, period: str, ttl_seconds: int) -> pd.DataFrame:
         cache_key = f"index:{index_symbol}:{period}"
         cached = self._history_cache.get(cache_key)
         now = time.time()
@@ -489,3 +537,24 @@ class MarketDataClient:
         recent = df.tail(days)
         turnover = (recent["Close"] * recent["Volume"]).mean()
         return float(turnover) if not pd.isna(turnover) else 0.0
+
+
+class DataClientPool:
+    """Hands every engine in one process the same MarketDataClient for the
+    same settings, so the profiles share one history/quote cache, one set
+    of circuit breakers and one Yahoo pacing queue instead of each
+    downloading the same symbols on its own. Engines that need different
+    settings (a manual book keeps live quotes and may use the end-of-day
+    fallback) get their own client."""
+
+    def __init__(self) -> None:
+        self._clients: dict[tuple, MarketDataClient] = {}
+        self._lock = threading.Lock()
+
+    def get(self, **settings) -> MarketDataClient:
+        key = tuple(sorted(settings.items()))
+        with self._lock:
+            client = self._clients.get(key)
+            if client is None:
+                client = self._clients[key] = MarketDataClient(**settings)
+            return client

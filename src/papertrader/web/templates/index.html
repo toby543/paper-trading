@@ -595,7 +595,6 @@
   {% if tab_categories | unique | list | length > 1 %}
   <div class="tab-bar" id="tradingTabBar">
     <button class="trading-tab" data-category="swing" id="tabSwing">Swing Trading</button>
-    {% if 'long_term' in tab_categories %}<button class="trading-tab" data-category="long_term" id="tabLongTerm">Long Term Trading</button>{% endif %}
     {% if 'crypto' in tab_categories %}<button class="trading-tab" data-category="crypto" id="tabCrypto">Crypto Trading</button>{% endif %}
     {% if 'manual' in tab_categories %}<button class="trading-tab" data-category="manual" id="tabManual">Manual Trading</button>{% endif %}
   </div>
@@ -1065,28 +1064,6 @@
           {%- endif -%}
         </span></div>
         {% endif %}
-        {% elif strategy.get('mode') == 'long_term_trend' %}
-        <div class="rules-col-label">Entry — long term trend</div>
-        <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; {{ strategy.get('fast_ma_days', '—') }}DMA &gt; {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
-        <div class="rule"><span>Participation</span><span class="mono">&ge; {{ strategy.get('min_momentum_return_pct', '—') }}% / {{ strategy.get('momentum_lookback_days', '—') }}d</span></div>
-        <div class="rule"><span>Liquidity</span><span class="mono">&ge; {{ ccy }}{{ "%.1f"|format(strategy.get('min_avg_daily_turnover_inr', 0) / 10000000) }}cr/day</span></div>
-        {% if regime.get('enabled') %}
-        <div class="rule"><span>Market regime</span><span class="mono">{{ regime.get('index_symbol', '—') }} above {{ regime.get('ma_days', '—') }}DMA</span></div>
-        {% endif %}
-        <div class="rule"><span>New positions / scan</span><span class="mono">&le; {{ strategy.get('max_new_positions_per_scan', '—') }}</span></div>
-        {% set min_ltp = strategy.get('min_ltp_inr') %}
-        {% set max_ltp = strategy.get('max_ltp_inr') %}
-        {% if min_ltp or max_ltp %}
-        <div class="rule"><span>Price range</span><span class="mono">
-          {%- if min_ltp and max_ltp -%}
-            {{ ccy }}{{ min_ltp|inr }} &ndash; {{ ccy }}{{ max_ltp|inr }}
-          {%- elif min_ltp -%}
-            &ge; {{ ccy }}{{ min_ltp|inr }}
-          {%- else -%}
-            &le; {{ ccy }}{{ max_ltp|inr }}
-          {%- endif -%}
-        </span></div>
-        {% endif %}
         {% elif strategy.get('mode') == 'crypto_momentum' %}
         <div class="rules-col-label">Entry — crypto momentum</div>
         <div class="rule"><span>Uptrend check</span><span class="mono">price &gt; 20DMA &gt; 50DMA</span></div>
@@ -1140,8 +1117,6 @@
         <div class="rule"><span>SuperTrend flip</span><span class="mono down">line flips back to downtrend</span></div>
         {% elif strategy.get('mode') == 'trend_pullback' %}
         <div class="rule"><span>Trend break</span><span class="mono down">close below {{ strategy.get('slow_ma_days', '—') }}DMA</span></div>
-        {% elif strategy.get('mode') == 'long_term_trend' %}
-        <div class="rule"><span>Trend break</span><span class="mono down">close below {{ strategy.get('fast_ma_days', '—') }}DMA</span></div>
         {% elif strategy.get('mode') == 'crypto_momentum' %}
         <div class="rule"><span>RSI momentum loss</span><span class="mono down">RSI(14) &lt; 40</span></div>
         <div class="rule"><span>Trend break</span><span class="mono down">close below 20DMA</span></div>
@@ -2424,7 +2399,7 @@ if (profileSelector) {
   });
 }
 
-// ---- Trading-horizon tabs: Swing Trading / Long Term Trading -----------
+// ---- Trading tabs: Swing / Crypto / Manual -----------------------------
 // Purely a view filter -- every profile keeps trading regardless of which
 // tab is active (same principle as the profile dropdown itself in
 // multi_profile_mode). Which tab starts active is derived from whichever
@@ -2773,7 +2748,6 @@ const WATCHLIST_HEAD = {
   ipo_base_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Listed</th><th>Score</th>`,
   pivot_supertrend: `<th>Symbol</th><th>LTP</th><th>R1</th><th>Above R1</th><th>SuperTrend</th><th>ATR</th><th>Score</th>`,
   trend_pullback: `<th>Symbol</th><th>LTP</th><th>Recent High</th><th>Pullback</th><th>Turn</th><th>Score</th>`,
-  long_term_trend: `<th>Symbol</th><th>LTP</th><th>200DMA</th><th>400DMA</th><th>1Y Return</th><th>Score</th>`,
   crypto_momentum: `<th>Symbol</th><th>LTP</th><th>20DMA</th><th>50DMA</th><th>RSI</th><th>30D Return</th><th>Score</th>`,
   crypto_breakout: `<th>Symbol</th><th>LTP</th><th>Breakout High</th><th>Momentum</th><th>Breakout Volume</th><th>Score</th>`,
   crypto_institutional_swing: `<th>Symbol</th><th>LTP</th><th>20DMA</th><th>50DMA</th><th>200DMA</th><th>Volume</th><th>Momentum</th><th>Score</th>`,
@@ -2824,16 +2798,6 @@ function watchlistRowHtml(mode, c) {
       <td class="mono" data-label="Recent High">${CCY}${fmt(c.recent_high)}</td>
       <td class="mono down" data-label="Pullback">-${c.pct_from_high.toFixed(1)}%</td>
       <td class="mono up" data-label="Turn">+${c.day_change_pct.toFixed(1)}%</td>
-      <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
-    `;
-  }
-  if (mode === "long_term_trend") {
-    return `
-      <td class="sym">${c.symbol}<span class="exch">${EXCH}</span></td>
-      <td class="mono" data-label="LTP">${fmtPrice(c.ltp)}</td>
-      <td class="mono" data-label="200DMA">${CCY}${fmt(c.fast_ma)}</td>
-      <td class="mono" data-label="400DMA">${CCY}${fmt(c.slow_ma)}</td>
-      <td class="mono up" data-label="1Y Return">+${c.momentum_return_pct.toFixed(1)}%</td>
       <td class="mono" data-label="Score">${c.score.toFixed(1)}</td>
     `;
   }
@@ -3077,7 +3041,7 @@ function renderComparison(data, liveSummary) {
   }
   renderAllUnrealizedTile(allRows);
   // Only compare profiles within the tab currently being viewed -- a
-  // long-term profile's return over years isn't a meaningful comparison
+  // crypto profile's return over weeks isn't a meaningful comparison
   // against a swing profile's return over weeks anyway.
   const rows = allRows.filter(r => (r.category || "swing") === activeTab);
   const meta = document.getElementById("compareMeta");

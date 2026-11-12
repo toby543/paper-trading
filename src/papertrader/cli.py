@@ -10,6 +10,7 @@ import threading
 from tabulate import tabulate
 
 from .config import REPO_ROOT, Config
+from .data.nse_client import DataClientPool
 from .engine.scheduler import TradingEngine
 
 log = logging.getLogger(__name__)
@@ -77,7 +78,8 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     if cfg.is_multi_profile_mode():
         profiles = list(cfg.list_profiles().keys())
-        engines = [TradingEngine(cfg, profile_name=p) for p in profiles]
+        pool = DataClientPool()   # one shared market-data client for all profiles
+        engines = [TradingEngine(cfg, profile_name=p, data_pool=pool) for p in profiles]
         log.info("Multi-profile mode: starting %d engines in parallel: %s", len(engines), profiles)
         for eng in engines[1:]:
             threading.Thread(target=eng.run_forever, name=f"trading-engine-{eng.profile_name}", daemon=True).start()
@@ -166,8 +168,9 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     engines: dict[str, TradingEngine] = {}
     if cfg.is_multi_profile_mode():
+        pool = DataClientPool()   # one shared market-data client for all profiles
         for profile_name in cfg.list_profiles():
-            eng = TradingEngine(cfg, profile_name=profile_name)
+            eng = TradingEngine(cfg, profile_name=profile_name, data_pool=pool)
             engines[profile_name] = eng
         log.info("Multi-profile mode: starting %d engines in parallel: %s", len(engines), list(engines))
     else:

@@ -40,9 +40,8 @@ EDITABLE_SETTINGS: list[dict] = [
     {"path": ("strategy", "momentum_lookback_days"), "type": "int", "min": 5, "max": 365,
      "group": "Strategy — Entry", "label": "Momentum lookback", "unit": "days",
      "desc": "Window the momentum return above is measured over."},
-    # max matches slow_ma_days: the long_term_trend profile runs
-    # fast_ma_days: 200, which a ceiling of 100 made impossible to edit --
-    # the panel displayed 200 and rejected every save as "must be <= 100".
+    # max matches slow_ma_days: a profile running fast_ma_days: 200 must stay
+    # editable -- a ceiling of 100 rejected every save as "must be <= 100".
     {"path": ("strategy", "fast_ma_days"), "type": "int", "min": 2, "max": 400,
      "group": "Strategy — Entry", "label": "Fast moving average", "unit": "days",
      "desc": "Shorter trend-confirmation average; also used for the momentum-breakdown exit."},
@@ -349,7 +348,7 @@ _STRATEGY_SUBSECTION_MODE = {
 # mode is added rather than silently omitting it.
 _ALL_MODES = frozenset({
     "52w_high", "cross_sectional_momentum", "consolidation_breakout", "pivot_supertrend",
-    "trend_pullback", "long_term_trend", "ipo_base_breakout",
+    "trend_pullback", "ipo_base_breakout",
     "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_mean_reversion",
     "crypto_trend_pullback", "crypto_breakout_retest", "crypto_pairs_trading",
 })
@@ -364,11 +363,11 @@ _FIELD_MODES = {
     # Price bands are applied inside each strategy, and the crypto strategies
     # don't consult them (crypto_momentum, crypto_breakout, crypto_institutional_swing).
     ("strategy", "min_ltp_inr"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "52w_high", "cross_sectional_momentum",
         "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
     ("strategy", "max_ltp_inr"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend",
+        "52w_high", "cross_sectional_momentum",
         "pivot_supertrend", "trend_pullback", "ipo_base_breakout",
     },
     ("risk", "exit_below_fast_ma"): {"52w_high", "consolidation_breakout", "ipo_base_breakout"},
@@ -384,11 +383,11 @@ _FIELD_MODES = {
     # put four editable fields on those profiles' panels that changed
     # nothing at all when saved.
     ("strategy", "min_momentum_return_pct"): {
-        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
+        "52w_high", "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     ("strategy", "momentum_lookback_days"): {
-        "52w_high", "long_term_trend", "consolidation_breakout", "ipo_base_breakout",
+        "52w_high", "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing",
     },
     # Fast/slow MAs: crypto_breakout also reads config.get("fast_ma_days")/
@@ -400,12 +399,12 @@ _FIELD_MODES = {
     # pivot_supertrend reads neither: its trend is the SuperTrend band, not
     # a moving-average pair, and it mentions neither key.
     ("strategy", "fast_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "trend_pullback",
         "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },
     ("strategy", "slow_ma_days"): {
-        "52w_high", "cross_sectional_momentum", "long_term_trend", "trend_pullback",
+        "52w_high", "cross_sectional_momentum", "trend_pullback",
         "consolidation_breakout", "ipo_base_breakout",
         "crypto_momentum", "crypto_breakout", "crypto_institutional_swing", "crypto_trend_pullback",
     },

@@ -267,7 +267,7 @@ class Config:
         return result
 
     def list_profile_categories(self) -> dict[str, str]:
-        """Return dict of profile_name -> category ("swing" or "long_term")
+        """Return dict of profile_name -> category ("swing", "crypto" or "manual")
         for all configured profiles, used to filter the dashboard's tabs.
         A profile without an explicit `category` falls back to "swing" --
         every profile that existed before the long-term tab was added is

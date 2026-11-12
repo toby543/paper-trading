@@ -40,7 +40,7 @@ from ..strategy.momentum_52w_high import (
     rank_candidates as rank_52w,
 )
 from ..strategy import (
-    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
+    consolidation_breakout, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
     crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
 )
@@ -119,11 +119,6 @@ def _required_trading_days(strategy_cfg: dict, trades_24_7: bool = False) -> int
         tp_cfg = strategy_cfg.get("trend_pullback") or {}
         needed = max(needed, int(tp_cfg.get("pullback_lookback_days", 20)))
     else:
-        # Also covers long_term_trend, which uses momentum_lookback_days
-        # exactly like 52w_high does -- its slow_ma_days (typically ~400,
-        # a years-long average) is already picked up by the max() above,
-        # since that reads straight from strategy_cfg rather than
-        # hardcoding the other modes' 200-day default.
         needed = max(needed, int(strategy_cfg.get("momentum_lookback_days", 252) or 0) + 1)
     if mode == "consolidation_breakout":
         cb_cfg = strategy_cfg.get("consolidation_breakout") or {}
@@ -294,7 +289,7 @@ class Backtester:
 
         fd, self._tmp_db = tempfile.mkstemp(suffix=".db", prefix="papertrader-backtest-")
         os.close(fd)
-        self.storage = Storage(self._tmp_db, self.starting_capital)
+        self.storage = Storage(self._tmp_db, self.starting_capital, wal=False)
         # Profile-scoped so a crypto backtest is costed with exchange
         # percentage fees, not NSE flat brokerage -- matching live.
         backtest_exec_cfg = cfg.get_profile_execution_config(self.profile_name)
@@ -550,8 +545,6 @@ class Backtester:
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history_upto, cfg)
             elif mode == "trend_pullback":
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history_upto, cfg)
-            elif mode == "long_term_trend":
-                should_exit, reason = long_term_trend.check_exit(pos, quote, history_upto, cfg)
             elif mode in _SIMPLE_CRYPTO_STRATEGIES:
                 should_exit, reason = _SIMPLE_CRYPTO_STRATEGIES[mode].check_exit(
                     pos, quote, history_upto, cfg, today=day,
@@ -698,26 +691,6 @@ class Backtester:
                 if cand:
                     candidates.append(cand)
             ranked = trend_pullback.rank_candidates(candidates)
-        elif mode == "long_term_trend":
-            candidates = []
-            for symbol in self.universe:
-                if symbol in positions or symbol in cooldown_blocked:
-                    continue
-                hist = self._history.get(symbol)
-                if hist is None:
-                    continue
-                history_upto = hist.loc[:day]
-                quote = self._quote_for(symbol, history_upto)
-                if quote is None:
-                    continue
-                turnover = _avg_daily_turnover(history_upto)
-                cand = long_term_trend.evaluate_candidate(
-                    symbol, quote, history_upto, turnover, self.strategy_cfg,
-                    reasons=self._entry_rejections,
-                )
-                if cand:
-                    candidates.append(cand)
-            ranked = long_term_trend.rank_candidates(candidates)
         elif mode in _SIMPLE_CRYPTO_STRATEGIES:
             strategy = _SIMPLE_CRYPTO_STRATEGIES[mode]
             candidates = []

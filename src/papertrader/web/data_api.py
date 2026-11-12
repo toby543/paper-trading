@@ -535,7 +535,7 @@ def build_candidates(engine, limit: int = 20) -> dict:
     52w_high and cross_sectional_momentum both use
     momentum_52w_high.Candidate (cross_sectional imports it directly), but
     consolidation_breakout.Candidate, pivot_supertrend.Candidate,
-    trend_pullback.Candidate, long_term_trend.Candidate, ipo_base_breakout.Candidate,
+    trend_pullback.Candidate, ipo_base_breakout.Candidate,
     crypto_momentum.Candidate, crypto_breakout.Candidate, crypto_institutional_swing.Candidate,
     crypto_mean_reversion.Candidate, crypto_trend_pullback.Candidate,
     crypto_breakout_retest.Candidate, and crypto_pairs_trading.Candidate are all
@@ -600,15 +600,6 @@ def build_candidates(engine, limit: int = 20) -> dict:
                 "recent_high": round(cand.recent_high, 2),
                 "pct_from_high": round(cand.pct_from_high, 2),
                 "day_change_pct": round(cand.day_change_pct, 2),
-                "score": round(cand.score, 2),
-            })
-        elif mode == "long_term_trend":
-            rows.append({
-                "symbol": cand.symbol,
-                "ltp": _round_price(cand.ltp),
-                "fast_ma": round(cand.fast_ma, 2),
-                "slow_ma": round(cand.slow_ma, 2),
-                "momentum_return_pct": round(cand.momentum_return_pct, 2),
                 "score": round(cand.score, 2),
             })
         elif mode == "crypto_momentum":

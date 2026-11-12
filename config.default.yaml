@@ -55,7 +55,7 @@ multi_profile_mode: true
 profiles:
   52w_high:
     display_name: "52-Week High Momentum"
-    # Which dashboard tab this profile shows under: "swing" or "long_term".
+    # Which dashboard tab this profile shows under: "swing", "crypto" or "manual".
     category: swing
     # Existing trades stay here - if you have data/state.db, it will be used as the base
     state_file: data/state_52w_high.db
@@ -187,46 +187,6 @@ profiles:
         # ...but no more than this far below it -- deeper than this and the
         # uptrend may already be broken rather than just pulling back.
         max_pullback_pct: 12.0
-
-  long_term_trend:
-    display_name: "Long Term Trend"
-    category: long_term
-    # Fresh ledger independent from the other five profiles
-    state_file: data/state_long_term_trend.db
-    starting_capital: 100000.0
-    strategy_mode: long_term_trend
-    # This profile starts fresh with new capital
-    strategy:
-      # Years-long windows, not weeks -- this profile asks "is this stock
-      # in a well-established multi-year uptrend?", not "is today a good
-      # entry?". fast_ma_days/slow_ma_days here play the same structural
-      # role (price > fast > slow) as every other profile's moving
-      # averages, just stretched from weeks to years.
-      fast_ma_days: 200
-      slow_ma_days: 400
-      # A real, multi-year return required on top of the trend check --
-      # merely sitting above a long average for a year of sideways drift
-      # isn't the "already compounding" story this strategy looks for.
-      momentum_lookback_days: 252
-      min_momentum_return_pct: 12.0
-      min_avg_daily_turnover_inr: 50000000
-      max_new_positions_per_scan: 3
-      min_ltp_inr: 0
-      max_ltp_inr: 0
-    # Deliberately much wider than the swing profiles' shared risk
-    # defaults -- risk is profile-scoped (like strategy) precisely so
-    # this profile can tolerate the ordinary volatility of a years-long
-    # hold without getting stopped out of what's still a perfectly
-    # healthy uptrend. Position sizing stays modest (fewer, longer-held
-    # names) rather than the swing profiles' faster-turnover sizing.
-    risk:
-      stop_loss_pct: 20.0
-      trailing_stop_pct: 25.0
-      take_profit_pct: 0
-      position_size_pct_of_equity: 10.0
-      max_open_positions: 8
-      max_cash_deployed_per_scan_pct: 40.0
-      reentry_cooldown_days: 3
 
   # ============================================================================
   # CRYPTO TRADING PROFILES
@@ -430,7 +390,7 @@ regime:
   # of regime -- this only gates new buys, never risk management.
   # index_symbol is also reused as the benchmark for
   # strategy.min_relative_strength_pct, even if this filter is disabled.
-  # NOTE: This filter applies only to equity strategies (52w_high, long_term_trend, etc.)
+  # NOTE: This filter applies only to equity strategies (52w_high, trend_pullback, etc.)
   # For CRYPTO trading (crypto_momentum, crypto_breakout), this filter has limited
   # relevance since: (1) crypto trades 24/7 independent of NSE hours,
   # (2) Nifty 50 correlation with crypto is weak/unreliable, and
@@ -501,6 +461,10 @@ data_source:
   fallback: yfinance
   request_timeout_seconds: 15
   max_retries: 5
+  # How long a live quote is reused, in seconds. Every profile and every
+  # dashboard poll asks for the same prices; 0 fetches each time. Manual
+  # profiles always read a live price whatever this is set to.
+  quote_cache_seconds: 20
 
 logging:
   file: data/papertrader.log

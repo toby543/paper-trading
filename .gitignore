@@ -6,6 +6,8 @@ venv/
 *.egg-info/
 data/state.db
 data/state_*.db
+data/state_*.db-wal
+data/state_*.db-shm
 data/price_cache/
 data/papertrader.log
 data/auth_secrets.json

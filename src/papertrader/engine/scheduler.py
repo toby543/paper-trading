@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from ..config import Config
-from ..data.nse_client import MarketDataClient, DataUnavailableError
+from ..data.nse_client import DataClientPool, MarketDataClient, DataUnavailableError
 from ..data.universe import load_universe
 from .manual import MANUAL_MODE, ManualTrader
 from ..portfolio.broker import PaperBroker, InsufficientFundsError
@@ -25,7 +25,7 @@ from ..risk.risk_manager import RiskManager
 from ..strategy.cross_sectional_momentum import select_cross_sectional_candidates
 from ..strategy.momentum_52w_high import Candidate as Candidate52w, evaluate_candidate as eval_52w, rank_candidates as rank_52w, check_exit as exit_52w, evaluate_regime, describe_regime_rule
 from ..strategy import (
-    consolidation_breakout, long_term_trend, pivot_supertrend, trend_pullback, ipo_base_breakout,
+    consolidation_breakout, pivot_supertrend, trend_pullback, ipo_base_breakout,
     crypto_momentum, crypto_breakout, crypto_institutional_swing,
     crypto_mean_reversion, crypto_trend_pullback, crypto_breakout_retest, crypto_pairs_trading,
 )
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 
 class TradingEngine:
-    def __init__(self, cfg: Config, profile_name: str | None = None):
+    def __init__(self, cfg: Config, profile_name: str | None = None, data_pool: DataClientPool | None = None):
         self.cfg = cfg
         self.profile_name = profile_name or cfg.get("active_profile", default="52w_high")
         # Guards storage/broker/strategy_cfg against a profile switch
@@ -107,7 +107,8 @@ class TradingEngine:
             max_cash_deployed_per_scan_pct=profile_risk_cfg.get("max_cash_deployed_per_scan_pct", 40.0),
             fractional_quantities=cfg.get_profile_fractional_quantities(self.profile_name),
         )
-        self.data = MarketDataClient(
+        manual_profile = cfg.get_profile_strategy_mode(self.profile_name) == MANUAL_MODE
+        data_settings = dict(
             preferred=cfg.get("data_source", "preferred", default="nse"),
             fallback=cfg.get("data_source", "fallback", default="yfinance"),
             timeout=cfg.get("data_source", "request_timeout_seconds", default=10),
@@ -115,7 +116,15 @@ class TradingEngine:
             # Crypto pairs arrive quoted in USD; converted to this
             # profile's own book currency at the data layer.
             quote_currency=self.quote_currency,
+            # A manual book fills orders and fires GTTs off these quotes, so
+            # it always reads a live price; automated profiles and the
+            # dashboard reuse one fetched in the last few seconds.
+            quote_ttl_seconds=0 if manual_profile else cfg.get("data_source", "quote_cache_seconds", default=20),
+            allow_eod_fallback=manual_profile,
         )
+        # With a pool, every engine in the process shares one client (and so
+        # one cache and one rate limiter); alone, an engine keeps its own.
+        self.data = data_pool.get(**data_settings) if data_pool else MarketDataClient(**data_settings)
         # Profile-specific universe file (e.g., crypto profiles use crypto-only symbols)
         self.universe = load_universe(cfg.get_profile_universe_file(self.profile_name))
         # Crypto trades 24/7 on global exchanges -- it has no NSE session to
@@ -282,7 +291,7 @@ class TradingEngine:
 
     # History period each scan mode fetches (see the scan branches below);
     # anything not listed uses "1y".
-    _SCAN_HISTORY_PERIOD = {"cross_sectional_momentum": "2y", "long_term_trend": "2y", "ipo_base_breakout": "3y"}
+    _SCAN_HISTORY_PERIOD = {"cross_sectional_momentum": "2y", "ipo_base_breakout": "3y"}
 
     def check_exits(self) -> None:
         if self.is_manual:
@@ -331,8 +340,6 @@ class TradingEngine:
                 should_exit, reason = pivot_supertrend.check_exit(pos, quote, history, cfg)
             elif mode == "trend_pullback":
                 should_exit, reason = trend_pullback.check_exit(pos, quote, history, cfg)
-            elif mode == "long_term_trend":
-                should_exit, reason = long_term_trend.check_exit(pos, quote, history, cfg)
             elif mode == "crypto_momentum":
                 should_exit, reason = crypto_momentum.check_exit(pos, quote, history, cfg)
             elif mode == "crypto_breakout":
@@ -639,44 +646,6 @@ class TradingEngine:
             self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
                                           candidates=len(candidates), reasons=reasons)
             return trend_pullback.rank_candidates(candidates)
-
-        if mode == "long_term_trend":
-            candidates = []
-            reasons: dict[str, int] = {}
-            scanned = 0
-            for symbol in self.universe:
-                if symbol in exclude_symbols:
-                    continue
-                try:
-                    quote = self.data.get_quote(symbol)
-                    history = self.data.get_history(symbol, period="2y")
-                    turnover = self.data.get_avg_daily_turnover(symbol, history=history)
-                except DataUnavailableError as exc:
-                    log.debug("Skipping %s: %s", symbol, exc)
-                    reasons["no_data"] = reasons.get("no_data", 0) + 1
-                    continue
-
-                scanned += 1
-                try:
-                    cand = long_term_trend.evaluate_candidate(
-                        symbol, quote, history, turnover, self.strategy_cfg, reasons=reasons,
-                    )
-                except Exception as exc:  # noqa: BLE001 - one symbol's malformed data must never
-                    # take down the whole scan, let alone this engine's entire background thread.
-                    log.warning("long_term_trend: skipping %s after evaluation error: %s", symbol, exc)
-                    reasons["evaluation_error"] = reasons.get("evaluation_error", 0) + 1
-                    continue
-                if cand:
-                    candidates.append(cand)
-
-            log.info(
-                "long_term_trend scan: %d symbols evaluated, %d candidates. Rejections: %s",
-                scanned, len(candidates),
-                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])) or "none",
-            )
-            self._record_scan_diagnostics(mode, "scanned", scanned=scanned,
-                                          candidates=len(candidates), reasons=reasons)
-            return long_term_trend.rank_candidates(candidates)
 
         if mode == "crypto_momentum":
             candidates = []

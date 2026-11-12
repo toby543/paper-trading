@@ -19,6 +19,7 @@ each client maps that to its own exchange's pair convention internally.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -166,6 +167,7 @@ class BinanceClient(_CircuitBreaker):
         self.session.headers.update(DEFAULT_HEADERS)
         self._history_cache: dict[str, pd.DataFrame] = {}
         self._last_call = 0.0
+        self._throttle_lock = threading.Lock()
         self._known_symbols: Optional[set[str]] = None
         # Once Binance is unreachable (blocked network, outage), stop
         # retrying it for the rest of this process -- same circuit-breaker
@@ -174,10 +176,11 @@ class BinanceClient(_CircuitBreaker):
         self.broken = False
 
     def _throttle(self) -> None:
-        elapsed = time.time() - self._last_call
-        if elapsed < self._MIN_INTERVAL_SECONDS:
-            time.sleep(self._MIN_INTERVAL_SECONDS - elapsed)
-        self._last_call = time.time()
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_call
+            if elapsed < self._MIN_INTERVAL_SECONDS:
+                time.sleep(self._MIN_INTERVAL_SECONDS - elapsed)
+            self._last_call = time.time()
 
     @retry(
         reraise=True,
@@ -287,15 +290,17 @@ class KrakenClient(_CircuitBreaker):
         self.session.headers.update(DEFAULT_HEADERS)
         self._history_cache: dict[str, pd.DataFrame] = {}
         self._last_call = 0.0
+        self._throttle_lock = threading.Lock()
         # Same circuit-breaker pattern as BinanceClient/NSESession: once
         # Kraken is unreachable, stop retrying it for the rest of this run.
         self.broken = False
 
     def _throttle(self) -> None:
-        elapsed = time.time() - self._last_call
-        if elapsed < self._MIN_INTERVAL_SECONDS:
-            time.sleep(self._MIN_INTERVAL_SECONDS - elapsed)
-        self._last_call = time.time()
+        with self._throttle_lock:
+            elapsed = time.time() - self._last_call
+            if elapsed < self._MIN_INTERVAL_SECONDS:
+                time.sleep(self._MIN_INTERVAL_SECONDS - elapsed)
+            self._last_call = time.time()
 
     @retry(
         reraise=True,

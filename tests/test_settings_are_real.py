@@ -18,7 +18,6 @@ from papertrader.web.settings_schema import (
     _ALL_MODES,
     _FIELD_MODES,
     applies_to_mode,
-    coerce_and_validate,
 )
 
 STRATEGY_DIR = pathlib.Path("src/papertrader/strategy")
@@ -33,7 +32,6 @@ MODE_MODULE = {
     "ipo_base_breakout": "ipo_base_breakout",
     "pivot_supertrend": "pivot_supertrend",
     "trend_pullback": "trend_pullback",
-    "long_term_trend": "long_term_trend",
     "crypto_momentum": "crypto_momentum",
     "crypto_breakout": "crypto_breakout",
     "crypto_institutional_swing": "crypto_institutional_swing",
@@ -106,13 +104,6 @@ def test_pivot_supertrend_is_not_offered_moving_average_fields():
     for field in ("fast_ma_days", "slow_ma_days", "momentum_lookback_days",
                   "min_momentum_return_pct"):
         assert not applies_to_mode(("strategy", field), "pivot_supertrend"), field
-
-
-def test_long_term_trends_own_fast_ma_is_editable():
-    """The profile runs fast_ma_days: 200 against an old ceiling of 100,
-    so the panel displayed a value it refused to save."""
-    configured = yaml.safe_load(open("profiles/long_term_trend.yaml"))["strategy"]["fast_ma_days"]
-    assert coerce_and_validate(("strategy", "fast_ma_days"), configured) == configured
 
 
 def test_trailing_stop_hidden_for_the_strategies_that_ignore_it():

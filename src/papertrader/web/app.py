@@ -34,6 +34,7 @@ from ..config_editor import update_config_file, update_config_files
 from ..data.universe import load_universe
 from ..data import symbol_search
 from ..engine.manual import ManualOrderError
+from ..data.nse_client import DataClientPool
 from ..engine.scheduler import TradingEngine
 from .backtest_jobs import get_job, start_backtest_job
 from .data_api import (
@@ -873,7 +874,8 @@ def run_dashboard(cfg: Config, host: str = "127.0.0.1", port: int = 8000, debug:
     ledger file(s). Builds one (non-running) TradingEngine per profile
     in multi_profile_mode so it can read each profile's own ledger."""
     if cfg.is_multi_profile_mode():
-        engines = {name: TradingEngine(cfg, profile_name=name) for name in cfg.list_profiles()}
+        pool = DataClientPool()
+        engines = {name: TradingEngine(cfg, profile_name=name, data_pool=pool) for name in cfg.list_profiles()}
     else:
         eng = TradingEngine(cfg)
         engines = {eng.profile_name: eng}
