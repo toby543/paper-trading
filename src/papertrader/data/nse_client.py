@@ -278,6 +278,16 @@ class MarketDataClient:
             self._quote_cache[symbol] = (time.time(), quote)
             return replace(quote)
 
+    def get_fresh_quote(self, symbol: str) -> Quote:
+        """Always fetches, ignoring the cache (for filling an order), and
+        refreshes the cache with the result for everyone else."""
+        if self.quote_ttl_seconds <= 0:
+            return self._get_quote(symbol)
+        with self._key_lock("quote", symbol):
+            quote = self._get_quote(symbol)
+            self._quote_cache[symbol] = (time.time(), quote)
+            return replace(quote)
+
     def _get_quote(self, symbol: str) -> Quote:
         if self._is_crypto_symbol(symbol):
             # Crypto has no NSE equivalent. Try two independent exchanges'

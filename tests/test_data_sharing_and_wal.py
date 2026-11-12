@@ -91,6 +91,23 @@ def test_yahoo_pacing_is_shared_by_every_caller():
     assert time.time() - started >= 0.3 - 0.02              # four calls, three enforced gaps
 
 
+def test_a_fresh_quote_skips_the_cache_and_refreshes_it():
+    client = MarketDataClient(quote_ttl_seconds=30)
+    prices = iter([100.0, 101.0, 102.0])
+    client._get_quote = lambda symbol: _quote(symbol, next(prices))
+    assert client.get_quote("ABC").ltp == 100.0
+    assert client.get_fresh_quote("ABC").ltp == 101.0
+    assert client.get_quote("ABC").ltp == 101.0            # readers now see the fresher price
+
+
+def test_manual_fills_use_a_fresh_price_and_its_dashboard_a_cached_one(tmp_path, monkeypatch):
+    manual = _engine(tmp_path, monkeypatch, "manual_swing", DataClientPool())
+    prices = iter([100.0, 105.0])
+    manual.data._get_quote = lambda symbol: _quote(symbol, next(prices))
+    assert manual.data.get_quote("ABC").ltp == 100.0        # dashboard read, now cached
+    assert manual.manual_trader()._live_price("ABC").ltp == 105.0
+
+
 def test_the_pool_shares_a_client_only_for_identical_settings():
     pool = DataClientPool()
     a = pool.get(quote_currency="INR", timeout=10, quote_ttl_seconds=20)
@@ -112,8 +129,8 @@ def test_automated_profiles_share_one_client_and_a_manual_book_keeps_its_own(tmp
     crypto = _engine(tmp_path, monkeypatch, "crypto_momentum", pool)
     manual = _engine(tmp_path, monkeypatch, "manual_swing", pool)
     assert swing.data is crypto.data and swing.data.quote_ttl_seconds > 0
-    assert manual.data is not swing.data
-    assert manual.data.quote_ttl_seconds == 0 and manual.data.allow_eod_fallback is True
+    assert manual.data is not swing.data                    # it may use the end-of-day fallback
+    assert manual.data.allow_eod_fallback is True
     assert swing.data.allow_eod_fallback is False
     alone = _engine(tmp_path, monkeypatch, "52w_high", None)
     assert alone.data is not swing.data

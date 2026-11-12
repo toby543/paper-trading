@@ -71,8 +71,11 @@ class ManualTrader:
         return check(symbol)
 
     def _live_price(self, symbol: str):
+        # Orders, GTTs and stop/target checks act on a price, so they skip the
+        # short quote cache the dashboard reads through.
+        fetch = getattr(self.data, "get_fresh_quote", None) or self.data.get_quote
         try:
-            quote = self.data.get_quote(symbol)
+            quote = fetch(symbol)
         except DataUnavailableError as exc:
             raise ManualOrderError(f"No live price available for {symbol} right now ({exc}).") from exc
         if quote is None or not math.isfinite(quote.ltp) or quote.ltp <= 0:

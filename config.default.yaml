@@ -463,7 +463,7 @@ data_source:
   max_retries: 5
   # How long a live quote is reused, in seconds. Every profile and every
   # dashboard poll asks for the same prices; 0 fetches each time. Manual
-  # profiles always read a live price whatever this is set to.
+  # order fills, GTTs and stop/target checks always read a live price.
   quote_cache_seconds: 20
 
 logging:

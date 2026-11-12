@@ -116,10 +116,9 @@ class TradingEngine:
             # Crypto pairs arrive quoted in USD; converted to this
             # profile's own book currency at the data layer.
             quote_currency=self.quote_currency,
-            # A manual book fills orders and fires GTTs off these quotes, so
-            # it always reads a live price; automated profiles and the
-            # dashboard reuse one fetched in the last few seconds.
-            quote_ttl_seconds=0 if manual_profile else cfg.get("data_source", "quote_cache_seconds", default=20),
+            # Reused for a few seconds by the engines and dashboard polls. A
+            # manual book's order fills bypass it (ManualTrader._live_price).
+            quote_ttl_seconds=cfg.get("data_source", "quote_cache_seconds", default=20),
             allow_eod_fallback=manual_profile,
         )
         # With a pool, every engine in the process shares one client (and so
