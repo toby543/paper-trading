@@ -191,6 +191,10 @@ class MarketDataClient:
         # read what it stored instead of downloading it again.
         self._key_locks: dict[tuple, threading.Lock] = {}
         self._key_locks_guard = threading.Lock()
+        # (symbol, period) -> (fetched_at, raw Yahoo daily bars); see _yahoo_daily.
+        self._raw_cache: dict[tuple[str, str], tuple[float, pd.DataFrame]] = {}
+        # Set while get_fresh_quote runs, so a fill never reuses a download.
+        self._fresh = threading.local()
         self._nse = NSESession(timeout=timeout, max_attempts=max_retries)
         self._binance = BinanceClient(timeout=timeout)
         self._kraken = KrakenClient(timeout=timeout)
@@ -245,6 +249,27 @@ class MarketDataClient:
                 lock = self._key_locks[key] = threading.Lock()
             return lock
 
+    def _yahoo_daily(self, symbol: str, period: str, max_age: float) -> tuple[float, pd.DataFrame]:
+        """Yahoo's raw daily bars and when they were fetched, reusing a
+        download made less than `max_age` seconds ago. A Yahoo quote and a
+        one-year history are the same download, so a scan that asks for both
+        makes one request; on the Pi this parsing was most of the CPU time.
+        Each caller passes its own freshness limit, so a quote is never older
+        than the quote cache allows and history never older than its TTL."""
+        import yfinance as yf
+
+        with self._key_lock("yahoo", symbol, period):
+            hit = self._raw_cache.get((symbol, period))
+            if hit is not None and time.time() - hit[0] < max_age:
+                return hit
+            self._throttle_yfinance()
+            # `timeout` bounds the HTTP call: without it a stalled connection
+            # hangs the calling engine's thread forever, with no exception and
+            # no log line (see the "Engine may have stopped scanning" warning).
+            raw = yf.Ticker(yahoo_ticker(symbol)).history(period=period, interval="1d", timeout=self.timeout)
+            hit = self._raw_cache[(symbol, period)] = (time.time(), raw)
+            return hit
+
     @staticmethod
     def _is_crypto_symbol(symbol: str) -> bool:
         """Crypto universe symbols are already full Yahoo Finance tickers
@@ -284,7 +309,11 @@ class MarketDataClient:
         if self.quote_ttl_seconds <= 0:
             return self._get_quote(symbol)
         with self._key_lock("quote", symbol):
-            quote = self._get_quote(symbol)
+            self._fresh.on = True
+            try:
+                quote = self._get_quote(symbol)
+            finally:
+                self._fresh.on = False
             self._quote_cache[symbol] = (time.time(), quote)
             return replace(quote)
 
@@ -392,23 +421,8 @@ class MarketDataClient:
                 f"exchange price ({ref[0]:.6g}); not using it")
 
     def _quote_from_yfinance(self, symbol: str, is_crypto: bool = False) -> Quote:
-        import yfinance as yf
-
-        self._throttle_yfinance()
-        ticker_symbol = yahoo_ticker(symbol)
-        ticker = yf.Ticker(ticker_symbol)
-        # `timeout` bounds the underlying HTTP call the same way self.timeout
-        # already bounds every NSE request -- without it, a stalled
-        # connection here hangs this call forever. Since this runs inside
-        # the autonomous engine's single background thread with no
-        # supervisor, an unbounded hang doesn't raise (so the resilience
-        # try/except in run_forever() never fires) and doesn't scan again
-        # (so nothing updates last_scan_at) -- it just freezes that
-        # profile's trading silently, indefinitely, with zero log output,
-        # until the process is restarted by hand. Exactly the failure
-        # mode behind an "Engine may have stopped scanning" warning that
-        # doesn't resolve on its own.
-        raw = ticker.history(period="1y", interval="1d", timeout=self.timeout)
+        max_age = 0.0 if getattr(self._fresh, "on", False) else self.quote_ttl_seconds
+        _fetched_at, raw = self._yahoo_daily(symbol, "1y", max_age)
         if raw.empty:
             raise DataUnavailableError(f"yfinance returned no history for {symbol}")
         # Yahoo sometimes ends the series with a half-formed bar: volume but
@@ -477,17 +491,9 @@ class MarketDataClient:
         now = time.time()
         if cached is not None and (now - cached.attrs.get("_fetched_at", 0)) < ttl_seconds:
             return cached
-        import yfinance as yf
-
-        self._throttle_yfinance()
-        ticker_symbol = yahoo_ticker(symbol)
         try:
-            # timeout=self.timeout: see the comment in _quote_from_yfinance --
-            # without it, a stalled connection hangs this call forever with
-            # no exception and no log line, which freezes the whole
-            # autonomous loop (this call sits in check_exits()'s per-symbol
-            # loop, ahead of scan_for_entries() in the same cycle).
-            df = yf.Ticker(ticker_symbol).history(period=period, interval="1d", timeout=self.timeout)
+            # Shares a download with a Yahoo quote made in the last ttl_seconds.
+            fetched_at, df = self._yahoo_daily(symbol, period, ttl_seconds)
         except Exception as exc:  # noqa: BLE001 - a timeout/network error on ONE symbol
             # must be a normal "skip this symbol" outcome (matching every other
             # DataUnavailableError call site), never an uncaught exception that
@@ -509,7 +515,8 @@ class MarketDataClient:
                 for col in ("Open", "High", "Low", "Close"):
                     if col in df.columns:
                         df[col] = df[col] * fx
-        df.attrs["_fetched_at"] = now
+        # The download's own time, so a reused one does not get a fresh TTL.
+        df.attrs["_fetched_at"] = fetched_at
         self._history_cache[cache_key] = df
         return df
 

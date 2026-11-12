@@ -81,6 +81,45 @@ def test_concurrent_requests_for_one_history_download_it_once(monkeypatch):
     assert len(downloads) == 1 and len(results) == 5
 
 
+def _fake_yahoo(monkeypatch):
+    downloads = []
+
+    class FakeTicker:
+        def __init__(self, ticker):
+            pass
+
+        def history(self, period, **kwargs):
+            downloads.append(period)
+            close = 100.0 + len(downloads)
+            return pd.DataFrame({"Open": [close] * 2, "High": [close] * 2, "Low": [close] * 2,
+                                 "Close": [close - 1, close], "Volume": [1.0] * 2},
+                                index=pd.to_datetime(["2026-11-11", "2026-11-12"]))
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=FakeTicker))
+    client = MarketDataClient(preferred="yfinance", quote_ttl_seconds=20)
+    client._YFINANCE_MIN_INTERVAL_SECONDS = 0
+    return client, downloads
+
+
+def test_a_yahoo_quote_and_a_one_year_history_share_one_download(monkeypatch):
+    client, downloads = _fake_yahoo(monkeypatch)
+    quote = client.get_quote("ABC")
+    history = client.get_history("ABC", period="1y")
+    assert downloads == ["1y"] and float(history["Close"].iloc[-1]) == quote.ltp
+    client.get_history("ABC", period="2y")                   # a different span is its own download
+    assert downloads == ["1y", "2y"]
+
+
+def test_a_fill_never_reuses_a_download_and_history_keeps_its_download_time(monkeypatch):
+    client, downloads = _fake_yahoo(monkeypatch)
+    client.get_quote("ABC")
+    fresh = client.get_fresh_quote("ABC")
+    assert downloads == ["1y", "1y"] and fresh.ltp == 102.0
+    client._raw_cache[("ABC", "1y")] = (time.time() - 600, client._raw_cache[("ABC", "1y")][1])
+    history = client.get_history("ABC", period="1y")          # reuses the 10-minute-old download
+    assert downloads == ["1y", "1y"]
+    assert time.time() - history.attrs["_fetched_at"] >= 600  # so its TTL runs from then, not now
+
+
 def test_yahoo_pacing_is_shared_by_every_caller():
     client = MarketDataClient()
     client._YFINANCE_MIN_INTERVAL_SECONDS = 0.1
